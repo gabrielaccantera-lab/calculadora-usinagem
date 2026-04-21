@@ -437,11 +437,26 @@ def exportar(resultados):
         r=resultados.get(mes)
         if not r: continue
         wsm=wb.create_sheet(mes[:10]); hA,hB,hC,dias=r["hA"],r["hB"],r["hC"],r["dias"]
+        # Linha 1 — mês + grupos
         for ci,txt in [(1,""),(2,"TURNO A"),(3,"TURNO B"),(4,"TURNO C"),
                        (5,"TURNO A"),(6,"TURNO B"),(7,"TURNO C"),
                        (8,"TURNO A"),(9,"TURNO B"),(10,"TURNO C")]:
             ec(wsm.cell(1,ci,txt),JD_V,"FFFFFF",True)
         wsm.cell(1,1,mes.upper()); ec(wsm.cell(1,1),JD_V,"FFFFFF",True)
+
+        # Linha 2 — descrição de cada bloco de colunas
+        JD_V2 = JD_VERDE.replace("#","")
+        JD_Y2 = JD_AMARELO.replace("#","")
+        wsm.merge_cells("A2:A2")
+        ec(wsm.cell(2,1,"CENTRO"),JD_V2,"FFFFFF",True)
+        wsm.merge_cells("B2:D2")
+        ec(wsm.cell(2,2,"% OCUPAÇÃO"),JD_V2,"FFFFFF",True)
+        wsm.merge_cells("E2:G2")
+        ec(wsm.cell(2,5,"TURNO ATIVO (0=inativo / 1=ativo)"),JD_Y2,JD_V,"000000",True)
+        wsm.merge_cells("H2:J2")
+        ec(wsm.cell(2,8,"HORAS DISPONÍVEIS NO MÊS"),"1565C0","FFFFFF",True)
+        wsm.row_dimensions[2].height = 16
+
         def cbg(v):
             if v>1.0: return "FFCDD2"
             if v>=0.85: return "FFFDE7"
@@ -503,99 +518,188 @@ def exportar(resultados):
 # COMPARAÇÃO COM EXCEL REFERÊNCIA
 # ─────────────────────────────────────────
 def comparar_com_excel(res_app, file_bytes):
-    """Lê os resultados das abas mensais do próprio arquivo carregado e compara com o app."""
-    import openpyxl
-    from openpyxl.utils import get_column_letter
-
+    """Lê abas mensais do mesmo arquivo e compara célula a célula com o app."""
     MAPA_ABAS = {
-        "Novembro":   "NovFY26", "Dezembro":  "DezFY26", "Janeiro":   "JanFY26",
-        "Fevereiro":  "FevFY26", "Março":     "MarFY26", "Abril":     "AbrFY26",
-        "Maio":       "MaiFY26", "Junho":     "JunFY26", "Julho":     "JulFY26",
-        "Agosto":     "AgoFY26", "Setembro":  "SetFY26", "Outubro":   "OutFY26",
+        "Novembro":"NovFY26","Dezembro":"DezFY26","Janeiro":"JanFY26",
+        "Fevereiro":"FevFY26","Março":"MarFY26","Abril":"AbrFY26",
+        "Maio":"MaiFY26","Junho":"JunFY26","Julho":"JulFY26",
+        "Agosto":"AgoFY26","Setembro":"SetFY26","Outubro":"OutFY26",
+    }
+    # Mapa de linhas dos suportes no Excel (col AA=27, AB=28, AC=29)
+    LINHAS_SUPORTE = {
+        "Total Operadores CEN": 89,
+        "Lavadora e Inspeção":  90,
+        "Gravação e Estanq.":   91,
+        "Preset":               92,
+        "Coringa":              93,
+        "Facilitador":          94,
+        "Total por Turno":      95,
+        "Total Funcionários":   96,  # só AA
+    }
+    LINHAS_PROD = {
+        "Ciclo Operacional":  98,
+        "Ciclo Total":        99,
+        "Labor Operacional": 100,
+        "Labor Total ★":     101,
     }
 
     try:
         wb = openpyxl.load_workbook(BytesIO(file_bytes), read_only=True, data_only=True)
         abas_disponiveis = wb.sheetnames
     except Exception as e:
-        return None, f"Erro ao abrir arquivo: {e}"
+        return None, None, f"Erro ao abrir arquivo: {e}"
 
-    comparacoes = []
+    resumo_rows   = []  # uma linha por mês
+    detalhe_rows  = []  # linhas de divergência detalhadas
+
     for mes, aba in MAPA_ABAS.items():
         r_app = res_app.get(mes)
         if not r_app:
             continue
-
         if aba not in abas_disponiveis:
-            comparacoes.append({
-                "Mês": mes[:3].upper(), "Aba Excel": aba, "Status": "⚠️ aba ausente",
-                "Excel — Total Func.": "—", "App — Total Func.": r_app["total"],
-                "Δ Total": "—",
-                "Excel — Labor Total": "—", "App — Labor Total": f"{r_app['prod_labor_tot']:.1%}",
-                "Δ Labor": "—", "Causa": "Aba não encontrada no arquivo"
+            resumo_rows.append({
+                "Mês": mes, "Status": "⚠️ aba ausente", "Causa": f"Aba {aba} não existe no arquivo"
             })
             continue
 
         ws = wb[aba]
 
-        # Total funcionários: linha 96, coluna AA (col 27)
-        total_excel = ws.cell(row=96, column=27).value  # AA96
-        # Produtividades: linhas 98-101, coluna AD (col 30)
-        ciclo_op  = ws.cell(row=98,  column=30).value
-        ciclo_tot = ws.cell(row=99,  column=30).value
-        labor_op  = ws.cell(row=100, column=30).value
-        labor_tot = ws.cell(row=101, column=30).value
-        # Turnos: linha 95, colunas AA, AB, AC
-        turno_a_excel = ws.cell(row=95, column=27).value
-        turno_b_excel = ws.cell(row=95, column=28).value
-        turno_c_excel = ws.cell(row=95, column=29).value
+        # Ler valores do Excel
+        xl = {}
+        xl["op_A"]    = ws.cell(89, 27).value or 0
+        xl["op_B"]    = ws.cell(89, 28).value or 0
+        xl["op_C"]    = ws.cell(89, 29).value or 0
+        xl["lav_A"]   = ws.cell(90, 27).value or 0
+        xl["lav_B"]   = ws.cell(90, 28).value or 0
+        xl["lav_C"]   = ws.cell(90, 29).value or 0
+        xl["gra_A"]   = ws.cell(91, 27).value or 0
+        xl["gra_B"]   = ws.cell(91, 28).value or 0
+        xl["gra_C"]   = ws.cell(91, 29).value or 0
+        xl["pre_A"]   = ws.cell(92, 27).value or 0
+        xl["pre_B"]   = ws.cell(92, 28).value or 0
+        xl["pre_C"]   = ws.cell(92, 29).value or 0
+        xl["cor_A"]   = ws.cell(93, 27).value or 0
+        xl["cor_B"]   = ws.cell(93, 28).value or 0
+        xl["cor_C"]   = ws.cell(93, 29).value or 0
+        xl["fac_A"]   = ws.cell(94, 27).value or 0
+        xl["fac_B"]   = ws.cell(94, 28).value or 0
+        xl["fac_C"]   = ws.cell(94, 29).value or 0
+        xl["tot_A"]   = ws.cell(95, 27).value or 0
+        xl["tot_B"]   = ws.cell(95, 28).value or 0
+        xl["tot_C"]   = ws.cell(95, 29).value or 0
+        xl["total"]   = ws.cell(96, 27).value or 0
+        xl["ciclo_op"]  = ws.cell(98,  30).value or 0
+        xl["ciclo_tot"] = ws.cell(99,  30).value or 0
+        xl["labor_op"]  = ws.cell(100, 30).value or 0
+        xl["labor_tot"] = ws.cell(101, 30).value or 0
 
-        # Comparar total funcionários
-        if total_excel is None:
-            comparacoes.append({
-                "Mês": mes[:3].upper(), "Aba Excel": aba, "Status": "⚠️ valor não lido",
-                "Excel — Total Func.": "?", "App — Total Func.": r_app["total"],
-                "Δ Total": "—",
-                "Excel — Labor Total": "—", "App — Labor Total": f"{r_app['prod_labor_tot']:.1%}",
-                "Δ Labor": "—", "Causa": "Não foi possível ler célula AA96"
-            })
-            continue
+        # Valores do app
+        ap = {}
+        ap["op_A"]    = r_app["op_A"]
+        ap["op_B"]    = r_app["op_B"]
+        ap["op_C"]    = r_app["op_C"]
+        sup = r_app["suporte"]
+        ap["lav_A"]   = sup["lavadora"]["A"];  ap["lav_B"] = sup["lavadora"]["B"];  ap["lav_C"] = sup["lavadora"]["C"]
+        ap["gra_A"]   = sup["gravacao"]["A"];   ap["gra_B"] = sup["gravacao"]["B"];   ap["gra_C"] = sup["gravacao"]["C"]
+        ap["pre_A"]   = sup["preset"]["A"];     ap["pre_B"] = sup["preset"]["B"];     ap["pre_C"] = sup["preset"]["C"]
+        ap["cor_A"]   = sup["coringa"]["A"];    ap["cor_B"] = sup["coringa"]["B"];    ap["cor_C"] = sup["coringa"]["C"]
+        ap["fac_A"]   = sup["facilitador"]["A"];ap["fac_B"] = sup["facilitador"]["B"];ap["fac_C"] = sup["facilitador"]["C"]
+        ap["tot_A"]   = r_app["tot_A"]
+        ap["tot_B"]   = r_app["tot_B"]
+        ap["tot_C"]   = r_app["tot_C"]
+        ap["total"]   = r_app["total"]
+        ap["ciclo_op"]  = r_app["prod_ciclo_op"]
+        ap["ciclo_tot"] = r_app["prod_ciclo_tot"]
+        ap["labor_op"]  = r_app["prod_labor_op"]
+        ap["labor_tot"] = r_app["prod_labor_tot"]
 
-        total_excel = int(total_excel)
-        delta_total = r_app["total"] - total_excel
-        delta_labor = (r_app["prod_labor_tot"] - labor_tot) if labor_tot else None
+        # Detectar divergências
+        diffs = []
+        comparacoes_campos = [
+            ("Operadores CEN — Turno A", "op_A",   False),
+            ("Operadores CEN — Turno B", "op_B",   False),
+            ("Operadores CEN — Turno C", "op_C",   False),
+            ("Lavadora — Turno A",       "lav_A",  False),
+            ("Lavadora — Turno B",       "lav_B",  False),
+            ("Preset — Turno A",         "pre_A",  False),
+            ("Preset — Turno B",         "pre_B",  False),
+            ("Preset — Turno C",         "pre_C",  False),
+            ("Coringa — Turno A",        "cor_A",  False),
+            ("Facilitador — Turno A",    "fac_A",  False),
+            ("Facilitador — Turno B",    "fac_B",  False),
+            ("Total Turno A",            "tot_A",  False),
+            ("Total Turno B",            "tot_B",  False),
+            ("Total Turno C",            "tot_C",  False),
+            ("Total Funcionários",       "total",  False),
+            ("Labor Total",              "labor_tot", True),
+        ]
 
-        if abs(delta_total) == 0:
+        for label, key, is_pct in comparacoes_campos:
+            v_xl = xl[key]
+            v_ap = ap[key]
+            if is_pct:
+                delta = v_ap - v_xl
+                diff_ok = abs(delta) < 0.005
+                xl_fmt = f"{v_xl:.1%}" if v_xl else "—"
+                ap_fmt = f"{v_ap:.1%}"
+                d_fmt  = f"{delta:+.1%}"
+            else:
+                v_xl = int(round(v_xl)) if v_xl else 0
+                v_ap = int(v_ap)
+                delta = v_ap - v_xl
+                diff_ok = delta == 0
+                xl_fmt = str(v_xl)
+                ap_fmt = str(v_ap)
+                d_fmt  = f"{delta:+d}"
+
+            if not diff_ok:
+                # Classificar causa
+                if "Operadores CEN" in label:
+                    causa = "Threshold de ativação de turno diferente ou demanda divergente"
+                elif "Labor" in label or "Ciclo" in label:
+                    causa = "Decorre das diferenças nos operadores e/ou horas disponíveis"
+                elif label in ("Total Turno A","Total Turno B","Total Turno C","Total Funcionários"):
+                    causa = "Soma das diferenças acima"
+                else:
+                    causa = "Regra de suporte configurada diferente (verificar sidebar)"
+                diffs.append({"Campo": label, "Excel": xl_fmt, "App": ap_fmt, "Δ": d_fmt, "Causa provável": causa})
+                detalhe_rows.append({"Mês": mes, "Campo": label, "Excel": xl_fmt, "App": ap_fmt, "Δ": d_fmt, "Causa provável": causa})
+
+        delta_total = ap["total"] - int(round(xl["total"])) if xl["total"] else 0
+        if delta_total == 0 and not diffs:
             status = "✅ Igual"
-            causa  = ""
-        elif abs(delta_total) <= 2:
-            status = "🟡 Diferença pequena"
-            causa  = "Possível diferença em suporte manual ou arredondamento"
-        else:
+        elif abs(delta_total) <= 2 and not any(abs(int(d["Δ"].replace("+","")) if "%" not in d["Δ"] else 0) > 2 for d in diffs):
+            status = "🟡 Pequena diferença"
+        elif diffs:
             status = "🔴 Divergência"
-            causa  = "Verificar thresholds, dias trabalhados ou mapeamento de colunas"
+        else:
+            status = "✅ Igual"
 
-        comparacoes.append({
-            "Mês":                  mes[:3].upper(),
-            "Aba Excel":            aba,
+        resumo_rows.append({
+            "Mês":                  mes,
             "Status":               status,
-            "Excel — Turno A":      turno_a_excel,
-            "App — Turno A":        r_app["tot_A"],
-            "Excel — Turno B":      turno_b_excel,
-            "App — Turno B":        r_app["tot_B"],
-            "Excel — Turno C":      turno_c_excel,
-            "App — Turno C":        r_app["tot_C"],
-            "Excel — Total Func.":  total_excel,
-            "App — Total Func.":    r_app["total"],
+            "Excel — Turno A":      int(round(xl["tot_A"])),
+            "App — Turno A":        ap["tot_A"],
+            "Δ Turno A":            f"{ap['tot_A']-int(round(xl['tot_A'])):+d}",
+            "Excel — Turno B":      int(round(xl["tot_B"])),
+            "App — Turno B":        ap["tot_B"],
+            "Δ Turno B":            f"{ap['tot_B']-int(round(xl['tot_B'])):+d}",
+            "Excel — Turno C":      int(round(xl["tot_C"])),
+            "App — Turno C":        ap["tot_C"],
+            "Δ Turno C":            f"{ap['tot_C']-int(round(xl['tot_C'])):+d}",
+            "Excel — Total":        int(round(xl["total"])),
+            "App — Total":          ap["total"],
             "Δ Total":              f"{delta_total:+d}",
-            "Excel — Labor Total":  f"{labor_tot:.1%}" if labor_tot else "—",
-            "App — Labor Total":    f"{r_app['prod_labor_tot']:.1%}",
-            "Δ Labor":              f"{delta_labor:+.1%}" if delta_labor is not None else "—",
-            "Causa":                causa,
+            "Excel — Labor Total":  f"{xl['labor_tot']:.1%}" if xl["labor_tot"] else "—",
+            "App — Labor Total":    f"{ap['labor_tot']:.1%}",
+            "Δ Labor":              f"{ap['labor_tot']-xl['labor_tot']:+.1%}" if xl["labor_tot"] else "—",
+            "Nº divergências":      len(diffs),
         })
 
     wb.close()
-    return pd.DataFrame(comparacoes), None
+    df_resumo  = pd.DataFrame(resumo_rows)
+    df_detalhe = pd.DataFrame(detalhe_rows) if detalhe_rows else pd.DataFrame()
+    return df_resumo, df_detalhe, None
 
 def show_memoria(r, mes, df_intermediario, agg, horas_turno, thresholds):
     st.markdown(f'<div class="jd-section">Memória de cálculo — {mes}</div>', unsafe_allow_html=True)
@@ -897,54 +1001,77 @@ with tab_res:
 # ══════════════════════════════════════════
 with tab_cmp:
     st.markdown('<div class="jd-section">Comparação automática com o Excel</div>', unsafe_allow_html=True)
-    st.markdown("""
-O app lê automaticamente as abas mensais do **mesmo arquivo** que você carregou (NovFY26, DezFY26 etc.)
-e compara os resultados calculados com os valores que estão nessas abas.
-**Não é necessário subir nenhum arquivo adicional.**
-    """)
+    st.caption("O app lê automaticamente as abas mensais do arquivo carregado (NovFY26, DezFY26…) e compara célula a célula com o resultado calculado.")
 
-    df_cmp, err = comparar_com_excel(res_base, file_bytes)
+    df_resumo, df_detalhe, err = comparar_com_excel(res_base, file_bytes)
+
     if err:
         st.error(err)
-    elif df_cmp is not None and len(df_cmp) > 0:
-        n_ok   = (df_cmp["Status"].str.startswith("✅")).sum()
-        n_warn = (df_cmp["Status"].str.startswith("🟡")).sum()
-        n_err  = (df_cmp["Status"].str.startswith("🔴")).sum()
-        n_aus  = (df_cmp["Status"].str.startswith("⚠️")).sum()
+    elif df_resumo is not None and len(df_resumo) > 0:
+        n_ok   = (df_resumo["Status"].str.startswith("✅")).sum() if "Status" in df_resumo else 0
+        n_warn = (df_resumo["Status"].str.startswith("🟡")).sum() if "Status" in df_resumo else 0
+        n_err  = (df_resumo["Status"].str.startswith("🔴")).sum() if "Status" in df_resumo else 0
+        n_aus  = (df_resumo["Status"].str.startswith("⚠️")).sum() if "Status" in df_resumo else 0
 
         c1,c2,c3,c4 = st.columns(4)
-        c1.metric("✅ Iguais",              n_ok)
-        c2.metric("🟡 Diferença pequena",   n_warn)
-        c3.metric("🔴 Divergências",        n_err)
+        c1.metric("✅ Meses iguais",         n_ok)
+        c2.metric("🟡 Pequena diferença",    n_warn)
+        c3.metric("🔴 Com divergência",      n_err)
         c4.metric("⚠️ Abas não encontradas", n_aus)
 
-        st.markdown('<div class="jd-sub">Detalhe por mês</div>', unsafe_allow_html=True)
+        # Tabela resumo
+        st.markdown('<div class="jd-sub">Resumo por mês</div>', unsafe_allow_html=True)
+        def style_resumo(row):
+            st_val = str(row.get("Status",""))
+            if "✅" in st_val:   cor = "background-color:#003D10;color:#B9F6CA"
+            elif "🟡" in st_val: cor = "background-color:#3D2D00;color:#FFE57F"
+            elif "🔴" in st_val: cor = "background-color:#3D0000;color:#FF8A80"
+            else:                cor = "background-color:#2D1A00;color:#FFD54F"
+            return [cor if col == "Status" else "" for col in row.index]
 
-        def style_cmp(row):
-            if "✅" in str(row["Status"]): bg = "background-color:#003D10;color:#B9F6CA"
-            elif "🟡" in str(row["Status"]): bg = "background-color:#3D2D00;color:#FFE57F"
-            elif "🔴" in str(row["Status"]): bg = "background-color:#3D0000;color:#FF8A80"
-            else: bg = ""
-            return [bg if col == "Status" else "" for col in row.index]
-
-        cols_show = ["Mês","Status","Excel — Turno A","App — Turno A",
-                     "Excel — Turno B","App — Turno B","Excel — Turno C","App — Turno C",
-                     "Excel — Total Func.","App — Total Func.","Δ Total",
-                     "Excel — Labor Total","App — Labor Total","Δ Labor","Causa"]
-        cols_show = [c for c in cols_show if c in df_cmp.columns]
-        st.dataframe(df_cmp[cols_show].style.apply(style_cmp, axis=1),
+        cols_res = ["Mês","Status","Excel — Turno A","App — Turno A","Δ Turno A",
+                    "Excel — Turno B","App — Turno B","Δ Turno B",
+                    "Excel — Turno C","App — Turno C","Δ Turno C",
+                    "Excel — Total","App — Total","Δ Total",
+                    "Excel — Labor Total","App — Labor Total","Δ Labor","Nº divergências"]
+        cols_res = [c for c in cols_res if c in df_resumo.columns]
+        st.dataframe(df_resumo[cols_res].style.apply(style_resumo, axis=1),
                      use_container_width=True, hide_index=True)
 
-        buf = BytesIO(); df_cmp.to_excel(buf, index=False); buf.seek(0)
-        st.download_button("📥 Exportar comparação",
+        # Detalhe das divergências
+        if df_detalhe is not None and len(df_detalhe) > 0:
+            st.markdown('<div class="jd-sub">Detalhamento das divergências por campo</div>', unsafe_allow_html=True)
+            st.caption(f"{len(df_detalhe)} campo(s) divergente(s) encontrado(s) nos {n_err + n_warn} mês(es) com diferença.")
+
+            meses_div = df_detalhe["Mês"].unique().tolist()
+            mes_sel_div = st.selectbox("Ver detalhes do mês", meses_div, key="mes_div") if len(meses_div) > 1 else meses_div[0]
+
+            df_mes = df_detalhe[df_detalhe["Mês"] == mes_sel_div]
+
+            def style_det(row):
+                delta = str(row.get("Δ","0"))
+                try:
+                    num = float(delta.replace("+","").replace("%",""))
+                    if num == 0: return [""]*len(row)
+                    if abs(num) <= 1: return ["background-color:#3D2D00;color:#FFE57F"]*len(row)
+                    return ["background-color:#3D0000;color:#FF8A80"]*len(row)
+                except: return [""]*len(row)
+
+            st.dataframe(df_mes[["Campo","Excel","App","Δ","Causa provável"]].style.apply(style_det, axis=1),
+                         use_container_width=True, hide_index=True)
+
+        # Export
+        buf = BytesIO()
+        with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+            df_resumo.to_excel(writer, sheet_name="Resumo", index=False)
+            if df_detalhe is not None and len(df_detalhe) > 0:
+                df_detalhe.to_excel(writer, sheet_name="Divergências", index=False)
+        buf.seek(0)
+        st.download_button("📥 Exportar comparação completa",
             data=buf, file_name="comparacao.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
-        if n_err > 0 or n_warn > 0:
-            st.markdown('<div class="jd-sub">Meses com divergência — próximos passos</div>', unsafe_allow_html=True)
-            st.info("👉 Para investigar uma divergência: vá à aba **🩺 Diagnóstico**, selecione o mês e informe o total esperado do Excel.")
     else:
-        st.warning("Nenhuma aba mensal encontrada no arquivo (NovFY26, DezFY26 etc.). O app só consegue comparar automaticamente quando essas abas estão presentes.")
+        st.warning("Nenhuma aba mensal encontrada no arquivo (NovFY26, DezFY26 etc.). O arquivo precisa ter as abas mensais calculadas para a comparação funcionar.")
 
 
 
