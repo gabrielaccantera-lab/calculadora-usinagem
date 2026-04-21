@@ -22,53 +22,51 @@ JD_TEXTO       = "#1A1A1A"
 
 st.markdown("""
 <style>
-
 .jd-header {
     background: #1F4D19;
     padding: 16px 24px; border-radius: 10px;
     border-left: 6px solid #FFDE00;
     margin-bottom: 20px;
 }
-.jd-header h1 { color: white; margin: 0; font-size: 21px; font-weight: 700; }
+.jd-header h1 { color: #FFFFFF; margin: 0; font-size: 21px; font-weight: 700; }
 .jd-header p  { color: #b8d4b4; margin: 4px 0 0; font-size: 12px; }
 .jd-section {
-    font-size: 15px; font-weight: 700; color: #1F4D19;
+    font-size: 15px; font-weight: 700; color: #FFDE00;
     border-left: 4px solid #FFDE00; padding-left: 10px;
     margin: 22px 0 10px;
 }
 .jd-sub {
-    font-size: 12px; font-weight: 600; color: #367C2B;
+    font-size: 12px; font-weight: 600; color: #7BC67A;
     margin: 12px 0 4px; text-transform: uppercase; letter-spacing: .04em;
 }
-.badge-ok    { background:#367C2B;color:white;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600; }
-.badge-warn  { background:#C9A800;color:white;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600; }
-.badge-erro  { background:#C62828;color:white;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600; }
-.aviso-erro  { background:#FFEBEE;border-left:4px solid #C62828;border-radius:6px;padding:9px 13px;margin:5px 0;font-size:12px;color:#B71C1C; }
-.aviso-warn  { background:#FFFDE7;border-left:4px solid #C9A800;border-radius:6px;padding:9px 13px;margin:5px 0;font-size:12px;color:#7B5800; }
-.aviso-ok    { background:#E8F5E9;border-left:4px solid #367C2B;border-radius:6px;padding:9px 13px;margin:5px 0;font-size:12px;color:#1F4D19; }
+.aviso-erro  { background:#3D0000;border-left:4px solid #FF5252;border-radius:6px;padding:9px 13px;margin:5px 0;font-size:12px;color:#FF8A80; }
+.aviso-warn  { background:#3D2D00;border-left:4px solid #FFDE00;border-radius:6px;padding:9px 13px;margin:5px 0;font-size:12px;color:#FFE57F; }
+.aviso-ok    { background:#003D10;border-left:4px solid #69F0AE;border-radius:6px;padding:9px 13px;margin:5px 0;font-size:12px;color:#B9F6CA; }
 .formula-box {
-    background:#1A1A1A;color:#A8E6A3;font-family:monospace;
+    background:#0D1117;color:#A8E6A3;font-family:monospace;
     padding:10px 14px;border-radius:6px;font-size:12px;line-height:1.8;
     border-left:3px solid #FFDE00;
 }
 .mem-step {
-    background:transparent;border:1px solid #444;border-radius:8px;
-    padding:12px 16px;margin:6px 0; color:#FAFAFA;
+    background:#1A1A2E;border:1px solid #444;border-radius:8px;
+    padding:12px 16px;margin:6px 0;color:#FAFAFA;
 }
+.mem-step b { color:#FFDE00; }
 .mem-step .step-num {
     background:#FFDE00;color:#1F4D19;border-radius:50%;
-    width:22px;height:22px;display:inline-flex;align-items:center;
-    justify-content:center;font-size:11px;font-weight:700;margin-right:8px;
+    width:24px;height:24px;display:inline-flex;align-items:center;
+    justify-content:center;font-size:12px;font-weight:700;margin-right:8px;
 }
-.diff-igual   { background:#E8F5E9;color:#1F4D19;font-weight:600;padding:2px 6px;border-radius:4px; }
-.diff-pequeno { background:#FFFDE7;color:#7B5800;font-weight:600;padding:2px 6px;border-radius:4px; }
-.diff-grande  { background:#FFEBEE;color:#B71C1C;font-weight:600;padding:2px 6px;border-radius:4px; }
-.log-line { font-family:monospace;font-size:11px;color:#444;padding:1px 0; }
-.log-ok   { color:#367C2B; }
-.log-warn { color:#C9A800; }
-.log-err  { color:#C62828; }
-.cenario-card{background:#F8FAFC;border:1.5px solid #B5D4F4;border-radius:10px;padding:14px 16px;margin:6px 0}
-.cenario-card.ativo{border-color:#1F4D19;background:#E8F5E9}
+.diff-igual   { background:#003D10;color:#B9F6CA;font-weight:600;padding:2px 6px;border-radius:4px; }
+.diff-pequeno { background:#3D2D00;color:#FFE57F;font-weight:600;padding:2px 6px;border-radius:4px; }
+.diff-grande  { background:#3D0000;color:#FF8A80;font-weight:600;padding:2px 6px;border-radius:4px; }
+.log-line { font-family:monospace;font-size:11px;color:#AAAAAA;padding:1px 0; }
+.log-ok   { color:#69F0AE; }
+.log-warn { color:#FFDE00; }
+.log-err  { color:#FF5252; }
+.cenario-card{background:#1A1A2E;border:1.5px solid #333;border-radius:10px;padding:14px 16px;margin:6px 0;color:#FAFAFA;}
+.cenario-card b{color:#FFDE00;}
+.cenario-card.ativo{border-color:#FFDE00;background:#1F2D1A;}
 </style>
 """, unsafe_allow_html=True)
 
