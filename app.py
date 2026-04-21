@@ -135,6 +135,17 @@ def read_pmp(fb, log):
     log.append(f"   {modelos_lidos} modelos · {len(rows)} registros com qtd > 0")
     return pd.DataFrame(rows), dias
 
+def read_turnos(fb):
+    """Lê IMPUTTURNOS — retorna horas acumuladas por turno (7.5, 14.25, 19.5)."""
+    try:
+        df = pd.read_excel(BytesIO(fb), sheet_name='IMPUTTURNOS', header=None)
+        hA = float(df.iloc[0,1]) if pd.notna(df.iloc[0,1]) else 7.5
+        hB = float(df.iloc[0,2]) if pd.notna(df.iloc[0,2]) else 14.25
+        hC = float(df.iloc[0,3]) if pd.notna(df.iloc[0,3]) else 19.5
+        return {"A": hA, "B": hB, "C": hC}
+    except:
+        return {"A": 7.5, "B": 14.25, "C": 19.5}
+
 def read_tempo(fb, log):
     df = pd.read_excel(BytesIO(fb), sheet_name='IMPUTTEMPO', header=0)
     log.append(f"✅ IMPUTTEMPO lido: {df.shape[0]} linhas · colunas: {list(df.columns[:4])}")
@@ -796,10 +807,13 @@ st.session_state.log_leitura = []
 with st.spinner("Lendo planilha..."):
     try:
         log = st.session_state.log_leitura
-        pmp, dias = read_pmp(file_bytes, log)
-        tempo      = read_tempo(file_bytes, log)
-        dist       = read_dist(file_bytes, log)
-        aplic      = read_aplic(file_bytes, log)
+        pmp, dias  = read_pmp(file_bytes, log)
+        tempo       = read_tempo(file_bytes, log)
+        dist        = read_dist(file_bytes, log)
+        aplic       = read_aplic(file_bytes, log)
+        turnos_arq  = read_turnos(file_bytes)
+        st.session_state["turnos_arq"] = turnos_arq
+        log.append(f"✅ IMPUTTURNOS lido: A={turnos_arq['A']}h · B={turnos_arq['B']}h · C={turnos_arq['C']}h (acumulados)")
         log.append(f"✅ Leitura concluída em {datetime.now().strftime('%H:%M:%S')}")
     except Exception as e:
         st.error(f"Erro ao ler: {e}"); st.stop()
@@ -825,9 +839,11 @@ if erros:
 with st.sidebar:
     st.markdown(f"## ⚙️ Configurações")
     st.markdown(f"**Duração dos turnos (h)**")
-    hA = st.number_input("Turno A", value=8.80, step=0.01, format="%.2f")
-    hB = st.number_input("Turno B", value=8.23, step=0.01, format="%.2f")
-    hC = st.number_input("Turno C", value=7.68, step=0.01, format="%.2f")
+    st.caption("Horas acumuladas desde o início do dia — lidas do IMPUTTURNOS.")
+    _def = st.session_state.get("turnos_arq", {"A":7.5,"B":14.25,"C":19.5})
+    hA = st.number_input("Turno A (h acumulado)", value=_def["A"], step=0.01, format="%.2f")
+    hB = st.number_input("Turno B (h acumulado)", value=_def["B"], step=0.01, format="%.2f")
+    hC = st.number_input("Turno C (h acumulado)", value=_def["C"], step=0.01, format="%.2f")
     horas_turno = {"A":hA,"B":hB,"C":hC}
 
     st.markdown("---")
