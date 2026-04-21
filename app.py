@@ -52,11 +52,11 @@ st.markdown("""
     border-left:3px solid #FFDE00;
 }
 .mem-step {
-    background:white;border:1px solid #D0D0D0;border-radius:8px;
-    padding:12px 16px;margin:6px 0;
+    background:transparent;border:1px solid #444;border-radius:8px;
+    padding:12px 16px;margin:6px 0; color:#FAFAFA;
 }
 .mem-step .step-num {
-    background:#1F4D19;color:white;border-radius:50%;
+    background:#FFDE00;color:#1F4D19;border-radius:50%;
     width:22px;height:22px;display:inline-flex;align-items:center;
     justify-content:center;font-size:11px;font-weight:700;margin-right:8px;
 }
