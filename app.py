@@ -416,7 +416,9 @@ def exportar(resultados):
         c.fill=PatternFill("solid",fgColor=bg)
         c.alignment=Alignment(horizontal="center" if center else "left",vertical="center")
         c.border=brd
-        if fmt: c.number_format=fmt
+        if fmt and isinstance(fmt, str) and len(fmt) > 0:
+            try: c.number_format=fmt
+            except: pass
     ws=wb.active; ws.title="RESUMO MO"
     JD_V=JD_VERDE_ESC.replace("#",""); JD_Y=JD_AMARELO.replace("#","")
     for i,h in enumerate(["Mês","Dias","Turno A","Turno B","Turno C","Total",
@@ -445,16 +447,16 @@ def exportar(resultados):
         wsm.cell(1,1,mes.upper()); ec(wsm.cell(1,1),JD_V,"FFFFFF",True)
 
         # Linha 2 — descrição de cada bloco de colunas
-        JD_V2 = JD_VERDE.replace("#","")
+        JD_V2 = JD_VERDE_ESC.replace("#","")
         JD_Y2 = JD_AMARELO.replace("#","")
-        wsm.merge_cells("A2:A2")
-        ec(wsm.cell(2,1,"CENTRO"),JD_V2,"FFFFFF",True)
+        JD_V3 = JD_VERDE_ESC.replace("#","")
         wsm.merge_cells("B2:D2")
-        ec(wsm.cell(2,2,"% OCUPAÇÃO"),JD_V2,"FFFFFF",True)
+        c2=wsm.cell(2,1,"CENTRO"); c2.font=Font(name="Arial",bold=True,color="FFFFFF",size=9); c2.fill=PatternFill("solid",fgColor=JD_V2); c2.alignment=Alignment(horizontal="center",vertical="center"); c2.border=brd
+        c2=wsm.cell(2,2,"% OCUPAÇÃO"); c2.font=Font(name="Arial",bold=True,color="FFFFFF",size=9); c2.fill=PatternFill("solid",fgColor=JD_V2); c2.alignment=Alignment(horizontal="center",vertical="center"); c2.border=brd
         wsm.merge_cells("E2:G2")
-        ec(wsm.cell(2,5,"TURNO ATIVO (0=inativo / 1=ativo)"),JD_Y2,JD_V,"000000",True)
+        c2=wsm.cell(2,5,"TURNO ATIVO  (0=inativo  1=ativo)"); c2.font=Font(name="Arial",bold=True,color=JD_V3,size=9); c2.fill=PatternFill("solid",fgColor=JD_Y2); c2.alignment=Alignment(horizontal="center",vertical="center"); c2.border=brd
         wsm.merge_cells("H2:J2")
-        ec(wsm.cell(2,8,"HORAS DISPONÍVEIS NO MÊS"),"1565C0","FFFFFF",True)
+        c2=wsm.cell(2,8,"HORAS DISPONIVEIS NO MES"); c2.font=Font(name="Arial",bold=True,color="FFFFFF",size=9); c2.fill=PatternFill("solid",fgColor="1565C0"); c2.alignment=Alignment(horizontal="center",vertical="center"); c2.border=brd
         wsm.row_dimensions[2].height = 16
 
         def cbg(v):
