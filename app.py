@@ -532,8 +532,7 @@ def exportar(resultados):
 # COMPARAÇÃO COM EXCEL REFERÊNCIA
 # ─────────────────────────────────────────
 def comparar_com_excel(res_app, file_bytes, tempo, dist, aplic, pmp, dias, horas_turno, thresholds, suporte_cfg):
-    """Compara resultado do app com as abas mensais do Excel.
-    Quando diverge, rastreia a causa até o dado de input específico."""
+    """Compara app vs Excel. Quando diverge, rastreia até o centro e a causa raiz no input."""
     MAPA_ABAS = {
         "Novembro":"NovFY26","Dezembro":"DezFY26","Janeiro":"JanFY26",
         "Fevereiro":"FevFY26","Março":"MarFY26","Abril":"AbrFY26",
@@ -549,15 +548,25 @@ def comparar_com_excel(res_app, file_bytes, tempo, dist, aplic, pmp, dias, horas
     resumo_rows  = []
     detalhe_rows = []
 
+    thr_A = thresholds["A"] / 100
+    thr_B = thresholds["B"] / 100
+    thr_C = thresholds["C"] / 100
+    hA    = horas_turno["A"]
+    hB    = horas_turno["B"]
+
     for mes, aba in MAPA_ABAS.items():
         r_app = res_app.get(mes)
         if not r_app: continue
         if aba not in abas:
-            resumo_rows.append({"Mês":mes,"Status":"⚠️ aba ausente","Observação":f"Aba {aba} não encontrada"})
+            resumo_rows.append({"Mês":mes,"Status":"⚠️ aba ausente","Observação":f"Aba {aba} não encontrada no arquivo"})
             continue
 
-        ws = wb[aba]
-        # Ler totais do Excel
+        ws  = wb[aba]
+        d   = dias.get(mes, 0)
+        minA = d * hA * 60
+        minB = d * hB * 60
+
+        # ── Ler totais do Excel ──────────────────────────────────
         xl_opA  = int(ws.cell(89,27).value or 0)
         xl_opB  = int(ws.cell(89,28).value or 0)
         xl_opC  = int(ws.cell(89,29).value or 0)
@@ -567,7 +576,6 @@ def comparar_com_excel(res_app, file_bytes, tempo, dist, aplic, pmp, dias, horas
         xl_tot  = int(ws.cell(96,27).value or 0)
         xl_labor = ws.cell(101,30).value or 0
 
-        # Comparar operadores CEN (mais sensível)
         delta_opA = r_app["op_A"] - xl_opA
         delta_opB = r_app["op_B"] - xl_opB
         delta_opC = r_app["op_C"] - xl_opC
@@ -581,197 +589,150 @@ def comparar_com_excel(res_app, file_bytes, tempo, dist, aplic, pmp, dias, horas
             status = "🔴 Divergência"
 
         resumo_rows.append({
-            "Mês":              mes,
-            "Status":           status,
-            "Op. CEN A — App":  r_app["op_A"],
-            "Op. CEN A — Excel":xl_opA,
-            "Δ Op. A":          f"{delta_opA:+d}",
-            "Op. CEN B — App":  r_app["op_B"],
-            "Op. CEN B — Excel":xl_opB,
-            "Δ Op. B":          f"{delta_opB:+d}",
-            "Op. CEN C — App":  r_app["op_C"],
-            "Op. CEN C — Excel":xl_opC,
-            "Δ Op. C":          f"{delta_opC:+d}",
-            "Total — App":      r_app["total"],
-            "Total — Excel":    xl_tot,
-            "Δ Total":          f"{delta_tot:+d}",
-            "Labor — App":      f"{r_app['prod_labor_tot']:.1%}",
-            "Labor — Excel":    f"{xl_labor:.1%}" if xl_labor else "—",
+            "Mês":               mes,
+            "Status":            status,
+            "Op. CEN A App":     r_app["op_A"],
+            "Op. CEN A Excel":   xl_opA,
+            "Δ Op. A":           f"{delta_opA:+d}",
+            "Op. CEN B App":     r_app["op_B"],
+            "Op. CEN B Excel":   xl_opB,
+            "Δ Op. B":           f"{delta_opB:+d}",
+            "Op. CEN C App":     r_app["op_C"],
+            "Op. CEN C Excel":   xl_opC,
+            "Δ Op. C":           f"{delta_opC:+d}",
+            "Total App":         r_app["total"],
+            "Total Excel":       xl_tot,
+            "Δ Total":           f"{delta_tot:+d}",
+            "Labor App":         f"{r_app['prod_labor_tot']:.1%}",
+            "Labor Excel":       f"{xl_labor:.1%}" if xl_labor else "—",
         })
 
-        # Diagnóstico detalhado só para meses com divergência
-        if status != "✅ Igual":
-            d_dias = dias.get(mes, 0)
-            hA = horas_turno["A"]; hB = horas_turno["B"]
-            minA = d_dias*hA*60; minB = d_dias*hB*60
-            thr_A = thresholds["A"]/100; thr_B = thresholds["B"]/100; thr_C = thresholds["C"]/100
+        # ── Diagnóstico detalhado só para meses com divergência ──
+        if status == "✅ Igual":
+            continue
 
-            # Recalcular ocupação por centro via inputs
-            df_mes = (aplic.merge(pmp[pmp.mes==mes], on="modelo")
-                           .merge(tempo, on=["centro","peca"])
-                           .merge(dist,  on=["centro","peca"]))
-            df_mes["indice_ciclo"] = (df_mes.t_ciclo * df_mes.div_carga * df_mes.div_volume) / df_mes.disponib
-            df_mes["min_ciclo"]    = df_mes.indice_ciclo * df_mes.qtd
-            agg_mes = df_mes.groupby("centro")["min_ciclo"].sum().reset_index()
+        # Calcular ocupação por centro via inputs
+        df_mes = (aplic.merge(pmp[pmp.mes==mes], on="modelo")
+                       .merge(tempo, on=["centro","peca"])
+                       .merge(dist,  on=["centro","peca"]))
+        df_mes["indice_ciclo"] = (df_mes.t_ciclo * df_mes.div_carga * df_mes.div_volume) / df_mes.disponib
+        df_mes["min_ciclo"]    = df_mes.indice_ciclo * df_mes.qtd
+        agg_mes = df_mes.groupby("centro")["min_ciclo"].sum().reset_index()
 
-            # Ler ocupação por centro do Excel
-            centros_xl = {}
-            for r in range(69, 89):
-                cen = ws.cell(r,23).value
-                if cen:
-                    centros_xl[str(cen)] = {
-                        "ocup_A": ws.cell(r,24).value or 0,
-                        "ocup_B": ws.cell(r,25).value or 0,
-                        "ativo_A": int(ws.cell(r,27).value or 0),
-                        "ativo_B": int(ws.cell(r,28).value or 0),
-                        "ativo_C": int(ws.cell(r,29).value or 0),
-                    }
+        # Ler ocupação e ativação por centro do Excel
+        centros_xl = {}
+        for r in range(69, 89):
+            cen = ws.cell(r,23).value
+            if cen:
+                centros_xl[str(cen).strip()] = {
+                    "ocup_A": float(ws.cell(r,24).value or 0),
+                    "ocup_B": float(ws.cell(r,25).value or 0),
+                    "ativo_A": int(ws.cell(r,27).value or 0),
+                    "ativo_B": int(ws.cell(r,28).value or 0),
+                    "ativo_C": int(ws.cell(r,29).value or 0),
+                }
 
-            for _, row in agg_mes.iterrows():
-                cen = row.centro
-                mc  = row.min_ciclo
-                pA_app = mc/minA if minA>0 else 0
-                pB_app = mc/minB if minB>0 else 0
-                aA_app = 1 if pA_app > thr_A else 0
-                aB_app = 1 if pA_app > thr_B else 0
-                aC_app = 1 if pB_app > thr_C else 0
+        for _, row in agg_mes.iterrows():
+            cen = row.centro
+            mc  = row.min_ciclo
+            oA_app = mc / minA if minA > 0 else 0
+            oB_app = mc / minB if minB > 0 else 0
+            aA_app = 1 if oA_app > thr_A else 0
+            aB_app = 1 if oA_app > thr_B else 0
+            aC_app = 1 if oB_app > thr_C else 0
 
-                xl = centros_xl.get(cen, {})
-                aA_xl = xl.get("ativo_A", 0)
-                aB_xl = xl.get("ativo_B", 0)
-                aC_xl = xl.get("ativo_C", 0)
-                oA_xl = xl.get("ocup_A", 0)
-                oB_xl = xl.get("ocup_B", 0)
+            xl = centros_xl.get(cen, {})
+            aA_xl = xl.get("ativo_A", 0)
+            aB_xl = xl.get("ativo_B", 0)
+            aC_xl = xl.get("ativo_C", 0)
+            oA_xl = xl.get("ocup_A", 0)
+            oB_xl = xl.get("ocup_B", 0)
 
-                for turno, a_app, a_xl, ocup_app, ocup_xl, thr_pct in [
-                    ("A", aA_app, aA_xl, pA_app, oA_xl, thr_A),
-                    ("B", aB_app, aB_xl, pB_app, oA_xl, thr_B),  # threshold B usa ocup_A
-                    ("C", aC_app, aC_xl, pB_app, oB_xl, thr_C),  # threshold C usa ocup_B
-                ]:
-                    if a_app != a_xl:
-                        # Classificar causa
-                        diff_ocup = abs(ocup_app - ocup_xl)
-                        if diff_ocup > 0.10:
-                            causa = "📊 Diferença de volume — verifique demanda no INPUT_PMP ou modelos na IMPUTAPLICAÇÃO"
-                            tipo  = "volume"
-                        elif diff_ocup > 0.02:
-                            causa = "⚙️ Diferença nos fatores de distribuição (IMPUTDISTRIBUIÇÃO) ou tempo de ciclo (IMPUTTEMPO)"
-                            tipo  = "fator"
-                        else:
-                            causa = f"⚖️ Ocupação próxima do threshold ({thr_pct:.0%}) — pequena diferença de dado causa ativação diferente"
-                            tipo  = "threshold"
+            for turno, a_app, a_xl, ocup_app, ocup_xl in [
+                ("A", aA_app, aA_xl, oA_app, oA_xl),
+                ("B", aB_app, aB_xl, oA_app, oA_xl),  # threshold B usa ocup_A
+                ("C", aC_app, aC_xl, oB_app, oB_xl),  # threshold C usa ocup_B
+            ]:
+                if a_app == a_xl:
+                    continue  # sem divergência neste turno
 
-                        detalhe_rows.append({
-                            "Mês":              mes,
-                            "Centro":           cen,
-                            "Turno":            turno,
-                            "Ativo App":        a_app,
-                            "Ativo Excel":      a_xl,
-                            "Ocup. App":        f"{ocup_app:.1%}",
-                            "Ocup. Excel":      f"{ocup_xl:.1%}" if ocup_xl else "—",
-                            "Δ Ocup.":          f"{ocup_app-float(ocup_xl):+.1%}" if ocup_xl else "—",
-                            "Threshold":        f">{thr_pct:.0%}",
-                            "Tipo de causa":    tipo,
-                            "O que investigar": causa,
-                        })
+                delta_ocup = ocup_app - ocup_xl
+                abs_delta  = abs(delta_ocup)
+
+                # ── Identificar causa raiz no input ─────────────────
+                # Ver quais inputs contribuem para a diferença de ocupação
+                df_cen = df_mes[df_mes.centro == cen].copy()
+                total_pecas_app = int(df_cen.qtd.sum()) if len(df_cen) > 0 else 0
+
+                # Volume esperado para reproduzir ocup_A do Excel
+                mc_xl_esperado = ocup_xl * minA if turno in ("A","B") else ocup_xl * minB
+                volume_xl_estimado = mc_xl_esperado / (df_cen.indice_ciclo.mean()) if len(df_cen) > 0 and df_cen.indice_ciclo.mean() > 0 else 0
+
+                if abs_delta > 0.15:
+                    # Diferença grande — provavelmente volume ou índice muito diferente
+                    if total_pecas_app < volume_xl_estimado * 0.7:
+                        causa_curta = "Volume de peças menor que o esperado"
+                        causa_longa = (
+                            f"O app calculou {total_pecas_app} peças para este centro em {mes}, "
+                            f"mas o Excel indica uma carga equivalente a ~{volume_xl_estimado:.0f} peças. "
+                            f"Verifique: (1) se há modelos faltando na aba IMPUTAPLICAÇÃO para o {cen}, "
+                            f"(2) se os volumes no INPUT_PMP estão corretos para os modelos que passam por este centro."
+                        )
+                        origem = "INPUT_PMP ou IMPUTAPLICAÇÃO"
+                    elif total_pecas_app > volume_xl_estimado * 1.3:
+                        causa_curta = "Volume de peças maior que o esperado"
+                        causa_longa = (
+                            f"O app calculou {total_pecas_app} peças para este centro em {mes}, "
+                            f"mas o Excel indica uma carga equivalente a ~{volume_xl_estimado:.0f} peças. "
+                            f"Verifique: (1) se há modelos a mais na IMPUTAPLICAÇÃO para o {cen}, "
+                            f"(2) se os volumes no INPUT_PMP estão inflados para algum modelo."
+                        )
+                        origem = "IMPUTAPLICAÇÃO"
+                    else:
+                        # Volume parecido mas índice diferente
+                        idx_medio_app = df_cen.indice_ciclo.mean() if len(df_cen) > 0 else 0
+                        idx_esperado  = mc_xl_esperado / total_pecas_app if total_pecas_app > 0 else 0
+                        causa_curta = "Índice de ciclo diferente do Excel"
+                        causa_longa = (
+                            f"O volume de peças é similar ({total_pecas_app} app vs ~{volume_xl_estimado:.0f} Excel), "
+                            f"mas o índice de ciclo médio calculado pelo app ({idx_medio_app:.2f} min/peça) "
+                            f"difere do esperado ({idx_esperado:.2f} min/peça). "
+                            f"Verifique na aba IMPUTDISTRIBUIÇÃO: div_carga, div_volume e disponibilidade do {cen}. "
+                            f"O índice = (t_ciclo × div_carga × div_volume) ÷ disponibilidade."
+                        )
+                        origem = "IMPUTDISTRIBUIÇÃO"
+                else:
+                    # Diferença pequena — ocupação próxima do threshold
+                    thr_usado = thr_A if turno == "A" else (thr_B if turno == "B" else thr_C)
+                    causa_curta = f"Ocupação na borda do threshold ({thr_usado:.0%})"
+                    causa_longa = (
+                        f"A ocupação do app ({ocup_app:.1%}) e do Excel ({ocup_xl:.1%}) são próximas, "
+                        f"e o threshold de ativação do turno {turno} é {thr_usado:.0%}. "
+                        f"Uma pequena diferença em qualquer dado de input (tempo de ciclo, demanda ou fator) "
+                        f"pode cruzar o threshold e mudar a ativação. "
+                        f"Não é necessariamente um erro — revise se os dados de input estão atualizados."
+                    )
+                    origem = "Verificar todos os inputs do " + cen
+
+                detalhe_rows.append({
+                    "Mês":          mes,
+                    "Centro":       cen,
+                    "Turno":        turno,
+                    "App — Ativo":  "✅ Sim" if a_app else "❌ Não",
+                    "Excel — Ativo":"✅ Sim" if a_xl  else "❌ Não",
+                    "App — Ocup.":  f"{ocup_app:.1%}",
+                    "Excel — Ocup.":f"{ocup_xl:.1%}",
+                    "Δ Ocupação":   f"{delta_ocup:+.1%}",
+                    "Causa":        causa_curta,
+                    "Origem no input": origem,
+                    "Detalhe":      causa_longa,
+                })
 
     wb.close()
-    return pd.DataFrame(resumo_rows), pd.DataFrame(detalhe_rows) if detalhe_rows else pd.DataFrame(), None
+    df_res = pd.DataFrame(resumo_rows)
+    df_det = pd.DataFrame(detalhe_rows) if detalhe_rows else pd.DataFrame()
+    return df_res, df_det, None
 
-import streamlit as st
-import pandas as pd
-import numpy as np
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-from io import BytesIO
-import openpyxl
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
-from datetime import datetime
-
-st.set_page_config(page_title="Calculadora de Recursos — Usinagem", layout="wide", page_icon="🏭")
-
-# ─── PALETA JOHN DEERE ───────────────────
-JD_VERDE       = "#367C2B"
-JD_VERDE_ESC   = "#1F4D19"
-JD_AMARELO     = "#FFDE00"
-JD_AMARELO_ESC = "#C9A800"
-JD_CINZA_CLR   = "#F4F4F4"
-JD_CINZA_BD    = "#D0D0D0"
-JD_TEXTO       = "#1A1A1A"
-
-st.markdown("""
-<style>
-.jd-header {
-    background: #1F4D19;
-    padding: 16px 24px; border-radius: 10px;
-    border-left: 6px solid #FFDE00;
-    margin-bottom: 20px;
-}
-.jd-header h1 { color: #FFFFFF; margin: 0; font-size: 21px; font-weight: 700; }
-.jd-header p  { color: #b8d4b4; margin: 4px 0 0; font-size: 12px; }
-.jd-section {
-    font-size: 15px; font-weight: 700; color: #FFDE00;
-    border-left: 4px solid #FFDE00; padding-left: 10px;
-    margin: 22px 0 10px;
-}
-.jd-sub {
-    font-size: 12px; font-weight: 600; color: #7BC67A;
-    margin: 12px 0 4px; text-transform: uppercase; letter-spacing: .04em;
-}
-.aviso-erro  { background:#3D0000;border-left:4px solid #FF5252;border-radius:6px;padding:9px 13px;margin:5px 0;font-size:12px;color:#FF8A80; }
-.aviso-warn  { background:#3D2D00;border-left:4px solid #FFDE00;border-radius:6px;padding:9px 13px;margin:5px 0;font-size:12px;color:#FFE57F; }
-.aviso-ok    { background:#003D10;border-left:4px solid #69F0AE;border-radius:6px;padding:9px 13px;margin:5px 0;font-size:12px;color:#B9F6CA; }
-.formula-box {
-    background:#0D1117;color:#A8E6A3;font-family:monospace;
-    padding:10px 14px;border-radius:6px;font-size:12px;line-height:1.8;
-    border-left:3px solid #FFDE00;
-}
-.mem-step {
-    background:#1A1A2E;border:1px solid #444;border-radius:8px;
-    padding:12px 16px;margin:6px 0;color:#FAFAFA;
-}
-.mem-step b { color:#FFDE00; }
-.mem-step .step-num {
-    background:#FFDE00;color:#1F4D19;border-radius:50%;
-    width:24px;height:24px;display:inline-flex;align-items:center;
-    justify-content:center;font-size:12px;font-weight:700;margin-right:8px;
-}
-.diff-igual   { background:#003D10;color:#B9F6CA;font-weight:600;padding:2px 6px;border-radius:4px; }
-.diff-pequeno { background:#3D2D00;color:#FFE57F;font-weight:600;padding:2px 6px;border-radius:4px; }
-.diff-grande  { background:#3D0000;color:#FF8A80;font-weight:600;padding:2px 6px;border-radius:4px; }
-.log-line { font-family:monospace;font-size:11px;color:#AAAAAA;padding:1px 0; }
-.log-ok   { color:#69F0AE; }
-.log-warn { color:#FFDE00; }
-.log-err  { color:#FF5252; }
-.cenario-card{background:#1A1A2E;border:1.5px solid #333;border-radius:10px;padding:14px 16px;margin:6px 0;color:#FAFAFA;}
-.cenario-card b{color:#FFDE00;}
-.cenario-card.ativo{border-color:#FFDE00;background:#1F2D1A;}
-</style>
-""", unsafe_allow_html=True)
-
-MESES       = ["Novembro","Dezembro","Janeiro","Fevereiro","Março","Abril",
-               "Maio","Junho","Julho","Agosto","Setembro","Outubro"]
-MESES_ABREV = ["NOV","DEZ","JAN","FEV","MAR","ABR","MAI","JUN","JUL","AGO","SET","OUT"]
-
-# ─────────────────────────────────────────
-# MAPEAMENTO DE COLUNAS (por nome, não índice)
-# ─────────────────────────────────────────
-COL_MAP = {
-    "IMPUTTEMPO": {
-        "centro":  ["Máquina","MÁQUINA","maquina","Centro","CENTRO"],
-        "peca":    ["PEÇA","Peça","peca","PECA"],
-        "t_ciclo": ["Tempo\nCiclo\n(min)","Tempo Ciclo (min)","T.CICLO","t_ciclo","CICLO"],
-        "t_labor": ["Tempo\nLabor\n(min)","Tempo Labor (min)","T.LABOR","t_labor","LABOR"],
-    },
-    "IMPUTDISTRIBUIÇÃO": {
-        "centro":     ["Máquina","MÁQUINA","maquina","Centro","CENTRO"],
-        "peca":       ["PEÇA","Peça","peca","PECA"],
-        "div_carga":  ["Divisão\nCarga\nENTRE\nMÁQUINAS","Div Carga","DIV_CARGA","div_carga"],
-        "div_volume": ["Divisão \nde\nVolume\nENTRE\nPEÇAS","Div Volume","DIV_VOLUME","div_volume"],
-        "disponib":   ["Disponi-\nbilidade","Disponibilidade","DISPONIB","disponib"],
-    },
-}
 
 def find_col(df, candidates, aba, campo):
     """Busca coluna por lista de nomes candidatos. Fallback por índice com aviso."""
@@ -1781,25 +1742,43 @@ with tab_cmp:
 
         # Detalhe das divergências
         if df_detalhe is not None and len(df_detalhe) > 0:
-            st.markdown('<div class="jd-sub">Detalhamento das divergências por campo</div>', unsafe_allow_html=True)
-            st.caption(f"{len(df_detalhe)} campo(s) divergente(s) encontrado(s) nos {n_err + n_warn} mês(es) com diferença.")
+            st.markdown('<div class="jd-sub">Detalhamento das divergências por centro</div>', unsafe_allow_html=True)
+            st.caption(f"{len(df_detalhe)} divergência(s) encontrada(s) em {len(df_detalhe['Mês'].unique())} mês(es). Selecione o mês para ver a análise detalhada.")
 
             meses_div = df_detalhe["Mês"].unique().tolist()
-            mes_sel_div = st.selectbox("Ver detalhes do mês", meses_div, key="mes_div") if len(meses_div) > 1 else meses_div[0]
+            mes_sel_div = st.selectbox("Ver detalhes do mês", meses_div, key="mes_div")
 
-            df_mes = df_detalhe[df_detalhe["Mês"] == mes_sel_div]
+            df_mes = df_detalhe[df_detalhe["Mês"] == mes_sel_div].reset_index(drop=True)
 
+            # Tabela resumida por centro
+            cols_tab = ["Centro","Turno","App — Ativo","Excel — Ativo",
+                        "App — Ocup.","Excel — Ocup.","Δ Ocupação","Causa","Origem no input"]
             def style_det(row):
-                delta = str(row.get("Δ","0"))
-                try:
-                    num = float(delta.replace("+","").replace("%",""))
-                    if num == 0: return [""]*len(row)
-                    if abs(num) <= 1: return ["background-color:#3D2D00;color:#FFE57F"]*len(row)
-                    return ["background-color:#3D0000;color:#FF8A80"]*len(row)
-                except: return [""]*len(row)
+                a = str(row.get("App — Ativo",""))
+                e = str(row.get("Excel — Ativo",""))
+                if a != e:
+                    if "maior" in str(row.get("Causa","")).lower() or "menor" in str(row.get("Causa","")).lower():
+                        return ["background-color:#3D0000;color:#FF8A80"]*len(row)
+                    return ["background-color:#3D2D00;color:#FFE57F"]*len(row)
+                return [""]*len(row)
 
-            st.dataframe(df_mes[["Campo","Excel","App","Δ","Causa provável"]].style.apply(style_det, axis=1),
-                         use_container_width=True, hide_index=True)
+            st.dataframe(
+                df_mes[cols_tab].style.apply(style_det, axis=1),
+                use_container_width=True, hide_index=True
+            )
+
+            # Detalhe expandível por linha
+            st.markdown('<div class="jd-sub">Análise detalhada — o que investigar</div>', unsafe_allow_html=True)
+            for _, row in df_mes.iterrows():
+                icon = "🔴" if "maior" in row["Causa"].lower() or "menor" in row["Causa"].lower() else "🟡"
+                with st.expander(f"{icon} {row['Centro']} — Turno {row['Turno']}: {row['Causa']}"):
+                    c1, c2, c3, c4 = st.columns(4)
+                    c1.metric("App — Ativo",   row["App — Ativo"])
+                    c2.metric("Excel — Ativo", row["Excel — Ativo"])
+                    c3.metric("Ocupação App",  row["App — Ocup."])
+                    c4.metric("Ocupação Excel",row["Excel — Ocup."])
+                    st.markdown(f'<div class="aviso-warn">📍 <b>Origem provável:</b> {row["Origem no input"]}</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="aviso-warn">🔍 <b>O que aconteceu:</b> {row["Detalhe"]}</div>', unsafe_allow_html=True)
 
         # Export
         buf = BytesIO()
