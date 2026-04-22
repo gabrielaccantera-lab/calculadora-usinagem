@@ -416,8 +416,9 @@ def grafico_cenarios(cenarios_dict):
         title=dict(text="MÃO-DE-OBRA POR TURNO",font=dict(size=14,color=JD_VERDE_ESC)),
         yaxis_title="Nº Funcionários",
         yaxis2=dict(title="Labor Total (%)",tickformat=".0f",ticksuffix="%",range=[0,100]),
-        legend=dict(orientation="h",y=-0.3,font=dict(size=10)),
-        height=440,plot_bgcolor="white",paper_bgcolor="white",
+        legend=dict(orientation="h",y=-0.35,font=dict(size=10,color="#FAFAFA"),
+                    bgcolor="rgba(30,30,30,0.8)",bordercolor="#555",borderwidth=1),
+        height=460,plot_bgcolor="white",paper_bgcolor="rgba(0,0,0,0)",
         xaxis=dict(showgrid=False),yaxis=dict(showgrid=True,gridcolor="#E8E8E8"))
     return fig
 
@@ -533,6 +534,814 @@ def exportar(resultados):
             wsm.column_dimensions[get_column_letter(ci)].width=w
     wb.save(out); out.seek(0)
     return out
+
+# ─────────────────────────────────────────
+# DIAGNÓSTICO DE DIVERGÊNCIAS — EXCEL DE SAÍDA
+# ─────────────────────────────────────────
+def gerar_excel_diagnostico(file_bytes):
+    """Gera Excel com diagnóstico completo de divergências entre inputs e Excel de referência."""
+    MESES = ["Novembro","Dezembro","Janeiro","Fevereiro","Março","Abril",
+             "Maio","Junho","Julho","Agosto","Setembro","Outubro"]
+
+    # ── Ler inputs ──────────────────────────────────────────────────────────
+    tempo_raw = pd.read_excel(BytesIO(file_bytes), sheet_name='IMPUTTEMPO', header=0)
+    dist_raw  = pd.read_excel(BytesIO(file_bytes), sheet_name='IMPUTDISTRIBUIÇÃO', header=0)
+    aplic_raw = pd.read_excel(BytesIO(file_bytes), sheet_name='IMPUTAPLICAÇÃO', header=0)
+    pmp_raw   = pd.read_excel(BytesIO(file_bytes), sheet_name='INPUT_PMP', header=None)
+
+    tempo_raw = tempo_raw.rename(columns={
+        tempo_raw.columns[0]:"centro", tempo_raw.columns[1]:"peca",
+        tempo_raw.columns[5]:"t_ciclo", tempo_raw.columns[6]:"t_labor"})
+    dist_raw = dist_raw.rename(columns={
+        dist_raw.columns[0]:"centro", dist_raw.columns[1]:"peca",
+        dist_raw.columns[7]:"div_carga", dist_raw.columns[9]:"div_volume",
+        dist_raw.columns[10]:"disponib"})
+
+    # ── Ler base do Excel de referência (NovFY26) ──────────────────────────
+    wb_ref = openpyxl.load_workbook(BytesIO(file_bytes), read_only=True, data_only=True)
+    abas = wb_ref.sheetnames
+    aba_ref = next((a for a in ["NovFY26","DezFY26","JanFY26"] if a in abas), None)
+
+    excel_base = []
+    if aba_ref:
+        ws_ref = wb_ref[aba_ref]
+        for r in range(7, 64):
+            centro = ws_ref.cell(r,1).value; peca = ws_ref.cell(r,2).value
+            if not centro or not peca: continue
+            excel_base.append({
+                "centro":     str(centro).strip(), "peca": str(peca).strip(),
+                "t_ciclo":    ws_ref.cell(r,6).value,
+                "t_labor":    ws_ref.cell(r,7).value,
+                "div_carga":  ws_ref.cell(r,8).value,
+                "div_volume": ws_ref.cell(r,10).value,
+                "disponib":   ws_ref.cell(r,11).value,
+                "indice_xl":  ws_ref.cell(r,12).value,
+            })
+    wb_ref.close()
+    df_xl = pd.DataFrame(excel_base) if excel_base else pd.DataFrame()
+
+    # ── Construir workbook de diagnóstico ──────────────────────────────────
+    wb = openpyxl.Workbook()
+
+    # ════════════════════════════════════════════════════════════════
+    # ABA 1 — RESUMO GERAL
+    # ════════════════════════════════════════════════════════════════
+    ws1 = wb.active
+    ws1.title = "📋 RESUMO"
+
+    ws1.merge_cells("A1:F1")
+    c = ws1.cell(1, 1, "DIAGNÓSTICO DE DIVERGÊNCIAS — CALCULADORA DE USINAGEM")
+    c.font = Font(name="Arial", bold=True, color="FFFFFF", size=13)
+    c.fill = VERDE_HEADER
+    c.alignment = Alignment(horizontal="center", vertical="center")
+    ws1.row_dimensions[1].height = 28
+
+    ws1.merge_cells("A2:F2")
+    c = ws1.cell(2, 1, "Este arquivo mostra onde os dados de input diferem do que o Excel de referência usa. Células em VERMELHO = divergência. Veja as abas seguintes para detalhes.")
+    c.font = Font(name="Arial", size=9, color="333333", italic=True)
+    c.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+    ws1.row_dimensions[2].height = 24
+
+    # Legenda
+    ws1.cell(4,1, "LEGENDA:").font = Font(bold=True, size=9)
+    for r, (cor, fill, texto) in enumerate([
+        (5, VERMELHO_CLARO, "🔴 VERMELHO — Valor diferente do Excel de referência → precisa verificar"),
+        (6, AMARELO,        "🟡 AMARELO — Valor igual, mas índice calculado difere (efeito de outro campo)"),
+        (7, VERDE,          "🟢 VERDE — Sem divergência detectada"),
+    ], 5):
+        ws1.cell(r,2, texto).fill = fill
+        ws1.cell(r,2).font = Font(size=9)
+        ws1.cell(r,2).alignment = Alignment(horizontal="left")
+    ws1.column_dimensions["B"].width = 70
+
+    # Contadores
+    df_dist_clean = dist_raw[["centro","peca","div_carga","div_volume","disponib"]].dropna(subset=["centro"])
+    df_cmp_res = df_xl.merge(df_dist_clean, on=["centro","peca"], suffixes=("_xl","_inp"), how="outer") if not df_xl.empty else pd.DataFrame()
+
+    n_div = 0
+    if not df_cmp_res.empty:
+        for _, row in df_cmp_res.iterrows():
+            for xl_col, inp_col in [("div_carga_xl","div_carga_inp"),("div_volume_xl","div_volume_inp"),("disponib_xl","disponib_inp")]:
+                xl_v = row.get(xl_col); inp_v = row.get(inp_col)
+                if xl_v is not None and inp_v is not None:
+                    try:
+                        if abs(float(xl_v) - float(inp_v)) > 0.001: n_div += 1
+                    except: pass
+
+    ws1.cell(9,1, f"Total de divergências encontradas no IMPUTDISTRIBUIÇÃO: {n_div}").font = Font(bold=True, size=10)
+    ws1.cell(10,1, "→ Veja a aba 'IMPUTDISTRIBUIÇÃO' para ver linha a linha o que está diferente").font = Font(size=9, italic=True)
+    ws1.cell(12,1, "→ Veja a aba 'IMPUTTEMPO' para conferir tempos de ciclo e labor").font = Font(size=9, italic=True)
+    ws1.cell(13,1, "→ Veja a aba 'IMPUTAPLICAÇÃO' para conferir quais modelos passam por cada centro").font = Font(size=9, italic=True)
+    ws1.column_dimensions["A"].width = 70
+
+    # ════════════════════════════════════════════════════════════════
+    # ABA 2 — IMPUTDISTRIBUIÇÃO COM DESTAQUE
+    # ════════════════════════════════════════════════════════════════
+    ws2 = wb.create_sheet("IMPUTDISTRIBUIÇÃO")
+
+    headers = ["Centro", "Peça", "Div. Carga\n(Input)", "Div. Carga\n(Excel Ref.)", "Div. Volume\n(Input)",
+               "Div. Volume\n(Excel Ref.)", "Disponib.\n(Input)", "Disponib.\n(Excel Ref.)",
+               "Índice Ciclo\n(App calcula)", "Índice Ciclo\n(Excel usa)", "Δ Índice", "Situação"]
+    col_widths = [12, 12, 14, 14, 14, 14, 12, 12, 14, 14, 10, 30]
+
+    for ci, (h, w) in enumerate(zip(headers, col_widths), 1):
+        cell_style(ws2, 1, ci, h, CINZA_HEADER, True, "FFFFFF", font_size=9)
+        ws2.column_dimensions[get_column_letter(ci)].width = w
+    ws2.row_dimensions[1].height = 36
+
+    ri = 2
+    if not df_xl.empty:
+        df_tempo_clean = tempo_raw[["centro","peca","t_ciclo","t_labor"]].dropna(subset=["centro"])
+        df_full = df_xl.merge(df_dist_clean, on=["centro","peca"], suffixes=("_xl","_inp"), how="outer")
+        df_full = df_full.merge(df_tempo_clean, on=["centro","peca"], how="left")
+
+        for _, row in df_full.iterrows():
+            bg = VERDE if ri % 2 == 0 else PatternFill("solid", fgColor="F1F8F1")
+
+            dc_xl  = row.get("div_carga_xl");  dc_inp = row.get("div_carga_inp")
+            dv_xl  = row.get("div_volume_xl"); dv_inp = row.get("div_volume_inp")
+            di_xl  = row.get("disponib_xl");   di_inp = row.get("disponib_inp")
+            tc     = row.get("t_ciclo") or 0
+            xl_idx = row.get("indice_xl")
+
+            def safe(v): return round(float(v),4) if v is not None else "—"
+
+            # Calcular índice app
+            dc_v = float(dc_inp) if dc_inp is not None else 1
+            dv_v = float(dv_inp) if dv_inp is not None else 1
+            di_v = float(di_inp) if di_inp is not None else 0.9
+            app_idx = round((float(tc) * dc_v * dv_v) / di_v, 4) if di_v > 0 else 0
+            xl_idx_v = round(float(xl_idx), 4) if xl_idx is not None else 0
+            delta_idx = round(xl_idx_v - app_idx, 4)
+
+            def diverge(xl, inp):
+                if xl is None or inp is None: return False
+                try: return abs(float(xl) - float(inp)) > 0.001
+                except: return False
+
+            div_dc = diverge(dc_xl, dc_inp)
+            div_dv = diverge(dv_xl, dv_inp)
+            div_di = diverge(di_xl, di_inp)
+            any_div = div_dc or div_dv or div_di
+
+            comentarios = []
+            if div_dc: comentarios.append(f"Div. Carga: Input={safe(dc_inp)} vs Excel={safe(dc_xl)}")
+            if div_dv: comentarios.append(f"Div. Volume: Input={safe(dv_inp)} vs Excel={safe(dv_xl)}")
+            if div_di: comentarios.append(f"Disponib.: Input={safe(di_inp)} vs Excel={safe(di_xl)}")
+            if abs(delta_idx) > 0.5: comentarios.append(f"Índice diverge em {delta_idx:+.4f} min/peça → afeta ocupação dos turnos")
+
+            situacao = "✅ OK" if not any_div else f"🔴 {len(comentarios)} campo(s) diferente(s)"
+            comentario_txt = "\n".join(comentarios) if comentarios else None
+
+            cell_style(ws2, ri, 1,  row.get("centro",""), bg, center=False)
+            cell_style(ws2, ri, 2,  row.get("peca",""), bg, center=False)
+            cell_style(ws2, ri, 3,  safe(dc_inp), VERMELHO_CLARO if div_dc else bg,
+                       comment_text=f"IMPUTDISTRIBUIÇÃO usa: {safe(dc_inp)}\nExcel de referência usa: {safe(dc_xl)}\nDiferença: {round(float(dc_xl or 0)-float(dc_inp or 0),4)}" if div_dc else None)
+            cell_style(ws2, ri, 4,  safe(dc_xl), VERMELHO_CLARO if div_dc else bg)
+            cell_style(ws2, ri, 5,  safe(dv_inp), VERMELHO_CLARO if div_dv else bg,
+                       comment_text=f"IMPUTDISTRIBUIÇÃO usa: {safe(dv_inp)}\nExcel de referência usa: {safe(dv_xl)}" if div_dv else None)
+            cell_style(ws2, ri, 6,  safe(dv_xl), VERMELHO_CLARO if div_dv else bg)
+            cell_style(ws2, ri, 7,  safe(di_inp), VERMELHO_CLARO if div_di else bg,
+                       comment_text=f"IMPUTDISTRIBUIÇÃO usa: {safe(di_inp)}\nExcel de referência usa: {safe(di_xl)}" if div_di else None)
+            cell_style(ws2, ri, 8,  safe(di_xl), VERMELHO_CLARO if div_di else bg)
+            cell_style(ws2, ri, 9,  app_idx, AMARELO if abs(delta_idx) > 0.5 else bg)
+            cell_style(ws2, ri, 10, xl_idx_v, AMARELO if abs(delta_idx) > 0.5 else bg)
+            cell_style(ws2, ri, 11, f"{delta_idx:+.4f}" if delta_idx != 0 else "0",
+                       VERMELHO_CLARO if abs(delta_idx) > 0.5 else bg)
+            cell_style(ws2, ri, 12, situacao, VERMELHO_CLARO if any_div else VERDE,
+                       comment_text=comentario_txt, bold=any_div)
+            ws2.row_dimensions[ri].height = 16
+            ri += 1
+
+    # ════════════════════════════════════════════════════════════════
+    # ABA 3 — IMPUTTEMPO
+    # ════════════════════════════════════════════════════════════════
+    ws3 = wb.create_sheet("IMPUTTEMPO")
+    headers3 = ["Centro","Peça","T. Ciclo\n(Input)","T. Ciclo\n(Excel Ref.)","T. Labor\n(Input)","T. Labor\n(Excel Ref.)","Situação"]
+    for ci, h in enumerate(headers3, 1):
+        cell_style(ws3, 1, ci, h, CINZA_HEADER, True, "FFFFFF", font_size=9)
+        ws3.column_dimensions[get_column_letter(ci)].width = 16
+    ws3.column_dimensions["G"].width = 30
+    ws3.row_dimensions[1].height = 36
+
+    df_tempo_cmp = df_xl.merge(tempo_raw[["centro","peca","t_ciclo","t_labor"]].dropna(subset=["centro"]),
+                               on=["centro","peca"], suffixes=("_xl","_inp"), how="outer") if not df_xl.empty else pd.DataFrame()
+
+    ri3 = 2
+    for _, row in df_tempo_cmp.iterrows():
+        bg = PatternFill("solid", fgColor="F8F8F8") if ri3 % 2 == 0 else PatternFill("solid", fgColor="FFFFFF")
+        tc_xl  = row.get("t_ciclo_xl");  tc_inp = row.get("t_ciclo_inp")
+        tl_xl  = row.get("t_labor_xl");  tl_inp = row.get("t_labor_inp")
+
+        def div(xl, inp):
+            if xl is None or inp is None: return False
+            try: return abs(float(xl) - float(inp)) > 0.01
+            except: return False
+
+        div_tc = div(tc_xl, tc_inp); div_tl = div(tl_xl, tl_inp)
+        sit = "✅ OK" if not div_tc and not div_tl else f"🔴 {'Ciclo ' if div_tc else ''}{'Labor' if div_tl else ''} diferente"
+
+        cell_style(ws3, ri3, 1, row.get("centro",""), bg, center=False)
+        cell_style(ws3, ri3, 2, row.get("peca",""), bg, center=False)
+        cell_style(ws3, ri3, 3, round(float(tc_inp),2) if tc_inp else "—",
+                   VERMELHO_CLARO if div_tc else bg,
+                   comment_text=f"Input: {tc_inp}\nExcel: {tc_xl}" if div_tc else None)
+        cell_style(ws3, ri3, 4, round(float(tc_xl),2) if tc_xl else "—", VERMELHO_CLARO if div_tc else bg)
+        cell_style(ws3, ri3, 5, round(float(tl_inp),2) if tl_inp else "—",
+                   VERMELHO_CLARO if div_tl else bg,
+                   comment_text=f"Input: {tl_inp}\nExcel: {tl_xl}" if div_tl else None)
+        cell_style(ws3, ri3, 6, round(float(tl_xl),2) if tl_xl else "—", VERMELHO_CLARO if div_tl else bg)
+        cell_style(ws3, ri3, 7, sit, VERMELHO_CLARO if (div_tc or div_tl) else VERDE,
+                   bold=(div_tc or div_tl))
+        ws3.row_dimensions[ri3].height = 15
+        ri3 += 1
+
+    # ════════════════════════════════════════════════════════════════
+    # ABA 4 — SÓ DIVERGÊNCIAS (resumo executivo)
+    # ════════════════════════════════════════════════════════════════
+    ws4 = wb.create_sheet("🔴 SÓ DIVERGÊNCIAS")
+    ws4.merge_cells("A1:G1")
+    c = ws4.cell(1,1,"APENAS AS DIVERGÊNCIAS — corrija esses dados nos seus arquivos de input")
+    c.font = Font(bold=True, color="FFFFFF", size=11)
+    c.fill = VERMELHO_HEADER
+    c.alignment = Alignment(horizontal="center", vertical="center")
+    ws4.row_dimensions[1].height = 24
+
+    hdrs4 = ["Onde corrigir","Centro","Peça","Campo","Valor no Input","Valor no Excel","O que fazer"]
+    for ci,h in enumerate(hdrs4,1):
+        cell_style(ws4, 2, ci, h, CINZA_HEADER, True, "FFFFFF")
+    ws4.column_dimensions["A"].width = 20; ws4.column_dimensions["B"].width = 12
+    ws4.column_dimensions["C"].width = 12; ws4.column_dimensions["D"].width = 28
+    ws4.column_dimensions["E"].width = 16; ws4.column_dimensions["F"].width = 16
+    ws4.column_dimensions["G"].width = 50
+    ws4.row_dimensions[2].height = 16
+
+    ri4 = 3
+    if not df_xl.empty:
+        df_d = df_xl.merge(dist_raw[["centro","peca","div_carga","div_volume","disponib"]].dropna(subset=["centro"]),
+                           on=["centro","peca"], suffixes=("_xl","_inp"), how="outer")
+        df_d = df_d.merge(tempo_raw[["centro","peca","t_ciclo","t_labor"]].dropna(subset=["centro"]),
+                          on=["centro","peca"], suffixes=("","_tempo"), how="outer")
+
+        for _, row in df_d.iterrows():
+            cen = row.get("centro",""); peca = row.get("peca","")
+            for campo, xl_col, inp_col, aba_txt, acao in [
+                ("Divisão de Carga",  "div_carga_xl",  "div_carga_inp",  "IMPUTDISTRIBUIÇÃO",
+                 "Corrija o valor na coluna 'Divisão Carga Entre Máquinas' da aba IMPUTDISTRIBUIÇÃO"),
+                ("Divisão de Volume", "div_volume_xl", "div_volume_inp", "IMPUTDISTRIBUIÇÃO",
+                 "Corrija o valor na coluna 'Divisão de Volume Entre Peças' da aba IMPUTDISTRIBUIÇÃO"),
+                ("Disponibilidade",   "disponib_xl",   "disponib_inp",   "IMPUTDISTRIBUIÇÃO",
+                 "Corrija o valor na coluna 'Disponibilidade' da aba IMPUTDISTRIBUIÇÃO"),
+            ]:
+                xl_v = row.get(xl_col); inp_v = row.get(inp_col)
+                if xl_v is None or inp_v is None: continue
+                try:
+                    if abs(float(xl_v) - float(inp_v)) > 0.001:
+                        bg4 = VERMELHO_CLARO if ri4 % 2 == 0 else PatternFill("solid", fgColor="FFEBEE")
+                        cell_style(ws4, ri4, 1, aba_txt, bg4, bold=True)
+                        cell_style(ws4, ri4, 2, cen, bg4)
+                        cell_style(ws4, ri4, 3, peca, bg4)
+                        cell_style(ws4, ri4, 4, campo, bg4)
+                        cell_style(ws4, ri4, 5, round(float(inp_v),4), bg4)
+                        cell_style(ws4, ri4, 6, round(float(xl_v),4), VERMELHO_ESCURO, False, "FFFFFF")
+                        cell_style(ws4, ri4, 7, acao, bg4, center=False)
+                        ws4.row_dimensions[ri4].height = 16
+                        ri4 += 1
+                except: pass
+
+    if ri4 == 3:
+        ws4.cell(3,1,"✅ Nenhuma divergência encontrada nos dados de input!").font = Font(bold=True, color="1F4D19")
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return output
+
+
+def gerar_diagnostico_mensal(file_bytes, res_app, tempo, dist, aplic, pmp, dias, horas_turno, thresholds):
+    """Gera Excel com uma aba por mês mostrando App vs Excel célula a célula."""
+    hA = horas_turno["A"]; hB = horas_turno["B"]
+    thr_A = thresholds["A"]/100; thr_B = thresholds["B"]/100; thr_C = thresholds["C"]/100
+
+    # ── Calcular ocupação por centro via inputs (uma vez para todos os meses) ──
+    df_all = (aplic.merge(pmp, on="modelo")
+                   .merge(tempo, on=["centro","peca"])
+                   .merge(dist,  on=["centro","peca"]))
+    df_all["indice_ciclo"] = (df_all.t_ciclo * df_all.div_carga * df_all.div_volume) / df_all.disponib
+    df_all["min_ciclo"]    = df_all.indice_ciclo * df_all.qtd
+    agg_all = df_all.groupby(["centro","mes"])["min_ciclo"].sum().reset_index()
+
+    # ── Ler dados do Excel de referência (iter_rows — rápido) ──
+    wb_ref = openpyxl.load_workbook(BytesIO(file_bytes), read_only=True, data_only=True)
+    abas_ref = wb_ref.sheetnames
+
+    dados_xl = {}
+    for mes, aba in MAPA.items():
+        if aba not in abas_ref: continue
+        ws_ref = wb_ref[aba]
+        centros_xl = {}
+        for row in ws_ref.iter_rows(min_row=69, max_row=88, min_col=23, max_col=29, values_only=True):
+            cen = row[0]
+            if not cen: continue
+            centros_xl[str(cen).strip()] = {
+                "ocup_A": safe_float(row[1]), "ocup_B": safe_float(row[2]),
+                "ativo_A": safe_int(row[4]), "ativo_B": safe_int(row[5]), "ativo_C": safe_int(row[6])
+            }
+        dados_xl[mes] = {
+            "centros": centros_xl,
+            "tot_A": safe_int(ws_ref.cell(95,27).value),
+            "tot_B": safe_int(ws_ref.cell(95,28).value),
+            "tot_C": safe_int(ws_ref.cell(95,29).value),
+            "total": safe_int(ws_ref.cell(96,27).value),
+            "labor": safe_float(ws_ref.cell(101,30).value),
+        }
+    wb_ref.close()
+
+    # ── Montar workbook de diagnóstico ──────────────────────────────────────
+    wb = openpyxl.Workbook()
+
+    # ── ABA CAPA ─────────────────────────────────────────────────────────────
+    ws_capa = wb.active
+    ws_capa.title = "CAPA"
+    ws_capa.column_dimensions["A"].width = 5
+    ws_capa.column_dimensions["B"].width = 45
+    ws_capa.column_dimensions["C"].width = 20
+    ws_capa.column_dimensions["D"].width = 20
+    ws_capa.column_dimensions["E"].width = 12
+
+    ws_capa.merge_cells("B1:E1")
+    ec(ws_capa,1,2,"DIAGNÓSTICO DE DIVERGÊNCIAS — USINAGEM",F_HDR_VERD,True,"FFFFFF",14,True)
+    ws_capa.row_dimensions[1].height = 32
+
+    ws_capa.merge_cells("B2:E2")
+    ec(ws_capa,2,2,"Comparação entre os dados de input e o Excel de referência, mês a mês",
+       F_CINZA_CLR,False,"555555",9,True,True)
+    ws_capa.row_dimensions[2].height = 18
+
+    # Legenda
+    ec(ws_capa,4,2,"LEGENDA:",None,True,"000000",10,False)
+    for r,(f,txt) in enumerate([
+        (F_VERM_CLR, "🔴 VERMELHO — App e Excel diferem → verifique o input"),
+        (F_AMAR,     "🟡 AMARELO — Diferença pequena (ocupação próxima do threshold)"),
+        (F_VERDE,    "🟢 VERDE — Sem divergência"),
+        (F_AZUL_CLR, "🔵 AZUL — Informativo (sem divergência de ativação)"),
+    ],5):
+        ws_capa.merge_cells(f"B{r}:E{r}")
+        ec(ws_capa,r,2,txt,f,False,"000000",9,False)
+        ws_capa.row_dimensions[r].height = 16
+
+    # Índice de meses
+    ec(ws_capa,10,2,"MÊS",F_HDR_CINZA,True,"FFFFFF",9); ec(ws_capa,10,3,"STATUS",F_HDR_CINZA,True,"FFFFFF",9)
+    ec(ws_capa,10,4,"Δ TOTAL (App−Excel)",F_HDR_CINZA,True,"FFFFFF",9); ec(ws_capa,10,5,"Nº DIV.",F_HDR_CINZA,True,"FFFFFF",9)
+    ws_capa.row_dimensions[10].height = 16
+
+    resumo_capa = []
+
+    # ── UMA ABA POR MÊS ─────────────────────────────────────────────────────
+    for mes in MESES:
+        r_app = res_app.get(mes)
+        d     = dias.get(mes, 0)
+        if not r_app or d == 0: continue
+
+        xl = dados_xl.get(mes, {})
+        centros_xl = xl.get("centros", {})
+
+        minA = d*hA*60; minB = d*hB*60
+
+        # Centros do app
+        agg_mes = agg_all[agg_all.mes == mes]
+        app_centros = {}
+        for _, row in agg_mes.iterrows():
+            mc = row.min_ciclo
+            oA = mc/minA if minA>0 else 0
+            oB = mc/minB if minB>0 else 0
+            app_centros[row.centro] = {
+                "ocup_A": oA, "ocup_B": oB,
+                "ativo_A": 1 if oA>thr_A else 0,
+                "ativo_B": 1 if oA>thr_B else 0,
+                "ativo_C": 1 if oB>thr_C else 0,
+            }
+
+        todos_centros = sorted(set(list(app_centros.keys()) + list(centros_xl.keys())))
+
+        # Criar aba do mês
+        nome_aba = mes[:10]
+        ws_mes = wb.create_sheet(nome_aba)
+        ws_mes.freeze_panes = "C3"
+
+        # Larguras
+        for ci,w in [(1,12),(2,12),(3,13),(4,13),(5,9),(6,13),(7,13),(8,9),(9,13),(10,13),(11,9),(12,28)]:
+            ws_mes.column_dimensions[get_column_letter(ci)].width = w
+
+        # Cabeçalho linha 1 — grupos
+        ws_mes.merge_cells("A1:B1"); ec(ws_mes,1,1,mes.upper(),F_HDR_VERD,True,"FFFFFF",11,True)
+        ws_mes.merge_cells("C1:E1"); ec(ws_mes,1,3,"TURNO A",F_HDR_VERD,True,"FFFFFF",10,True)
+        ws_mes.merge_cells("F1:H1"); ec(ws_mes,1,6,"TURNO B",F_HDR_AMAR,True,"1F4D19",10,True)
+        ws_mes.merge_cells("I1:K1"); ec(ws_mes,1,9,"TURNO C",F_HDR_CINZA,True,"FFFFFF",10,True)
+        ec(ws_mes,1,12,"",F_HDR_CINZA,True,"FFFFFF",10,True)
+        ws_mes.row_dimensions[1].height = 22
+
+        # Cabeçalho linha 2
+        for ci,txt,fill in [
+            (1,"Centro",F_HDR_CINZA),(2,"",F_HDR_CINZA),
+            (3,"Ocup. App",F_HDR_VERD),(4,"Ocup. Excel",F_HDR_VERD),(5,"Ativo?",F_HDR_VERD),
+            (6,"Ocup. App",F_HDR_AMAR),(7,"Ocup. Excel",F_HDR_AMAR),(8,"Ativo?",F_HDR_AMAR),
+            (9,"Ocup. App",F_HDR_CINZA),(10,"Ocup. Excel",F_HDR_CINZA),(11,"Ativo?",F_HDR_CINZA),
+            (12,"Diagnóstico",F_HDR_CINZA),
+        ]:
+            col_txt = "FFFFFF" if fill != F_HDR_AMAR else "1F4D19"
+            ec(ws_mes,2,ci,txt,fill,True,col_txt,8,True)
+        ws_mes.row_dimensions[2].height = 16
+
+        n_div_mes = 0
+        for ri, cen in enumerate(todos_centros, 3):
+            ap = app_centros.get(cen, {})
+            xl_c = centros_xl.get(cen, {})
+
+            oA_ap = ap.get("ocup_A",0); oA_xl = xl_c.get("ocup_A",0)
+            oB_ap = ap.get("ocup_B",0); oB_xl = xl_c.get("ocup_B",0)
+            aA_ap = ap.get("ativo_A",0); aA_xl = xl_c.get("ativo_A",0)
+            aB_ap = ap.get("ativo_B",0); aB_xl = xl_c.get("ativo_B",0)
+            aC_ap = ap.get("ativo_C",0); aC_xl = xl_c.get("ativo_C",0)
+
+            div_A = aA_ap != aA_xl
+            div_B = aB_ap != aB_xl
+            div_C = aC_ap != aC_xl
+            any_div = div_A or div_B or div_C
+            if any_div: n_div_mes += 1
+
+            bg_row = F_CINZA_CLR if ri%2==0 else F_BRANCO
+
+            # Diagnóstico textual
+            diags = []
+            if div_A: diags.append(f"Turno A: App={aA_ap} vs Excel={aA_xl} (ocup App={oA_ap:.0%} vs Excel={oA_xl:.0%})")
+            if div_B: diags.append(f"Turno B: App={aB_ap} vs Excel={aB_xl} (ocup App={oA_ap:.0%} vs Excel={oA_xl:.0%})")
+            if div_C: diags.append(f"Turno C: App={aC_ap} vs Excel={aC_xl} (ocup B App={oB_ap:.0%} vs Excel={oB_xl:.0%})")
+
+            delta_A = abs(oA_ap - oA_xl)
+            if any_div:
+                if delta_A > 0.15: diags.append("→ Causa provável: volume ou fator de distribuição diferente no IMPUTDISTRIBUIÇÃO")
+                else:              diags.append(f"→ Causa provável: ocupação próxima do threshold (thr_A>{thr_A:.0%}/thr_B>{thr_B:.0%})")
+
+            diag_txt = " | ".join(diags) if diags else "✅ Sem divergência"
+            comment_txt = "\n".join(diags) if diags else None
+
+            # Cor por célula
+            def cor_ocup(ap_v, xl_v, div):
+                if div: return F_VERM_CLR
+                if ap_v > 1.0 or xl_v > 1.0: return F_AMAR
+                return bg_row
+
+            def cor_ativo(a_ap, a_xl, div):
+                if div: return F_VERM_CLR
+                if a_ap: return F_VERDE
+                return bg_row
+
+            ec(ws_mes, ri, 1, cen, F_VERM_CLR if any_div else bg_row, any_div, "000000")
+            ec(ws_mes, ri, 2, "← VER" if any_div else "", F_VERM_CLR if any_div else bg_row, True, "C62828" if any_div else "000000", 8)
+
+            # Turno A
+            ec(ws_mes,ri,3,f"{oA_ap:.1%}", cor_ocup(oA_ap,oA_xl,div_A))
+            ec(ws_mes,ri,4,f"{oA_xl:.1%}", cor_ocup(oA_ap,oA_xl,div_A))
+            ec(ws_mes,ri,5,f"App={aA_ap}/XL={aA_xl}", cor_ativo(aA_ap,aA_xl,div_A), div_A)
+
+            # Turno B
+            ec(ws_mes,ri,6,f"{oA_ap:.1%}", cor_ocup(oA_ap,oA_xl,div_B))
+            ec(ws_mes,ri,7,f"{oA_xl:.1%}", cor_ocup(oA_ap,oA_xl,div_B))
+            ec(ws_mes,ri,8,f"App={aB_ap}/XL={aB_xl}", cor_ativo(aB_ap,aB_xl,div_B), div_B)
+
+            # Turno C
+            ec(ws_mes,ri,9,f"{oB_ap:.1%}", cor_ocup(oB_ap,oB_xl,div_C))
+            ec(ws_mes,ri,10,f"{oB_xl:.1%}", cor_ocup(oB_ap,oB_xl,div_C))
+            ec(ws_mes,ri,11,f"App={aC_ap}/XL={aC_xl}", cor_ativo(aC_ap,aC_xl,div_C), div_C)
+
+            # Diagnóstico
+            ec(ws_mes,ri,12,diag_txt,
+               F_VERM_CLR if any_div else bg_row,
+               any_div,"000000",8,False,True,comment_txt)
+            ws_mes.row_dimensions[ri].height = 15
+
+        # Linha de totais
+        ri_tot = len(todos_centros) + 4
+        xl_tot = dados_xl.get(mes,{})
+        app_tot = r_app["total"]; xl_tot_v = xl_tot.get("total",0)
+        delta_tot = app_tot - xl_tot_v
+
+        ws_mes.merge_cells(f"A{ri_tot}:B{ri_tot}")
+        ec(ws_mes,ri_tot,1,"TOTAL POR TURNO",F_HDR_VERD,True,"FFFFFF",9)
+        for ci,label,app_v,xl_v in [
+            (3,f"App={r_app['tot_A']}", r_app['tot_A'], xl_tot.get('tot_A',0)),
+            (4,f"Excel={xl_tot.get('tot_A',0)}", r_app['tot_A'], xl_tot.get('tot_A',0)),
+            (6,f"App={r_app['tot_B']}", r_app['tot_B'], xl_tot.get('tot_B',0)),
+            (7,f"Excel={xl_tot.get('tot_B',0)}", r_app['tot_B'], xl_tot.get('tot_B',0)),
+            (9,f"App={r_app['tot_C']}", r_app['tot_C'], xl_tot.get('tot_C',0)),
+            (10,f"Excel={xl_tot.get('tot_C',0)}", r_app['tot_C'], xl_tot.get('tot_C',0)),
+        ]:
+            div = abs(int(app_v or 0) - int(xl_v or 0)) > 0
+            ec(ws_mes,ri_tot,ci,label,F_VERM_CLR if div else F_VERDE_MED,True,"000000",9)
+
+        ws_mes.merge_cells(f"A{ri_tot+1}:B{ri_tot+1}")
+        ec(ws_mes,ri_tot+1,1,"TOTAL FUNCIONÁRIOS",F_HDR_VERD,True,"FFFFFF",9)
+        div_tot = delta_tot != 0
+        ec(ws_mes,ri_tot+1,3,f"App={app_tot}", F_VERM_CLR if div_tot else F_VERDE_MED,True,"000000",9)
+        ec(ws_mes,ri_tot+1,4,f"Excel={xl_tot_v}", F_VERM_CLR if div_tot else F_VERDE_MED,True,"000000",9)
+        ec(ws_mes,ri_tot+1,5,f"Δ={delta_tot:+d}", F_VERM_CLR if div_tot else F_VERDE_MED,True,"000000",9)
+
+        lab_app = r_app["prod_labor_tot"]; lab_xl = xl_tot.get("labor",0)
+        ec(ws_mes,ri_tot+2,3,f"Labor App={lab_app:.1%}",F_AZUL_CLR,True,"000000",9)
+        ec(ws_mes,ri_tot+2,4,f"Labor Excel={lab_xl:.1%}",F_AZUL_CLR,True,"000000",9)
+        delta_lab = lab_app - lab_xl
+        ec(ws_mes,ri_tot+2,5,f"Δ={delta_lab:+.1%}",F_AMAR if abs(delta_lab)>0.02 else F_AZUL_CLR,True,"000000",9)
+        ws_mes.row_dimensions[ri_tot].height=16; ws_mes.row_dimensions[ri_tot+1].height=16; ws_mes.row_dimensions[ri_tot+2].height=16
+
+        # Resumo para capa
+        status = "✅ Igual" if n_div_mes==0 else ("🟡 Pequena" if n_div_mes<=2 else "🔴 Divergente")
+        resumo_capa.append((mes, status, f"{delta_tot:+d}", n_div_mes))
+
+    # Preencher capa com índice
+    for ri, (mes, status, delta, n_div) in enumerate(resumo_capa, 11):
+        fill = F_VERDE if "✅" in status else (F_AMAR if "🟡" in status else F_VERM_CLR)
+        ec(ws_capa,ri,2,mes,fill,False,"000000",9,False)
+        ec(ws_capa,ri,3,status,fill,True,"000000",9)
+        ec(ws_capa,ri,4,delta,fill,True,"000000",9)
+        ec(ws_capa,ri,5,n_div,fill,True,"000000",9)
+        ws_capa.row_dimensions[ri].height=15
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return output
+
+def gerar_output_layout(file_bytes, res_app, tempo, dist, aplic, pmp, dias, horas_turno, thresholds, suporte_cfg):
+    """Gera Excel no mesmo layout do original, com células em vermelho onde diverge."""
+
+    hA=horas_turno["A"]; hB=horas_turno["B"]; hC=horas_turno["C"]
+    thr_A=thresholds["A"]/100; thr_B=thresholds["B"]/100; thr_C=thresholds["C"]/100
+
+    # Calcular min_ciclo por centro×mes
+    df_all = (aplic.merge(pmp, on="modelo")
+                   .merge(tempo, on=["centro","peca"])
+                   .merge(dist,  on=["centro","peca"]))
+    df_all["indice_ciclo"] = (df_all.t_ciclo * df_all.div_carga * df_all.div_volume) / df_all.disponib
+    df_all["min_ciclo"]    = df_all.indice_ciclo * df_all.qtd
+    df_all["min_labor"]    = df_all.t_labor * df_all.div_carga * df_all.qtd
+    agg_all = df_all.groupby(["centro","mes"])[["min_ciclo","min_labor"]].sum().reset_index()
+
+    # Ler Excel de referência (rápido — só totais e ocupação por centro)
+    wb_ref = openpyxl.load_workbook(BytesIO(file_bytes), read_only=True, data_only=True)
+    abas_ref = wb_ref.sheetnames
+    dados_xl = {}
+    for mes, aba in MAPA.items():
+        if aba not in abas_ref: continue
+        ws_ref = wb_ref[aba]
+        centros_xl = {}
+        for row in ws_ref.iter_rows(min_row=69, max_row=88, min_col=23, max_col=29, values_only=True):
+            cen = row[0]
+            if not cen: continue
+            centros_xl[str(cen).strip()] = {
+                "ocup_A": safe_float(row[1]), "ocup_B": safe_float(row[2]),
+                "ativo_A": safe_int(row[4]), "ativo_B": safe_int(row[5]), "ativo_C": safe_int(row[6])
+            }
+        dados_xl[mes] = {
+            "centros": centros_xl,
+            "tot_A": safe_int(ws_ref.cell(95,27).value),
+            "tot_B": safe_int(ws_ref.cell(95,28).value),
+            "tot_C": safe_int(ws_ref.cell(95,29).value),
+            "total": safe_int(ws_ref.cell(96,27).value),
+            "labor_tot": safe_float(ws_ref.cell(101,30).value),
+            "ciclo_op":  safe_float(ws_ref.cell(98,30).value),
+            "ciclo_tot": safe_float(ws_ref.cell(99,30).value),
+            "labor_op":  safe_float(ws_ref.cell(100,30).value),
+        }
+    wb_ref.close()
+
+    wb = openpyxl.Workbook()
+    primeira = True
+
+    for mes in MESES:
+        r_app = res_app.get(mes)
+        d     = dias.get(mes, 0)
+        if not r_app or d == 0: continue
+
+        xl = dados_xl.get(mes, {})
+        centros_xl = xl.get("centros", {})
+
+        minA=d*hA*60; minB=d*hB*60; minC=d*hC*60
+        agg_mes = agg_all[agg_all.mes==mes].copy()
+
+        # Calcular por centro
+        app_centros = {}
+        for _, row in agg_mes.iterrows():
+            mc=row.min_ciclo; ml=row.min_labor
+            oA=mc/minA if minA>0 else 0
+            oB=mc/minB if minB>0 else 0
+            oC=mc/minC if minC>0 else 0
+            aA=1 if oA>thr_A else 0
+            aB=1 if oA>thr_B else 0
+            aC=1 if oB>thr_C else 0
+            app_centros[row.centro] = {
+                "ocup_A":oA,"ocup_B":oB,"ocup_C":oC,
+                "ativo_A":aA,"ativo_B":aB,"ativo_C":aC,
+                "hA":d*hA*aA,"hB":d*hB*aB,"hC":d*hC*aC,
+                "min_ciclo":mc,"min_labor":ml
+            }
+
+        # Ordenar centros igual ao Excel (pela ordem que aparecem no agg)
+        ordem_centros = list(agg_mes.centro)
+
+        # ── Criar aba ──────────────────────────────────────────────
+        if primeira:
+            ws = wb.active; ws.title = mes[:10]; primeira = False
+        else:
+            ws = wb.create_sheet(mes[:10])
+
+        # Larguras das colunas (igual ao Excel original)
+        col_widths = {1:5,2:9,3:16,4:5,5:5,6:5,
+                      7:9,8:9,9:9,10:9,11:9,12:9,
+                      13:9,14:9,15:9,16:5}
+        for c,w in col_widths.items():
+            ws.column_dimensions[get_column_letter(c)].width = w
+
+        # ── LINHA 1 — Cabeçalho "DADOS AUTOMÁTICOS" ───────────────
+        ws.merge_cells("A1:P1")
+        ec(ws,1,1,"DADOS AUTOMÁTICOS", C_CINZA, True, "000000", 10, True)
+        ws.row_dimensions[1].height = 16
+
+        # ── LINHA 2 — Período e horas ─────────────────────────────
+        ec(ws,2,1,"PERÍODO:", C_CINZA, True, "000000", 8, False)
+        ws.merge_cells("B2:C2")
+        ec(ws,2,2,mes, C_BRANCO, True, "FF0000", 9, False)
+        ec(ws,2,5,"DATA DE REVISÃO:", C_CINZA, True, "000000", 8, False)
+        ws.merge_cells("G2:H2")
+        ec(ws,2,7,datetime.now().strftime("%d/%m/%Y"), C_BRANCO, True, "FF0000", 9)
+        ec(ws,2,10,"HORAS POR TURNO DE TRABALHO", C_CINZA, True, "000000", 8, True)
+        ws.row_dimensions[2].height = 14
+
+        # ── LINHA 3 — Valores das horas ───────────────────────────
+        for ci,h in [(10,hA),(13,hB),(16,hC)]:
+            ec(ws,3,ci,h,C_CINZA,True,"000000",8)
+        ws.row_dimensions[3].height = 14
+
+        # ── LINHA 4 — Cabeçalho dos grupos ───────────────────────
+        for ci, txt, fill in [
+            (1,"",C_CINZA),(2,"",C_CINZA),(3,"",C_CINZA),
+            (4,"TURNO A",C_VERDE),(5,"TURNO B",C_AMAR),(6,"TURNO C",C_AZUL),
+            (7,"TURNO A",C_VERDE),(8,"TURNO B",C_AMAR),(9,"TURNO C",C_AZUL),
+            (10,"TURNO A",C_VERDE),(11,"TURNO B",C_AMAR),(12,"TURNO C",C_AZUL),
+        ]:
+            ec(ws,4,ci,txt,fill,True,"000000",8)
+        ws.row_dimensions[4].height = 14
+
+        # ── LINHA 5 — Sub-cabeçalho ───────────────────────────────
+        ec(ws,5,1,"Centro",C_PRETO,True,"FFFFFF",8)
+        ec(ws,5,2,"",C_PRETO,True,"FFFFFF",8)
+        ec(ws,5,3,"",C_PRETO,True,"FFFFFF",8)
+        for ci,txt in [(4,"% Ocup"),(5,"% Ocup"),(6,"% Ocup"),
+                        (7,"Ativo"),(8,"Ativo"),(9,"Ativo"),
+                        (10,"Horas"),(11,"Horas"),(12,"Horas")]:
+            ec(ws,5,ci,txt,C_PRETO,True,"FFFFFF",8)
+        ws.row_dimensions[5].height = 14
+
+        # ── DADOS por centro ───────────────────────────────────────
+        ri = 6
+        for cen in ordem_centros:
+            ap = app_centros.get(cen, {})
+            xl_c = centros_xl.get(cen, {})
+
+            oA_ap=ap.get("ocup_A",0); oA_xl=xl_c.get("ocup_A",0)
+            oB_ap=ap.get("ocup_B",0); oB_xl=xl_c.get("ocup_B",0)
+            oC_ap=ap.get("ocup_C",0)
+            aA_ap=ap.get("ativo_A",0); aA_xl=xl_c.get("ativo_A",0)
+            aB_ap=ap.get("ativo_B",0); aB_xl=xl_c.get("ativo_B",0)
+            aC_ap=ap.get("ativo_C",0); aC_xl=xl_c.get("ativo_C",0)
+            hA_ap=ap.get("hA",0); hB_ap=ap.get("hB",0); hC_ap=ap.get("hC",0)
+
+            div_A = aA_ap != aA_xl
+            div_B = aB_ap != aB_xl
+            div_C = aC_ap != aC_xl
+
+            # Cor do nome do centro
+            cen_fill = C_VERM_DIV if (div_A or div_B or div_C) else C_BRANCO
+            cen_color = "FFFFFF" if (div_A or div_B or div_C) else "000000"
+
+            ec(ws,ri,1,cen,cen_fill,True,cen_color,8,False)
+            ec(ws,ri,2,"",C_BRANCO); ec(ws,ri,3,"",C_BRANCO)
+
+            # % Ocupação — cor igual ao Excel + vermelho se diverge
+            def fill_ocup(pct, div):
+                if div: return C_VERM_DIV
+                return cor_ocup(pct)
+
+            ec(ws,ri,4,f"{oA_ap:.0%}", fill_ocup(oA_ap, div_A and abs(oA_ap-oA_xl)>0.01))
+            ec(ws,ri,5,f"{oB_ap:.0%}", fill_ocup(oB_ap, div_B and abs(oB_ap-oB_xl)>0.01))
+            ec(ws,ri,6,f"{oC_ap:.0%}", cor_ocup(oC_ap))
+
+            # Ativo — vermelho se diverge, verde/amarelo/azul se igual
+            ec(ws,ri,7,aA_ap, C_VERM_DIV if div_A else (C_VERDE if aA_ap else C_BRANCO), True)
+            ec(ws,ri,8,aB_ap, C_VERM_DIV if div_B else (C_AMAR  if aB_ap else C_BRANCO), True)
+            ec(ws,ri,9,aC_ap, C_VERM_DIV if div_C else (C_AZUL  if aC_ap else C_BRANCO), True)
+
+            # Horas
+            ec(ws,ri,10,round(hA_ap,2) if hA_ap else 0, C_VERDE if hA_ap else C_BRANCO)
+            ec(ws,ri,11,round(hB_ap,2) if hB_ap else 0, C_AMAR  if hB_ap else C_BRANCO)
+            ec(ws,ri,12,round(hC_ap,2) if hC_ap else 0, C_AZUL  if hC_ap else C_BRANCO)
+
+            ws.row_dimensions[ri].height = 13
+            ri += 1
+
+        # ── TOTAIS DE OPERADORES ───────────────────────────────────
+        ri += 1  # linha em branco
+        xl_tot = dados_xl.get(mes, {})
+
+        def cel_tot(row, col, app_v, xl_v, fill_base):
+            div = int(app_v) != safe_int(xl_v)
+            f = C_VERM_DIV if div else fill_base
+            ec(ws, row, col, app_v, f, True, "000000", 8)
+            if div:
+                # Adicionar valor do Excel ao lado
+                ec(ws, row, col+3, f"(Excel:{safe_int(xl_v)})", C_VERM_DIV, False, "FFFFFF", 7)
+
+        ws.merge_cells(f"A{ri}:C{ri}")
+        ec(ws,ri,1,"TOTAL DE OPERADORES",C_ROSA,True,"000000",8,False)
+        cel_tot(ri,7, r_app["op_A"], xl_tot.get("tot_A",0)-6, C_VERDE)  # descontando suporte
+        cel_tot(ri,8, r_app["op_B"], xl_tot.get("tot_B",0)-4, C_AMAR)
+        cel_tot(ri,9, r_app["op_C"], xl_tot.get("tot_C",0)-1, C_AZUL)
+        ws.row_dimensions[ri].height = 14; ri += 1
+
+        # Suportes
+        sup = r_app["suporte"]
+        for nome, key in [("LAVADORA E INSPEÇÃO","lavadora"),("GRAVAÇÃO E ESTANQUIEDADE","gravacao"),
+                          ("PRESET","preset"),("CORINGA","coringa"),("FACILITADOR","facilitador")]:
+            ws.merge_cells(f"A{ri}:C{ri}")
+            ec(ws,ri,1,nome,C_BRANCO,False,"000000",8,False)
+            s=sup[key]
+            ec(ws,ri,7,s["A"],C_VERDE if s["A"] else C_BRANCO,True)
+            ec(ws,ri,8,s["B"],C_AMAR  if s["B"] else C_BRANCO,True)
+            ec(ws,ri,9,s["C"],C_AZUL  if s["C"] else C_BRANCO,True)
+            ec(ws,ri,10,round(s["A"]*d*hA,2) if s["A"] else 0, C_VERDE if s["A"] else C_BRANCO)
+            ec(ws,ri,11,round(s["B"]*d*hB,2) if s["B"] else 0, C_AMAR  if s["B"] else C_BRANCO)
+            ec(ws,ri,12,round(s["C"]*d*hC,2) if s["C"] else 0, C_AZUL  if s["C"] else C_BRANCO)
+            ws.row_dimensions[ri].height = 13; ri += 1
+
+        # TOTAL POR TURNO
+        ws.merge_cells(f"A{ri}:C{ri}")
+        ec(ws,ri,1,"TOTAL POR TURNO",C_ROSA,True,"000000",8,False)
+        for col, app_v, xl_v, fill in [
+            (7, r_app["tot_A"], xl_tot.get("tot_A",0), C_VERDE),
+            (8, r_app["tot_B"], xl_tot.get("tot_B",0), C_AMAR),
+            (9, r_app["tot_C"], xl_tot.get("tot_C",0), C_AZUL),
+            (10, round(r_app["tot_A"]*d*hA,2), 0, C_VERDE),
+            (11, round(r_app["tot_B"]*d*hB,2), 0, C_AMAR),
+            (12, round(r_app["tot_C"]*d*hC,2), 0, C_AZUL),
+        ]:
+            div = xl_v and (int(app_v) != int(xl_v))
+            ec(ws,ri,col,app_v, C_VERM_DIV if div else fill, True, "FFFFFF" if div else "000000", 8)
+        ws.row_dimensions[ri].height = 14; ri += 1
+
+        # TOTAL FUNCIONÁRIOS
+        ws.merge_cells(f"A{ri}:C{ri}")
+        ec(ws,ri,1,"TOTAL FUNCIONÁRIOS",C_ROSA,True,"000000",8,False)
+        div_tot = r_app["total"] != xl_tot.get("total",0)
+        ec(ws,ri,7,r_app["total"], C_VERM_DIV if div_tot else C_ROSA, True,
+           "FFFFFF" if div_tot else "000000", 9)
+        if div_tot:
+            ec(ws,ri,8,f"Excel: {xl_tot.get('total',0)}", C_VERM_DIV, True, "FFFFFF", 8)
+        ws.row_dimensions[ri].height = 16; ri += 2
+
+        # ── PRODUTIVIDADES ─────────────────────────────────────────
+        prods = [
+            ("PRODUTIVIDADE POR TEMPO DE CICLO OPERACIONAL", r_app["prod_ciclo_op"],  xl_tot.get("ciclo_op",0),  False),
+            ("PRODUTIVIDADE POR TEMPO DE CICLO TOTAL",       r_app["prod_ciclo_tot"], xl_tot.get("ciclo_tot",0), False),
+            ("PRODUTIVIDADE POR TEMPO DE LABOR OPERACIONAL", r_app["prod_labor_op"],  xl_tot.get("labor_op",0),  False),
+            ("PRODUTIVIDADE POR TEMPO DE LABOR TOTAL ★",     r_app["prod_labor_tot"], xl_tot.get("labor_tot",0), True),
+        ]
+        for nome, app_v, xl_v, destaque in prods:
+            ws.merge_cells(f"A{ri}:K{ri}")
+            fill_p = C_AMAR if destaque else C_BRANCO
+            ec(ws,ri,1,nome, fill_p, destaque, "000000", 8, False)
+            div_p = xl_v and abs(app_v - xl_v) > 0.005
+            ec(ws,ri,12,f"{app_v:.1%}", C_VERM_DIV if div_p else fill_p, True,
+               "FFFFFF" if div_p else "000000", 8)
+            if div_p:
+                ec(ws,ri,13,f"(Excel:{xl_v:.1%})", C_VERM_DIV, True, "FFFFFF", 7)
+            ws.row_dimensions[ri].height = 14; ri += 1
+
+        # Nota de divergências
+        n_div = sum(1 for cen in ordem_centros
+                    for a,b in [(app_centros.get(cen,{}).get("ativo_A",0), centros_xl.get(cen,{}).get("ativo_A",0)),
+                                (app_centros.get(cen,{}).get("ativo_B",0), centros_xl.get(cen,{}).get("ativo_B",0)),
+                                (app_centros.get(cen,{}).get("ativo_C",0), centros_xl.get(cen,{}).get("ativo_C",0))]
+                    if a != b)
+        if n_div > 0:
+            ws.merge_cells(f"A{ri}:P{ri}")
+            ec(ws,ri,1, f"⚠️ {n_div} divergência(s) em vermelho — verifique IMPUTDISTRIBUIÇÃO ou IMPUTAPLICAÇÃO",
+               C_VERM_DIV, True, "FFFFFF", 8, False)
+            ws.row_dimensions[ri].height = 14
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return output
 
 # ─────────────────────────────────────────
 # COMPARAÇÃO COM EXCEL REFERÊNCIA
@@ -1082,8 +1891,9 @@ def grafico_cenarios(cenarios_dict):
         title=dict(text="MÃO-DE-OBRA POR TURNO",font=dict(size=14,color=JD_VERDE_ESC)),
         yaxis_title="Nº Funcionários",
         yaxis2=dict(title="Labor Total (%)",tickformat=".0f",ticksuffix="%",range=[0,100]),
-        legend=dict(orientation="h",y=-0.3,font=dict(size=10)),
-        height=440,plot_bgcolor="white",paper_bgcolor="white",
+        legend=dict(orientation="h",y=-0.35,font=dict(size=10,color="#FAFAFA"),
+                    bgcolor="rgba(30,30,30,0.8)",bordercolor="#555",borderwidth=1),
+        height=460,plot_bgcolor="white",paper_bgcolor="rgba(0,0,0,0)",
         xaxis=dict(showgrid=False),yaxis=dict(showgrid=True,gridcolor="#E8E8E8"))
     return fig
 
@@ -1204,51 +2014,104 @@ def exportar(resultados):
 # ─────────────────────────────────────────
 def show_memoria(r, mes, df_intermediario, agg, horas_turno, thresholds):
     st.markdown(f'<div class="jd-section">Memória de cálculo — {mes}</div>', unsafe_allow_html=True)
+    st.caption("Cada passo abaixo mostra exatamente o que o app fez para chegar no resultado final.")
 
-    steps = [
-        ("1", "Inputs utilizados",
-         f"Dias trabalhados: **{r['dias']}**  |  Turno A: **{r['hA']}h**  |  Turno B: **{r['hB']}h**  |  Turno C: **{r['hC']}h**\n\n"
-         f"Min. disponíveis: A = **{r['minA']:.0f} min** ({r['dias']}×{r['hA']}×60)  |  B = **{r['minB']:.0f} min**  |  C = **{r['minC']:.0f} min**"),
-        ("2", "Fórmula do índice de ciclo",
-         None),
-        ("3", "Fórmula dos minutos necessários por linha",
-         None),
-        ("4", "Agrupamento por centro",
-         None),
-        ("5", "Regras de ativação de turno",
-         f"Turno A ativo se ocup_A > **{thresholds['A']}%**\n\n"
-         f"Turno B ativo se ocup_A > **{thresholds['B']}%** (A sobrecarregado)\n\n"
-         f"Turno C ativo se ocup_B > **{thresholds['C']}%** (B sobrecarregado)"),
-        ("6", "Output final",
-         f"Operadores CEN: A={r['op_A']} · B={r['op_B']} · C={r['op_C']}\n\n"
-         f"Total funcionários: **{r['total']}** (CEN + suportes)\n\n"
-         f"Labor Total: **{r['prod_labor_tot']:.1%}**  ({r['h_labor']:.1f}h labor ÷ {r['h_todos']:.1f}h totais)"),
-    ]
+    sup = r["suporte"]
+    d   = r["dias"]
+    hA, hB, hC = r["hA"], r["hB"], r["hC"]
 
-    for num, titulo, conteudo in steps:
-        st.markdown(f'<div class="mem-step"><span class="step-num">{num}</span> <b>{titulo}</b></div>', unsafe_allow_html=True)
-        if num == "2":
-            st.markdown('<div class="formula-box">indice_ciclo = (t_ciclo × div_carga × div_volume) ÷ disponib</div>', unsafe_allow_html=True)
-        elif num == "3":
-            st.markdown('<div class="formula-box">min_ciclo = indice_ciclo × qtd_pecas_mes<br>min_labor = t_labor × div_carga × qtd_pecas_mes</div>', unsafe_allow_html=True)
-        elif num == "4":
-            st.markdown('<div class="formula-box">GROUP BY centro + mes → SUM(min_ciclo), SUM(min_labor)<br>ocup_A = total_min_ciclo ÷ min_disp_A</div>', unsafe_allow_html=True)
-        elif conteudo:
-            st.markdown(conteudo)
+    # Passo 1
+    st.markdown('<div class="mem-step"><span class="step-num">1</span> <b>Inputs utilizados</b></div>', unsafe_allow_html=True)
+    st.markdown(
+        f"**Dias trabalhados:** {d}  |  **Turno A:** {hA}h acumulado  |  **Turno B:** {hB}h acumulado  |  **Turno C:** {hC}h acumulado\n\n"
+        f"**Minutos disponíveis por turno** (= dias × horas × 60):\n\n"
+        f"- Turno A: **{r['minA']:.0f} min** ({d} × {hA} × 60)\n"
+        f"- Turno B: **{r['minB']:.0f} min** ({d} × {hB} × 60)\n"
+        f"- Turno C: **{r['minC']:.0f} min** ({d} × {hC} × 60)")
 
-    # Tabela intermediária por centro
-    st.markdown('<div class="jd-sub">Tabela intermediária — centro × ocupação × ativação</div>', unsafe_allow_html=True)
+    # Passo 2
+    st.markdown('<div class="mem-step"><span class="step-num">2</span> <b>Cálculo do índice de ciclo por linha</b></div>', unsafe_allow_html=True)
+    st.markdown('<div class="formula-box">indice_ciclo = (t_ciclo × div_carga × div_volume) ÷ disponibilidade<br><br>Representa: quantos minutos de máquina são necessários para produzir 1 peça neste centro.</div>', unsafe_allow_html=True)
+
+    # Passo 3
+    st.markdown('<div class="mem-step"><span class="step-num">3</span> <b>Minutos necessários por linha (modelo × centro × peça)</b></div>', unsafe_allow_html=True)
+    st.markdown('<div class="formula-box">min_ciclo = indice_ciclo × qtd_pecas_no_mes<br>min_labor = t_labor × div_carga × qtd_pecas_no_mes<br><br>Aplicado para cada combinação de modelo + centro + peça presente na IMPUTAPLICAÇÃO.</div>', unsafe_allow_html=True)
+
+    # Passo 4
+    st.markdown('<div class="mem-step"><span class="step-num">4</span> <b>Agrupamento por centro</b></div>', unsafe_allow_html=True)
+    st.markdown('<div class="formula-box">SOMA de min_ciclo e min_labor de todas as linhas do mesmo centro<br><br>ocup_A = total_min_ciclo ÷ min_disp_A<br>ocup_B = total_min_ciclo ÷ min_disp_B<br>ocup_C = total_min_ciclo ÷ min_disp_C</div>', unsafe_allow_html=True)
+
+    # Passo 5
+    st.markdown('<div class="mem-step"><span class="step-num">5</span> <b>Regras de ativação de turno por centro</b></div>', unsafe_allow_html=True)
+    st.markdown(
+        f"- Turno A abre se **ocup_A > {thresholds['A']}%** (centro precisa de pelo menos {thresholds['A']}% da capacidade)\n"
+        f"- Turno B abre se **ocup_A > {thresholds['B']}%** (Turno A sozinho não aguenta — precisa de reforço)\n"
+        f"- Turno C abre se **ocup_B > {thresholds['C']}%** (mesmo com Turno A+B não é suficiente)")
+    st.markdown(f"**Resultado para {mes}:** CEN ativos → A: **{r['op_A']}** centros · B: **{r['op_B']}** centros · C: **{r['op_C']}** centros")
+
+    # Passo 6 — Suporte
+    st.markdown('<div class="mem-step"><span class="step-num">6</span> <b>Adição das funções de suporte</b></div>', unsafe_allow_html=True)
+    st.markdown("As funções de suporte são adicionadas **somente se o turno tiver pelo menos 1 operador CEN ativo.** Caso contrário = 0.")
+    sup_data = []
+    for nome, key in [("Lavadora e Inspeção","lavadora"),("Gravação e Estanqueidade","gravacao"),
+                      ("Preset","preset"),("Coringa","coringa"),("Facilitador","facilitador")]:
+        s = sup[key]
+        sup_data.append({"Função": nome, "Turno A": s["A"], "Turno B": s["B"], "Turno C": s["C"]})
+    st.dataframe(pd.DataFrame(sup_data), use_container_width=True, hide_index=True)
+
+    # Passo 7 — Totais por turno
+    st.markdown('<div class="mem-step"><span class="step-num">7</span> <b>Total por turno</b></div>', unsafe_allow_html=True)
+    st.markdown('<div class="formula-box">Total Turno X = Operadores CEN ativos + Lavadora + Gravação + Preset + Coringa + Facilitador</div>', unsafe_allow_html=True)
+    tot_data = {
+        "": ["Operadores CEN", "Lavadora", "Gravação", "Preset", "Coringa", "Facilitador", "**TOTAL**"],
+        "Turno A": [r["op_A"], sup["lavadora"]["A"], sup["gravacao"]["A"], sup["preset"]["A"],
+                    sup["coringa"]["A"], sup["facilitador"]["A"], f"**{r['tot_A']}**"],
+        "Turno B": [r["op_B"], sup["lavadora"]["B"], sup["gravacao"]["B"], sup["preset"]["B"],
+                    sup["coringa"]["B"], sup["facilitador"]["B"], f"**{r['tot_B']}**"],
+        "Turno C": [r["op_C"], sup["lavadora"]["C"], sup["gravacao"]["C"], sup["preset"]["C"],
+                    sup["coringa"]["C"], sup["facilitador"]["C"], f"**{r['tot_C']}**"],
+    }
+    st.dataframe(pd.DataFrame(tot_data), use_container_width=True, hide_index=True)
+    st.markdown(f"**Total geral de funcionários: {r['total']}** (soma dos 3 turnos)")
+
+    # Passo 8 — Produtividades
+    st.markdown('<div class="mem-step"><span class="step-num">8</span> <b>Cálculo das produtividades</b></div>', unsafe_allow_html=True)
+    h_todos = r["h_todos"]; h_ativos = r["h_ativos"]
+    h_ciclo = r["h_ciclo"]; h_labor = r["h_labor"]
+    st.markdown('<div class="formula-box">'
+        'Horas CEN ativos = Σ (centros ativos × dias × horas do turno)<br>'
+        'Horas totais = Σ (todos os func. × dias × horas do turno)<br><br>'
+        'Ciclo Operacional = horas_ciclo ÷ horas_CEN_ativos<br>'
+        'Ciclo Total       = horas_ciclo ÷ horas_todos<br>'
+        'Labor Operacional = horas_labor ÷ horas_CEN_ativos<br>'
+        'Labor Total ★     = horas_labor ÷ horas_todos  ← principal indicador'
+        '</div>', unsafe_allow_html=True)
+    prod_data = {
+        "Indicador": ["Ciclo Operacional","Ciclo Total","Labor Operacional","⭐ Labor Total"],
+        "Numerador": [f"{h_ciclo:.1f}h ciclo"]*2 + [f"{h_labor:.1f}h labor"]*2,
+        "Denominador": [f"{h_ativos:.1f}h CEN ativos", f"{h_todos:.1f}h todos",
+                        f"{h_ativos:.1f}h CEN ativos", f"{h_todos:.1f}h todos"],
+        "Resultado": [f"{r['prod_ciclo_op']:.1%}", f"{r['prod_ciclo_tot']:.1%}",
+                      f"{r['prod_labor_op']:.1%}", f"{r['prod_labor_tot']:.1%}"],
+    }
+    st.dataframe(pd.DataFrame(prod_data), use_container_width=True, hide_index=True)
+
+    # Tabela intermediária
+    st.markdown('<div class="jd-sub">Tabela detalhada por centro — resultado do passo 4 e 5</div>', unsafe_allow_html=True)
     df_show = r["centros"][["centro","min_ciclo_total","min_labor_total",
                               "min_disp_A","ocup_A","ocup_B","ocup_C",
                               "ativo_A","ativo_B","ativo_C"]].copy()
-    df_show["ocup_A"] = df_show.ocup_A.map(lambda x: f"{x:.1%}")
-    df_show["ocup_B"] = df_show.ocup_B.map(lambda x: f"{x:.1%}")
-    df_show["ocup_C"] = df_show.ocup_C.map(lambda x: f"{x:.1%}")
-    df_show["min_ciclo_total"] = df_show.min_ciclo_total.round(1)
-    df_show["min_labor_total"] = df_show.min_labor_total.round(1)
+    df_show = df_show.rename(columns={
+        "min_ciclo_total":"Min. Ciclo Total","min_labor_total":"Min. Labor Total",
+        "min_disp_A":"Min. Disp. A","ocup_A":"Ocup. A","ocup_B":"Ocup. B","ocup_C":"Ocup. C",
+        "ativo_A":"Ativo A","ativo_B":"Ativo B","ativo_C":"Ativo C"})
+    df_show["Ocup. A"] = df_show["Ocup. A"].map(lambda x: f"{x:.1%}")
+    df_show["Ocup. B"] = df_show["Ocup. B"].map(lambda x: f"{x:.1%}")
+    df_show["Ocup. C"] = df_show["Ocup. C"].map(lambda x: f"{x:.1%}")
+    df_show["Min. Ciclo Total"] = df_show["Min. Ciclo Total"].round(1)
+    df_show["Min. Labor Total"] = df_show["Min. Labor Total"].round(1)
     st.dataframe(df_show, use_container_width=True, hide_index=True)
 
-    # Download da base intermediária
     buf = BytesIO()
     df_intermediario[df_intermediario.mes==mes].to_excel(buf, index=False)
     buf.seek(0)
@@ -1666,7 +2529,12 @@ está diferente do que foi usado para gerar aquele Excel. O diagnóstico abaixo 
             for _, r in df.iterrows():
                 def cell(app, excel, delta):
                     icon = cor_delta(delta)
-                    return f"{icon} App={app} / Excel={excel} ({delta})"
+                    try:
+                        d_num = int(str(delta).replace("+",""))
+                        if d_num == 0: return f"✅ {app}"
+                        return f"{icon} App={app}  |  Excel={excel}  ({delta})"
+                    except:
+                        return f"{icon} App={app} / Excel={excel} ({delta})"
                 rows.append({
                     "Mês":     r["Mês"],
                     "Status":  r["Status"],
@@ -1817,6 +2685,56 @@ with tab_diag:
 # ══════════════════════════════════════════
 with tab_exp:
     st.markdown('<div class="jd-section">Exportação</div>', unsafe_allow_html=True)
+
+    # Diagnóstico em destaque
+    st.markdown('<div class="jd-sub">🔴 Diagnóstico de divergências</div>', unsafe_allow_html=True)
+    st.markdown("""
+Gera um Excel com **uma aba por mês** mostrando, centro a centro, onde o App diverge do Excel de referência.
+Células em **vermelho** = divergência de ativação de turno. Inclui a ocupação calculada vs Excel e a causa provável.
+    """)
+
+    col_d1, col_d2 = st.columns(2)
+    with col_d1:
+        with st.spinner("Gerando diagnóstico por mês... (~6s)"):
+            diag_mensal = gerar_diagnostico_mensal(
+                file_bytes, res_base, tempo, dist, aplic, pmp, dias,
+                horas_turno, thresholds)
+        st.download_button(
+            "🔴 Baixar diagnóstico por mês (recomendado)",
+            data=diag_mensal,
+            file_name="diagnostico_por_mes.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary"
+        )
+    with col_d2:
+        with st.spinner("Gerando diagnóstico de inputs..."):
+            diag_inp = gerar_excel_diagnostico(file_bytes)
+        st.download_button(
+            "🔍 Baixar diagnóstico de inputs (IMPUTDISTRIBUIÇÃO vs Excel)",
+            data=diag_inp,
+            file_name="diagnostico_inputs.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+    st.markdown("---")
+    st.markdown('<div class="jd-sub">📊 Resultado no layout do Excel original</div>', unsafe_allow_html=True)
+    st.markdown("""
+Gera um Excel **idêntico ao layout do seu Excel de referência** — mesmas colunas, mesmas cores (Verde=Turno A, Amarelo=Turno B, Azul=Turno C).
+**Células em vermelho** = divergência entre o que o App calculou e o que está no seu Excel.
+    """)
+    with st.spinner("Gerando resultado no layout do Excel... (~8s)"):
+        layout_data = gerar_output_layout(
+            file_bytes, res_base, tempo, dist, aplic, pmp, dias,
+            horas_turno, thresholds, suporte_cfg)
+    st.download_button(
+        "📊 Baixar resultado no layout do Excel (com divergências em vermelho)",
+        data=layout_data,
+        file_name="resultado_layout_excel.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        type="primary"
+    )
+
+    st.markdown("---")
     c1, c2 = st.columns(2)
     with c1:
         st.markdown("**Resultado completo (todas as abas)**")
