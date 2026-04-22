@@ -1259,27 +1259,61 @@ def show_memoria(r, mes, df_intermediario, agg, horas_turno, thresholds):
 # ─────────────────────────────────────────
 # INTERFACE
 # ─────────────────────────────────────────
-st.markdown(f"""
+st.markdown("""
 <div class="jd-header">
   <h1>🏭 Calculadora de Recursos — Usinagem</h1>
-  <p>Planejamento de headcount por turno · Auditável · Comparável com Excel · John Deere</p>
+  <p>Ferramenta de planejamento de headcount por turno · John Deere Manufatura</p>
 </div>
 """, unsafe_allow_html=True)
 
-with st.expander("📋 Como preparar o arquivo de upload", expanded=False):
-    st.markdown("""
-**O app lê 5 abas do seu `.xlsm` ou `.xlsx`. Abas mensais (NovFY26 etc.) não são necessárias.**
+# ── GUIA DE PRIMEIROS PASSOS ──────────────────────────────────────────────────
+with st.expander("👋 Primeira vez aqui? Veja como usar em 3 passos", expanded=True):
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.markdown("""
+<div class="mem-step">
+  <span class="step-num">1</span> <b>Suba seu arquivo Excel</b><br><br>
+  O mesmo arquivo que você já usa — com as abas de input preenchidas.<br><br>
+  <b>O app vai ler automaticamente:</b><br>
+  • <code>INPUT_PMP</code> — demanda mensal por modelo<br>
+  • <code>IMPUTTEMPO</code> — tempo de ciclo e labor<br>
+  • <code>IMPUTDISTRIBUIÇÃO</code> — fatores de carga<br>
+  • <code>IMPUTAPLICAÇÃO</code> — quais modelos passam por cada centro<br>
+  • <code>IMPUTTURNOS</code> — horas dos turnos
+</div>
+""", unsafe_allow_html=True)
+    with col2:
+        st.markdown("""
+<div class="mem-step">
+  <span class="step-num">2</span> <b>Confira os resultados</b><br><br>
+  A aba <b>📊 Resultados</b> mostra o headcount calculado por turno.<br><br>
+  Vá para <b>🔄 Comparação</b> para ver se o resultado bate com o seu Excel atual — 
+  o app lê as abas mensais (NovFY26, DezFY26…) e compara automaticamente.<br><br>
+  <b>Verde ✅</b> = igual ao Excel<br>
+  <b>Amarelo 🟡</b> = diferença pequena (até 2 pessoas)<br>
+  <b>Vermelho 🔴</b> = divergência maior
+</div>
+""", unsafe_allow_html=True)
+    with col3:
+        st.markdown("""
+<div class="mem-step">
+  <span class="step-num">3</span> <b>Investigue divergências</b><br><br>
+  Se algo divergir, clique no mês na aba <b>🔄 Comparação</b> para ver:<br><br>
+  • Qual centro está diferente<br>
+  • Em qual turno<br>
+  • Se é diferença de volume, de fator ou de threshold<br>
+  • <b>Onde exatamente corrigir</b> no seu Excel de input<br><br>
+  Use a aba <b>🔬 Memória de Cálculo</b> para ver a fórmula passo a passo.
+</div>
+""", unsafe_allow_html=True)
 
-| Aba | Conteúdo obrigatório |
-|---|---|
-| `INPUT_PMP` | Linha 1 = dias por mês · Linhas seguintes = volume por modelo |
-| `IMPUTTEMPO` | Colunas: Máquina, Peça, Tempo Ciclo (min), Tempo Labor (min) |
-| `IMPUTDISTRIBUIÇÃO` | Colunas: Máquina, Peça, Div. Carga, Div. Volume, Disponibilidade |
-| `IMPUTAPLICAÇÃO` | Matriz: Máquina × Peça × MODELO (0 ou 1) |
-| `IMPUTTURNOS` | Horas acumuladas por turno (referência) |
-
-> Horas de duração por turno e thresholds de ativação são configuráveis na barra lateral.
-    """)
+st.markdown("""
+<div class="aviso-warn">
+💡 <b>Dica rápida:</b> O app usa os dados das abas de input como fonte de verdade. 
+Se o resultado divergir do Excel de referência, significa que algum dado de input pode estar diferente 
+do que foi usado para gerar aquele Excel. A comparação te mostra exatamente onde.
+</div>
+""", unsafe_allow_html=True)
 
 uploaded = st.file_uploader("Upload do arquivo de inputs (.xlsm ou .xlsx)", type=["xlsm","xlsx"])
 if not uploaded:
@@ -1371,8 +1405,8 @@ with st.sidebar:
 
 # ─── TABS ────────────────────────────────
 tab_vis, tab_inp, tab_mem, tab_res, tab_cmp, tab_diag, tab_exp = st.tabs([
-    "🏠 Visão Geral", "📂 Inputs", "🔬 Memória de Cálculo",
-    "📊 Resultados", "🔄 Comparação", "🩺 Diagnóstico", "📥 Exportação"
+    "🏠 Visão Geral", "📂 Dados de Input", "🔬 Como foi Calculado",
+    "📊 Resultado por Mês", "🔄 Comparar com Excel", "🩺 Diagnóstico", "📥 Exportar"
 ])
 
 # Cache do resultado base
@@ -1393,24 +1427,64 @@ res_base, df_interm, agg_interm = calcular(
 # ══════════════════════════════════════════
 with tab_vis:
     st.plotly_chart(grafico_cenarios({"Base": res_base}), use_container_width=True)
+
+    with st.expander("ℹ️ Como ler este gráfico"):
+        st.markdown("""
+**Barras empilhadas** = total de funcionários por turno em cada mês.
+- 🟢 Verde = Turno A · 🟡 Amarelo = Turno B · 🔵 Azul = Turno C
+- Inclui operadores CEN + suporte (Lavadora, Gravação, Preset, Coringa, Facilitador)
+
+**Linha vermelha (%)** = Produtividade Labor Total — tempo produtivo ÷ tempo total disponível.
+Quanto maior, melhor. Valores baixos indicam turno ocioso ou suporte superdimensionado.
+        """)
+
     meses_ok = [m for m in MESES if res_base.get(m)]
     if meses_ok:
         media_labor = np.mean([res_base[m]["prod_labor_tot"] for m in meses_ok])
         max_total   = max(res_base[m]["total"] for m in meses_ok)
         min_total   = min(res_base[m]["total"] for m in meses_ok)
         mes_pico    = max(meses_ok, key=lambda m: res_base[m]["total"])
+        mes_vale    = min(meses_ok, key=lambda m: res_base[m]["total"])
         c1,c2,c3,c4 = st.columns(4)
         c1.metric("Meses calculados", len(meses_ok))
-        c2.metric("Labor Total médio", f"{media_labor:.0%}")
-        c3.metric("Pico de headcount", f"{max_total} func. ({mes_pico[:3].upper()})")
-        c4.metric("Variação anual", f"{max_total - min_total} func.")
+        c2.metric("⭐ Labor Total médio", f"{media_labor:.0%}",
+                  help="Produtividade média anual. Meta: quanto maior, melhor.")
+        c3.metric("Pico de headcount", f"{max_total} func.",
+                  delta=f"em {mes_pico[:3].upper()}",
+                  help="Mês com maior necessidade de pessoal.")
+        c4.metric("Variação anual", f"{max_total - min_total} func.",
+                  help=f"Diferença entre o mês de pico ({mes_pico[:3].upper()}) e o menor ({mes_vale[:3].upper()}).")
+
+        st.markdown('<div class="jd-section">Alertas automáticos</div>', unsafe_allow_html=True)
+        alertas = []
+        for m in meses_ok:
+            r = res_base[m]
+            if r["op_C"] > 5:
+                alertas.append(f"⚠️ **{m}** — Turno C com {r['op_C']} centros ativos. Verifique fatores de distribuição no IMPUTDISTRIBUIÇÃO.")
+            if r["prod_labor_tot"] < 0.30:
+                alertas.append(f"⚠️ **{m}** — Labor Total baixo ({r['prod_labor_tot']:.0%}). Pode indicar turno superdimensionado.")
+            if r["op_B"] == 0 and r["tot_A"] > 0:
+                alertas.append(f"ℹ️ **{m}** — Nenhum centro ativo no Turno B. Apenas Turno A operando.")
+        if alertas:
+            for a in alertas:
+                st.markdown(f'<div class="aviso-warn">{a}</div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="aviso-ok">✅ Nenhum alerta identificado nos dados calculados.</div>', unsafe_allow_html=True)
+
 
 # ══════════════════════════════════════════
 # TAB 2 — INPUTS
 # ══════════════════════════════════════════
 with tab_inp:
-    st.markdown('<div class="jd-section">Preview das bases carregadas</div>', unsafe_allow_html=True)
-    aba_inp = st.radio("", ["INPUT_PMP","IMPUTTEMPO","IMPUTDISTRIBUIÇÃO","IMPUTAPLICAÇÃO"], horizontal=True)
+    st.markdown('<div class="jd-section">Dados carregados do seu arquivo</div>', unsafe_allow_html=True)
+    st.caption("Verifique aqui se os dados foram lidos corretamente. Se algo parecer errado, o problema está na planilha de input.")
+    aba_inp = st.radio("Qual dado você quer conferir?", [
+        "INPUT_PMP — Demanda por modelo",
+        "IMPUTTEMPO — Tempo de ciclo e labor",
+        "IMPUTDISTRIBUIÇÃO — Fatores de carga",
+        "IMPUTAPLICAÇÃO — Quais modelos por centro"
+    ], horizontal=True)
+    aba_inp = aba_inp.split(" — ")[0]  # pegar só o nome da aba
     if aba_inp == "INPUT_PMP":
         st.dataframe(pmp.head(100), use_container_width=True, hide_index=True)
         st.caption(f"{len(pmp)} registros com qtd > 0 · {pmp.modelo.nunique()} modelos")
@@ -1455,8 +1529,38 @@ with tab_res:
     if "cenarios" not in st.session_state:
         st.session_state.cenarios = {}
 
-    mes_r = st.selectbox("Mês", [m for m in MESES if res_base.get(m)], key="mes_r")
-    if mes_r: show_tabela(res_base[mes_r])
+    st.markdown('<div class="jd-section">Resultado por mês</div>', unsafe_allow_html=True)
+    mes_r = st.selectbox("Selecione o mês", [m for m in MESES if res_base.get(m)], key="mes_r")
+
+    if mes_r and res_base.get(mes_r):
+        r = res_base[mes_r]
+        # Resumo rápido antes da tabela detalhada
+        st.markdown(f"""
+<div class="aviso-ok">
+📋 <b>{mes_r}</b> — {r['dias']} dias trabalhados &nbsp;|&nbsp;
+Turno A: <b>{r['tot_A']} pessoas</b> &nbsp;|&nbsp;
+Turno B: <b>{r['tot_B']} pessoas</b> &nbsp;|&nbsp;
+Turno C: <b>{r['tot_C']} pessoas</b> &nbsp;|&nbsp;
+<b>Total: {r['total']} funcionários</b>
+</div>
+        """, unsafe_allow_html=True)
+
+        with st.expander("ℹ️ Como ler a tabela abaixo"):
+            st.markdown("""
+**Tabela de cima — Por centro de usinagem (CEN):**
+- **% Ocupação A/B/C** = quanto da capacidade do turno está sendo usada por este centro
+  - 🟢 Verde = abaixo de 85% (confortável)
+  - 🟡 Amarelo = entre 85% e 100% (atenção)
+  - 🔴 Vermelho = acima de 100% (sobrecarregado)
+- **Ativo 0/1** = se o turno está aberto para este centro (1=aberto, 0=fechado)
+- **Horas** = horas disponíveis no mês para aquele centro naquele turno
+
+**Tabela de baixo — Funções de suporte:**
+- Mostra quantas pessoas de cada função estão alocadas por turno
+- A linha **TOTAL POR TURNO** já inclui operadores CEN + suporte
+            """)
+
+        show_tabela(r)
 
     st.markdown('<div class="jd-section">Simulador de cenários</div>', unsafe_allow_html=True)
     with st.expander("➕ Criar novo cenário", expanded=len(st.session_state.cenarios)==0):
@@ -1509,8 +1613,14 @@ with tab_res:
 # TAB 5 — COMPARAÇÃO
 # ══════════════════════════════════════════
 with tab_cmp:
-    st.markdown('<div class="jd-section">Comparação automática com o Excel</div>', unsafe_allow_html=True)
-    st.caption("O app lê automaticamente as abas mensais do arquivo carregado (NovFY26, DezFY26…) e compara célula a célula com o resultado calculado.")
+    st.markdown('<div class="jd-section">Comparação com o seu Excel atual</div>', unsafe_allow_html=True)
+    st.markdown("""
+O app lê as abas mensais do arquivo que você subiu (NovFY26, DezFY26…) e compara o resultado 
+calculado pelos inputs com o que está nessas abas.
+
+**Se divergir**, não significa que o app está errado — significa que algum dado de input 
+está diferente do que foi usado para gerar aquele Excel. O diagnóstico abaixo te mostra exatamente onde.
+    """)
 
     # Cache do resultado da comparação para não recalcular ao trocar de aba
     cache_key = f"cmp_{hash(str(dias))}_{hash(str(thresholds))}_{hash(str(horas_turno))}"
