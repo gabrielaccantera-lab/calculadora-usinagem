@@ -533,19 +533,19 @@ def exportar(resultados):
 # COMPARAÇÃO COM EXCEL REFERÊNCIA
 # ─────────────────────────────────────────
 def comparar_com_excel(res_app, file_bytes, tempo, dist, aplic, pmp, dias, horas_turno, thresholds, suporte_cfg):
-    """Compara app vs Excel. Quando diverge, rastreia até o centro e a causa raiz."""
+    """Compara app vs Excel. Otimizado: JOIN e agrupamento feitos uma vez para todos os meses."""
     MAPA = {
         "Novembro":"NovFY26","Dezembro":"DezFY26","Janeiro":"JanFY26",
         "Fevereiro":"FevFY26","Março":"MarFY26","Abril":"AbrFY26",
         "Maio":"MaiFY26","Junho":"JunFY26","Julho":"JulFY26",
         "Agosto":"AgoFY26","Setembro":"SetFY26","Outubro":"OutFY26",
     }
-    def safe_int(v, default=0):
-        try: return int(float(v)) if v is not None else default
-        except: return default
-    def safe_float(v, default=0.0):
-        try: return float(v) if v is not None else default
-        except: return default
+    def safe_int(v):
+        try: return int(float(v)) if v is not None else 0
+        except: return 0
+    def safe_float(v):
+        try: return float(v) if v is not None else 0.0
+        except: return 0.0
 
     try:
         wb = openpyxl.load_workbook(BytesIO(file_bytes), read_only=True, data_only=True)
@@ -558,6 +558,23 @@ def comparar_com_excel(res_app, file_bytes, tempo, dist, aplic, pmp, dias, horas
     thr_C = thresholds["C"] / 100
     hA    = horas_turno["A"]
     hB    = horas_turno["B"]
+
+    # ── PRÉ-CALCULAR: JOIN completo uma única vez para todos os meses ──────────
+    try:
+        df_all = (aplic.merge(pmp, on="modelo")
+                       .merge(tempo, on=["centro","peca"])
+                       .merge(dist,  on=["centro","peca"]))
+        df_all["indice_ciclo"] = (df_all.t_ciclo * df_all.div_carga * df_all.div_volume) / df_all.disponib
+        df_all["min_ciclo"]    = df_all.indice_ciclo * df_all.qtd
+        # Agrupar por centro+mes de uma vez
+        agg_all = df_all.groupby(["centro","mes"]).agg(
+            min_ciclo=("min_ciclo","sum"),
+            qtd_total=("qtd","sum"),
+            indice_medio=("indice_ciclo","mean")
+        ).reset_index()
+    except Exception as e:
+        wb.close()
+        return None, None, f"Erro no cálculo: {e}"
 
     resumo_rows  = []
     detalhe_rows = []
@@ -575,21 +592,18 @@ def comparar_com_excel(res_app, file_bytes, tempo, dist, aplic, pmp, dias, horas
         minA = d * hA * 60
         minB = d * hB * 60
 
-        xl_opA  = safe_int(ws.cell(89,27).value)
-        xl_opB  = safe_int(ws.cell(89,28).value)
-        xl_opC  = safe_int(ws.cell(89,29).value)
-        xl_tA   = safe_int(ws.cell(95,27).value)
-        xl_tB   = safe_int(ws.cell(95,28).value)
-        xl_tC   = safe_int(ws.cell(95,29).value)
-        xl_tot  = safe_int(ws.cell(96,27).value)
-        xl_labor= safe_float(ws.cell(101,30).value)
+        xl_opA = safe_int(ws.cell(89,27).value)
+        xl_opB = safe_int(ws.cell(89,28).value)
+        xl_opC = safe_int(ws.cell(89,29).value)
+        xl_tot = safe_int(ws.cell(96,27).value)
+        xl_labor = safe_float(ws.cell(101,30).value)
 
         dA = r_app["op_A"] - xl_opA
         dB = r_app["op_B"] - xl_opB
         dC = r_app["op_C"] - xl_opC
         dT = r_app["total"] - xl_tot
 
-        if dT == 0 and dA == 0 and dB == 0 and dC == 0:
+        if dT==0 and dA==0 and dB==0 and dC==0:
             status = "✅ Igual"
         elif abs(dT) <= 2:
             status = "🟡 Pequena diferença"
@@ -597,31 +611,22 @@ def comparar_com_excel(res_app, file_bytes, tempo, dist, aplic, pmp, dias, horas
             status = "🔴 Divergência"
 
         resumo_rows.append({
-            "Mês":             mes,
-            "Status":          status,
-            "CEN A — App":     r_app["op_A"],  "CEN A — Excel": xl_opA,  "Δ A": f"{dA:+d}",
-            "CEN B — App":     r_app["op_B"],  "CEN B — Excel": xl_opB,  "Δ B": f"{dB:+d}",
-            "CEN C — App":     r_app["op_C"],  "CEN C — Excel": xl_opC,  "Δ C": f"{dC:+d}",
-            "Total — App":     r_app["total"], "Total — Excel": xl_tot,  "Δ Total": f"{dT:+d}",
-            "Labor — App":     f"{r_app['prod_labor_tot']:.1%}",
-            "Labor — Excel":   f"{xl_labor:.1%}" if xl_labor else "—",
+            "Mês":           mes,  "Status": status,
+            "CEN A App":     r_app["op_A"],  "CEN A Excel": xl_opA,  "Δ A": f"{dA:+d}",
+            "CEN B App":     r_app["op_B"],  "CEN B Excel": xl_opB,  "Δ B": f"{dB:+d}",
+            "CEN C App":     r_app["op_C"],  "CEN C Excel": xl_opC,  "Δ C": f"{dC:+d}",
+            "Total App":     r_app["total"], "Total Excel": xl_tot,  "Δ Total": f"{dT:+d}",
+            "Labor App":     f"{r_app['prod_labor_tot']:.1%}",
+            "Labor Excel":   f"{xl_labor:.1%}" if xl_labor else "—",
         })
 
         if status == "✅ Igual":
             continue
 
-        # Calcular ocupação por centro via inputs
-        try:
-            df_mes = (aplic.merge(pmp[pmp.mes==mes], on="modelo")
-                           .merge(tempo, on=["centro","peca"])
-                           .merge(dist,  on=["centro","peca"]))
-            df_mes["indice_ciclo"] = (df_mes.t_ciclo * df_mes.div_carga * df_mes.div_volume) / df_mes.disponib
-            df_mes["min_ciclo"]    = df_mes.indice_ciclo * df_mes.qtd
-            agg_mes = df_mes.groupby("centro")["min_ciclo"].sum().reset_index()
-        except Exception as e:
-            continue
+        # Usar slice do agg pré-calculado — sem recalcular JOIN
+        agg_mes = agg_all[agg_all.mes == mes].copy()
 
-        # Ler ocupação por centro do Excel
+        # Ler ocupação por centro do Excel (só leitura, rápido)
         centros_xl = {}
         for r in range(69, 89):
             cen_val = ws.cell(r,23).value
@@ -636,20 +641,22 @@ def comparar_com_excel(res_app, file_bytes, tempo, dist, aplic, pmp, dias, horas
 
         for _, row in agg_mes.iterrows():
             try:
-                cen = row.centro
-                mc  = row.min_ciclo
-                oA_app = mc / minA if minA > 0 else 0
-                oB_app = mc / minB if minB > 0 else 0
+                cen         = row.centro
+                mc          = row.min_ciclo
+                qtd_app     = row.qtd_total
+                idx_medio   = row.indice_medio
+                oA_app      = mc / minA if minA > 0 else 0
+                oB_app      = mc / minB if minB > 0 else 0
                 aA_app = 1 if oA_app > thr_A else 0
                 aB_app = 1 if oA_app > thr_B else 0
                 aC_app = 1 if oB_app > thr_C else 0
 
-                xl = centros_xl.get(cen, {})
-                aA_xl = xl.get("ativo_A", 0)
-                aB_xl = xl.get("ativo_B", 0)
-                aC_xl = xl.get("ativo_C", 0)
-                oA_xl = xl.get("ocup_A", 0.0)
-                oB_xl = xl.get("ocup_B", 0.0)
+                xl      = centros_xl.get(cen, {})
+                aA_xl   = xl.get("ativo_A", 0)
+                aB_xl   = xl.get("ativo_B", 0)
+                aC_xl   = xl.get("ativo_C", 0)
+                oA_xl   = xl.get("ocup_A", 0.0)
+                oB_xl   = xl.get("ocup_B", 0.0)
 
                 for turno, a_app, a_xl, ocup_app, ocup_xl in [
                     ("A", aA_app, aA_xl, oA_app, oA_xl),
@@ -659,70 +666,48 @@ def comparar_com_excel(res_app, file_bytes, tempo, dist, aplic, pmp, dias, horas
                     if a_app == a_xl:
                         continue
 
-                    delta_ocup = ocup_app - float(ocup_xl)
-                    abs_delta  = abs(delta_ocup)
-
-                    df_cen = df_mes[df_mes.centro == cen].copy()
-                    total_pecas_app   = int(df_cen.qtd.sum()) if len(df_cen) > 0 else 0
-                    idx_medio_app     = float(df_cen.indice_ciclo.mean()) if len(df_cen) > 0 else 0
-                    mc_xl_esperado    = float(ocup_xl) * (minA if turno in ("A","B") else minB)
-                    volume_xl_estim   = mc_xl_esperado / idx_medio_app if idx_medio_app > 0 else 0
-                    idx_esperado      = mc_xl_esperado / total_pecas_app if total_pecas_app > 0 else 0
+                    delta_ocup    = ocup_app - float(ocup_xl)
+                    abs_delta     = abs(delta_ocup)
+                    mc_xl_esp     = float(ocup_xl) * (minA if turno in ("A","B") else minB)
+                    vol_xl_estim  = mc_xl_esp / idx_medio if idx_medio > 0 else 0
+                    idx_esperado  = mc_xl_esp / qtd_app   if qtd_app  > 0 else 0
 
                     if abs_delta > 0.15:
-                        if total_pecas_app < volume_xl_estim * 0.7:
-                            causa_curta = "Volume de peças menor que o esperado"
-                            causa_longa = (
-                                f"O app encontrou {total_pecas_app} peças passando pelo {cen} em {mes} "
-                                f"(soma de todos os modelos via IMPUTAPLICAÇÃO × INPUT_PMP). "
-                                f"Mas a carga do Excel equivale a ~{volume_xl_estim:.0f} peças com o mesmo índice de ciclo. "
-                                f"Provável causa: algum modelo está faltando na coluna do {cen} na aba IMPUTAPLICAÇÃO, "
-                                f"ou o volume desse modelo está incorreto no INPUT_PMP."
-                            )
-                            origem = "IMPUTAPLICAÇÃO (verifique se todos os modelos do {cen} estão marcados com 1) "                                       "ou INPUT_PMP (verifique os volumes de novembro para esses modelos)"
-                        elif total_pecas_app > volume_xl_estim * 1.3:
-                            causa_curta = "Volume de peças maior que o esperado"
-                            causa_longa = (
-                                f"O app encontrou {total_pecas_app} peças passando pelo {cen} em {mes}, "
-                                f"mas a carga do Excel equivale a ~{volume_xl_estim:.0f} peças. "
-                                f"Provável causa: algum modelo está marcado com 1 na IMPUTAPLICAÇÃO para o {cen} "
-                                f"mas não deveria, ou o volume no INPUT_PMP está maior do que o real."
-                            )
-                            origem = f"IMPUTAPLICAÇÃO — revise os modelos marcados para o {cen}"
+                        if qtd_app < vol_xl_estim * 0.7:
+                            causa  = "Volume de peças menor que o esperado"
+                            origem = f"IMPUTAPLICAÇÃO — verifique se todos os modelos do {cen} estão marcados com 1"
+                            expl   = (f"App encontrou {qtd_app:.0f} peças no {cen} em {mes}, "
+                                      f"mas o Excel indica carga equivalente a ~{vol_xl_estim:.0f} peças. "
+                                      f"Algum modelo pode estar faltando na IMPUTAPLICAÇÃO ou o volume no INPUT_PMP está baixo.")
+                        elif qtd_app > vol_xl_estim * 1.3:
+                            causa  = "Volume de peças maior que o esperado"
+                            origem = f"IMPUTAPLICAÇÃO — verifique se há modelos a mais para o {cen}"
+                            expl   = (f"App encontrou {qtd_app:.0f} peças no {cen} em {mes}, "
+                                      f"mas o Excel indica carga equivalente a ~{vol_xl_estim:.0f} peças. "
+                                      f"Algum modelo pode estar marcado com 1 indevidamente na IMPUTAPLICAÇÃO.")
                         else:
-                            causa_curta = "Índice de ciclo diferente"
-                            causa_longa = (
-                                f"O volume de peças é compatível ({total_pecas_app} app vs ~{volume_xl_estim:.0f} Excel), "
-                                f"mas o índice de ciclo calculado pelo app é {idx_medio_app:.2f} min/peça "
-                                f"vs {idx_esperado:.2f} min/peça esperado pelo Excel. "
-                                f"O índice é calculado como: (t_ciclo × div_carga × div_volume) ÷ disponibilidade. "
-                                f"Verifique na aba IMPUTDISTRIBUIÇÃO os valores de div_carga, div_volume e disponibilidade "
-                                f"para o {cen} — algum deles pode estar diferente do que o Excel usa."
-                            )
+                            causa  = "Índice de ciclo diferente"
                             origem = f"IMPUTDISTRIBUIÇÃO — verifique div_carga, div_volume e disponibilidade do {cen}"
+                            expl   = (f"Volume compatível ({qtd_app:.0f} app vs ~{vol_xl_estim:.0f} Excel), "
+                                      f"mas índice de ciclo app={idx_medio:.2f} vs esperado={idx_esperado:.2f} min/peça. "
+                                      f"Fórmula: (t_ciclo × div_carga × div_volume) ÷ disponibilidade.")
                     else:
-                        thr_usado = thr_A if turno == "A" else (thr_B if turno == "B" else thr_C)
-                        causa_curta = f"Ocupação próxima do threshold ({thr_usado:.0%})"
-                        causa_longa = (
-                            f"A ocupação calculada pelo app ({ocup_app:.1%}) e a do Excel ({ocup_xl:.1%}) são próximas. "
-                            f"O threshold de ativação do turno {turno} é {thr_usado:.0%}. "
-                            f"Uma diferença pequena em qualquer dado de input pode cruzar o threshold. "
-                            f"Verifique se há algum modelo com volume recém atualizado no INPUT_PMP para os modelos do {cen}."
-                        )
-                        origem = f"INPUT_PMP — verifique os volumes dos modelos que passam pelo {cen}"
+                        thr_u  = thr_A if turno=="A" else (thr_B if turno=="B" else thr_C)
+                        causa  = f"Ocupação próxima do threshold ({thr_u:.0%})"
+                        origem = f"INPUT_PMP — verifique volumes dos modelos do {cen}"
+                        expl   = (f"Ocupação app={ocup_app:.1%} vs Excel={ocup_xl:.1%}. "
+                                  f"Threshold={thr_u:.0%}. Pequena diferença de dado cruza o limite.")
 
                     detalhe_rows.append({
-                        "Mês":              mes,
-                        "Centro":           cen,
-                        "Turno":            turno,
-                        "App — Ativo":      "✅ Sim" if a_app else "❌ Não",
-                        "Excel — Ativo":    "✅ Sim" if a_xl  else "❌ Não",
-                        "Ocup. App":        f"{ocup_app:.1%}",
-                        "Ocup. Excel":      f"{float(ocup_xl):.1%}",
-                        "Δ Ocupação":       f"{delta_ocup:+.1%}",
-                        "Causa":            causa_curta,
-                        "Onde investigar":  origem,
-                        "Explicação":       causa_longa,
+                        "Mês": mes, "Centro": cen, "Turno": turno,
+                        "App — Ativo":   "✅ Sim" if a_app else "❌ Não",
+                        "Excel — Ativo": "✅ Sim" if a_xl  else "❌ Não",
+                        "Ocup. App":     f"{ocup_app:.1%}",
+                        "Ocup. Excel":   f"{float(ocup_xl):.1%}",
+                        "Δ Ocupação":    f"{delta_ocup:+.1%}",
+                        "Causa":         causa,
+                        "Onde investigar": origem,
+                        "Explicação":    expl,
                     })
             except Exception:
                 continue
@@ -1520,7 +1505,18 @@ with tab_cmp:
     st.markdown('<div class="jd-section">Comparação automática com o Excel</div>', unsafe_allow_html=True)
     st.caption("O app lê automaticamente as abas mensais do arquivo carregado (NovFY26, DezFY26…) e compara célula a célula com o resultado calculado.")
 
-    df_resumo, df_detalhe, err = comparar_com_excel(res_base, file_bytes, tempo, dist, aplic, pmp, dias, horas_turno, thresholds, suporte_cfg)
+    # Cache do resultado da comparação para não recalcular ao trocar de aba
+    cache_key = f"cmp_{hash(str(dias))}_{hash(str(thresholds))}_{hash(str(horas_turno))}"
+    if st.session_state.get("cmp_cache_key") != cache_key:
+        with st.spinner("Comparando com o Excel..."):
+            _r, _d, _e = comparar_com_excel(res_base, file_bytes, tempo, dist, aplic, pmp, dias, horas_turno, thresholds, suporte_cfg)
+        st.session_state["cmp_cache_key"]     = cache_key
+        st.session_state["cmp_cache_resumo"]  = _r
+        st.session_state["cmp_cache_detalhe"] = _d
+        st.session_state["cmp_cache_err"]     = _e
+    df_resumo  = st.session_state["cmp_cache_resumo"]
+    df_detalhe = st.session_state["cmp_cache_detalhe"]
+    err        = st.session_state["cmp_cache_err"]
 
     if err:
         st.error(err)
@@ -1538,22 +1534,60 @@ with tab_cmp:
 
         # Tabela resumo
         st.markdown('<div class="jd-sub">Resumo por mês</div>', unsafe_allow_html=True)
+
+        # Construir tabela visual por turno
+        def cor_delta(d):
+            try:
+                n = int(str(d).replace("+",""))
+                if n == 0:  return "✅"
+                if abs(n) <= 2: return "🟡"
+                return "🔴"
+            except: return ""
+
+        def build_resumo_visual(df):
+            rows = []
+            for _, r in df.iterrows():
+                def cell(app, excel, delta):
+                    icon = cor_delta(delta)
+                    return f"{icon} App={app} / Excel={excel} ({delta})"
+                rows.append({
+                    "Mês":     r["Mês"],
+                    "Status":  r["Status"],
+                    "Turno A": cell(r.get("CEN A App","?"), r.get("CEN A Excel","?"), r.get("Δ A","?")),
+                    "Turno B": cell(r.get("CEN B App","?"), r.get("CEN B Excel","?"), r.get("Δ B","?")),
+                    "Turno C": cell(r.get("CEN C App","?"), r.get("CEN C Excel","?"), r.get("Δ C","?")),
+                    "Total":   cell(r.get("Total App","?"), r.get("Total Excel","?"), r.get("Δ Total","?")),
+                    "Labor":   f"App={r.get('Labor App','?')} / Excel={r.get('Labor Excel','?')}",
+                })
+            return pd.DataFrame(rows)
+
+        df_vis = build_resumo_visual(df_resumo)
+
         def style_resumo(row):
             st_val = str(row.get("Status",""))
-            if "✅" in st_val:   cor = "background-color:#003D10;color:#B9F6CA"
-            elif "🟡" in st_val: cor = "background-color:#3D2D00;color:#FFE57F"
-            elif "🔴" in st_val: cor = "background-color:#3D0000;color:#FF8A80"
-            else:                cor = "background-color:#2D1A00;color:#FFD54F"
-            return [cor if col == "Status" else "" for col in row.index]
+            if "✅" in st_val:   base = "background-color:#003D10;color:#B9F6CA"
+            elif "🟡" in st_val: base = "background-color:#3D2D00;color:#FFE57F"
+            elif "🔴" in st_val: base = "background-color:#3D0000;color:#FF8A80"
+            else:                base = "background-color:#2D1A00;color:#FFD54F"
 
-        cols_res = ["Mês","Status","Excel — Turno A","App — Turno A","Δ Turno A",
-                    "Excel — Turno B","App — Turno B","Δ Turno B",
-                    "Excel — Turno C","App — Turno C","Δ Turno C",
-                    "Excel — Total","App — Total","Δ Total",
-                    "Excel — Labor Total","App — Labor Total","Δ Labor","Nº divergências"]
-        cols_res = [c for c in cols_res if c in df_resumo.columns]
-        st.dataframe(df_resumo[cols_res].style.apply(style_resumo, axis=1),
-                     use_container_width=True, hide_index=True)
+            styles = []
+            for col in row.index:
+                if col == "Status":
+                    styles.append(base)
+                elif col in ("Turno A","Turno B","Turno C","Total"):
+                    val = str(row[col])
+                    if "🔴" in val:   styles.append("background-color:#3D0000;color:#FF8A80")
+                    elif "🟡" in val: styles.append("background-color:#3D2D00;color:#FFE57F")
+                    elif "✅" in val: styles.append("background-color:#003D10;color:#B9F6CA")
+                    else:             styles.append("")
+                else:
+                    styles.append("")
+            return styles
+
+        st.dataframe(
+            df_vis.style.apply(style_resumo, axis=1),
+            use_container_width=True, hide_index=True
+        )
 
         # Detalhe das divergências
         if df_detalhe is not None and len(df_detalhe) > 0:
