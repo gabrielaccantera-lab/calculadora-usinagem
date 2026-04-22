@@ -281,13 +281,18 @@ def calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg
         op_A = int(df_c.ativo_A.sum()); op_B = int(df_c.ativo_B.sum()); op_C = int(df_c.ativo_C.sum())
 
         def get_sup(key, t, op_count):
+            """Retorna qtd de suporte para o turno.
+            Regra: se não há operador CEN ativo no turno, suporte = 0 sempre.
+            No modo manual, o usuário define o valor, mas a regra de presença prevalece."""
             cfg = suporte_cfg[key]
+            if op_count == 0:
+                return 0  # sem CEN no turno → sem suporte, independente do modo
             if cfg["modo"] == "auto":
                 defaults = {"lavadora":{"A":1,"B":1,"C":0},"gravacao":{"A":1,"B":1,"C":0},
                             "preset":{"A":2,"B":1,"C":1},"coringa":{"A":1,"B":0,"C":0},
                             "facilitador":{"A":1,"B":1,"C":0}}
-                return defaults[key][t] if op_count > 0 else 0
-            return cfg[t]
+                return defaults[key][t]
+            return cfg[t]  # manual — valor do usuário, mas só chega aqui se op_count > 0
 
         lav={t:get_sup("lavadora",t,[op_A,op_B,op_C]["ABC".index(t)]) for t in "ABC"}
         gra={t:get_sup("gravacao",t,[op_A,op_B,op_C]["ABC".index(t)]) for t in "ABC"}
@@ -1340,6 +1345,7 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown("**Funções de suporte**")
+    st.caption("⚠️ Se não houver operador CEN ativo num turno, o suporte desse turno é automaticamente zero.")
     suporte_cfg = {}
     for key,label,defs in [
         ("lavadora","Lavadora e Inspeção",{"A":1,"B":1,"C":0}),
@@ -1351,9 +1357,10 @@ with st.sidebar:
         with st.expander(f"🔧 {label}"):
             modo = st.radio("",["Automático","Manual"],key=f"m_{key}",horizontal=True)
             if modo=="Automático":
-                st.caption(f"A={defs['A']} · B={defs['B']} · C={defs['C']}")
+                st.caption(f"Padrão: A={defs['A']} · B={defs['B']} · C={defs['C']}")
                 suporte_cfg[key]={"modo":"auto",**defs}
             else:
+                st.caption("Define quantos por turno **quando o turno estiver ativo**. Se não houver CEN no turno, fica 0.")
                 c1,c2,c3=st.columns(3)
                 vA=c1.number_input("A",0,10,defs["A"],key=f"s_{key}_A")
                 vB=c2.number_input("B",0,10,defs["B"],key=f"s_{key}_B")
