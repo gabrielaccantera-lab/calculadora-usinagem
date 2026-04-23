@@ -141,39 +141,82 @@ def grafico_cenarios(cenarios_dict):
 # EXPORTAÇÃO
 # ─────────────────────────────────────────
 # Fills globais para diagnóstico
-_BRD_DIAG = Border(
-    left=Side(style='thin',color='CCCCCC'), right=Side(style='thin',color='CCCCCC'),
-    top=Side(style='thin',color='CCCCCC'),  bottom=Side(style='thin',color='CCCCCC'))
+def _make_brd():
+    return Border(
+        left=Side(style='thin',color='CCCCCC'), right=Side(style='thin',color='CCCCCC'),
+        top=Side(style='thin',color='CCCCCC'),  bottom=Side(style='thin',color='CCCCCC'))
 
-VERDE_HEADER   = PatternFill("solid", fgColor="1F4D19")
-VERMELHO_HEADER= PatternFill("solid", fgColor="C62828")
-CINZA_HEADER   = PatternFill("solid", fgColor="555555")
-VERMELHO_CLARO = PatternFill("solid", fgColor="FFCDD2")
-VERMELHO_ESCURO= PatternFill("solid", fgColor="C62828")
-AMARELO        = PatternFill("solid", fgColor="FFDE00")
-VERDE          = PatternFill("solid", fgColor="E8F5E9")
+def _pf(color): return PatternFill("solid", fgColor=color)
 
-# Fills para gerar_diagnostico_mensal / gerar_output_layout
-F_HDR_VERD  = PatternFill("solid", fgColor="1F4D19")
-F_HDR_AMAR  = PatternFill("solid", fgColor="FFDE00")
-F_HDR_CINZA = PatternFill("solid", fgColor="555555")
-F_CINZA_CLR = PatternFill("solid", fgColor="F4F4F4")
-F_BRANCO    = PatternFill("solid", fgColor="FFFFFF")
-F_VERM_CLR  = PatternFill("solid", fgColor="FFCDD2")
-F_AMAR      = PatternFill("solid", fgColor="FFDE00")
-F_VERDE     = PatternFill("solid", fgColor="E8F5E9")
-F_VERDE_MED = PatternFill("solid", fgColor="C8E6C9")
-F_AZUL_CLR  = PatternFill("solid", fgColor="E3F2FD")
+# Lazy globals — só instanciados na primeira chamada de função que precisar deles
+class _Fills:
+    """Instancia PatternFill só quando acessado (lazy), evitando custo no startup."""
+    _cache = {}
+    def __getattr__(self, name):
+        _map = {
+            "_BRD_DIAG":      _make_brd,
+            "VERDE_HEADER":   lambda: _pf("1F4D19"),
+            "VERMELHO_HEADER":lambda: _pf("C62828"),
+            "CINZA_HEADER":   lambda: _pf("555555"),
+            "VERMELHO_CLARO": lambda: _pf("FFCDD2"),
+            "VERMELHO_ESCURO":lambda: _pf("C62828"),
+            "AMARELO":        lambda: _pf("FFDE00"),
+            "VERDE":          lambda: _pf("E8F5E9"),
+            "F_HDR_VERD":     lambda: _pf("1F4D19"),
+            "F_HDR_AMAR":     lambda: _pf("FFDE00"),
+            "F_HDR_CINZA":    lambda: _pf("555555"),
+            "F_CINZA_CLR":    lambda: _pf("F4F4F4"),
+            "F_BRANCO":       lambda: _pf("FFFFFF"),
+            "F_VERM_CLR":     lambda: _pf("FFCDD2"),
+            "F_AMAR":         lambda: _pf("FFDE00"),
+            "F_VERDE":        lambda: _pf("E8F5E9"),
+            "F_VERDE_MED":    lambda: _pf("C8E6C9"),
+            "F_AZUL_CLR":     lambda: _pf("E3F2FD"),
+            "C_VERDE":        lambda: _pf("92D050"),
+            "C_AMAR":         lambda: _pf("FFFF00"),
+            "C_AZUL":         lambda: _pf("00B0F0"),
+            "C_PRETO":        lambda: _pf("000000"),
+            "C_CINZA":        lambda: _pf("D9D9D9"),
+            "C_BRANCO":       lambda: _pf("FFFFFF"),
+            "C_ROSA":         lambda: _pf("FFB6C1"),
+            "C_VERM_DIV":     lambda: _pf("FF0000"),
+        }
+        if name not in self._cache and name in _map:
+            self._cache[name] = _map[name]()
+        if name in self._cache:
+            return self._cache[name]
+        raise AttributeError(name)
 
-# Fills para gerar_output_layout
-C_VERDE    = PatternFill("solid", fgColor="92D050")
-C_AMAR     = PatternFill("solid", fgColor="FFFF00")
-C_AZUL     = PatternFill("solid", fgColor="00B0F0")
-C_PRETO    = PatternFill("solid", fgColor="000000")
-C_CINZA    = PatternFill("solid", fgColor="D9D9D9")
-C_BRANCO   = PatternFill("solid", fgColor="FFFFFF")
-C_ROSA     = PatternFill("solid", fgColor="FFB6C1")
-C_VERM_DIV = PatternFill("solid", fgColor="FF0000")
+_F = _Fills()
+
+# Aliases diretos para compatibilidade com o código existente
+_BRD_DIAG      = property(lambda s: _F._BRD_DIAG)
+VERDE_HEADER    = _F.VERDE_HEADER
+VERMELHO_HEADER = _F.VERMELHO_HEADER
+CINZA_HEADER    = _F.CINZA_HEADER
+VERMELHO_CLARO  = _F.VERMELHO_CLARO
+VERMELHO_ESCURO = _F.VERMELHO_ESCURO
+AMARELO         = _F.AMARELO
+VERDE           = _F.VERDE
+F_HDR_VERD      = _F.F_HDR_VERD
+F_HDR_AMAR      = _F.F_HDR_AMAR
+F_HDR_CINZA     = _F.F_HDR_CINZA
+F_CINZA_CLR     = _F.F_CINZA_CLR
+F_BRANCO        = _F.F_BRANCO
+F_VERM_CLR      = _F.F_VERM_CLR
+F_AMAR          = _F.F_AMAR
+F_VERDE         = _F.F_VERDE
+F_VERDE_MED     = _F.F_VERDE_MED
+F_AZUL_CLR      = _F.F_AZUL_CLR
+C_VERDE         = _F.C_VERDE
+C_AMAR          = _F.C_AMAR
+C_AZUL          = _F.C_AZUL
+C_PRETO         = _F.C_PRETO
+C_CINZA         = _F.C_CINZA
+C_BRANCO        = _F.C_BRANCO
+C_ROSA          = _F.C_ROSA
+C_VERM_DIV      = _F.C_VERM_DIV
+_BRD_DIAG       = _make_brd()
 
 def cor_ocup(pct):
     try:
@@ -2627,26 +2670,25 @@ tab_vis, tab_inp, tab_mem, tab_res, tab_cmp, tab_diag, tab_exp = st.tabs([
 
 # Cache do resultado base
 @st.cache_data(show_spinner=False)
-def calcular_cached(pmp_hash, _pmp, _tempo, _dist, _aplic, dias_hash, dias, hA, hB, hC, tA, tB, tC, _sup):
-    return calcular(_pmp, _tempo, _dist, _aplic, dias,
+def calcular_cached(pmp_hash, _pmp, _tempo, _dist, _aplic, dias_hash, _dias, hA, hB, hC, tA, tB, tC, _sup):
+    return calcular(_pmp, _tempo, _dist, _aplic, _dias,
                     {"A":hA,"B":hB,"C":hC}, {"A":tA,"B":tB,"C":tC}, _sup,
                     retornar_intermediarios=True)
 
 pmp_hash = hash(pmp.to_json())
 dias_hash = hash(str(dias))
-res_base, df_interm, agg_interm = calcular(
-    pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg,
-    retornar_intermediarios=True)
+res_base, df_interm, agg_interm = calcular_cached(
+    pmp_hash, pmp, tempo, dist, aplic, dias_hash, dias,
+    horas_turno["A"], horas_turno["B"], horas_turno["C"],
+    thresholds["A"], thresholds["B"], thresholds["C"], suporte_cfg)
 
-# ── Carregar dados reais do Excel (DADOS AUTOMÁTICOS e RESUMO_MO) ─────────────
-if "real_resumo" not in st.session_state:
-    with st.spinner("Lendo dados reais do Excel..."):
+# ── Dados reais carregados sob demanda (primeira vez que a aba precisar) ──────
+# (não bloqueia o startup)
+def _load_real_data_once():
+    if "real_resumo" not in st.session_state:
         _real_resumo, _real_mensal = read_real_data(file_bytes)
-        st.session_state["real_resumo"]  = _real_resumo
-        st.session_state["real_mensal"]  = _real_mensal
-        n_meses_real = len(_real_mensal)
-        if n_meses_real:
-            st.success(f"✅ Dados reais carregados: {n_meses_real} abas mensais + RESUMO_MO")
+        st.session_state["real_resumo"] = _real_resumo
+        st.session_state["real_mensal"] = _real_mensal
 
 # ══════════════════════════════════════════
 # TAB 1 — VISÃO GERAL
@@ -2752,6 +2794,7 @@ with tab_mem:
 # TAB 4 — RESULTADOS
 # ══════════════════════════════════════════
 with tab_res:
+    _load_real_data_once()  # carrega sob demanda, sem bloquear startup
     if "cenarios" not in st.session_state:
         st.session_state.cenarios = {}
 
