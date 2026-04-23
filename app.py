@@ -2116,131 +2116,108 @@ def exportar(resultados):
 # ─────────────────────────────────────────
 def show_memoria(r, mes, df_intermediario, agg, horas_turno, thresholds):
     st.markdown(f'<div class="jd-section">Memória de cálculo — {mes}</div>', unsafe_allow_html=True)
-    st.caption("Cada passo mostra a fórmula usada e os dados reais calculados para esse mês.")
+    st.caption("Cada passo abaixo mostra exatamente o que o app fez para chegar no resultado final.")
 
     sup = r["suporte"]
     d   = r["dias"]
     hA, hB, hC = r["hA"], r["hB"], r["hC"]
 
-    # ── PASSO 1: Inputs ─────────────────────────────────────────────────────
+    # Passo 1
     st.markdown('<div class="mem-step"><span class="step-num">1</span> <b>Inputs utilizados</b></div>', unsafe_allow_html=True)
     st.markdown(
-        f"**Dias trabalhados:** {d} &nbsp;|&nbsp; Turno A: **{hA}h** &nbsp;|&nbsp; Turno B: **{hB}h** &nbsp;|&nbsp; Turno C: **{hC}h**\n\n"
-        f"Minutos disponíveis por turno (dias × horas × 60):")
-    c1,c2,c3 = st.columns(3)
-    c1.metric("Turno A", f"{r['minA']:.0f} min", f"{d}×{hA}×60")
-    c2.metric("Turno B", f"{r['minB']:.0f} min", f"{d}×{hB}×60")
-    c3.metric("Turno C", f"{r['minC']:.0f} min", f"{d}×{hC}×60")
+        f"**Dias trabalhados:** {d}  |  **Turno A:** {hA}h acumulado  |  **Turno B:** {hB}h acumulado  |  **Turno C:** {hC}h acumulado\n\n"
+        f"**Minutos disponíveis por turno** (= dias × horas × 60):\n\n"
+        f"- Turno A: **{r['minA']:.0f} min** ({d} × {hA} × 60)\n"
+        f"- Turno B: **{r['minB']:.0f} min** ({d} × {hB} × 60)\n"
+        f"- Turno C: **{r['minC']:.0f} min** ({d} × {hC} × 60)")
 
-    # Amostra dos inputs lidos
-    df_inp = df_intermediario[df_intermediario.mes==mes][
-        ["centro","peca","modelo","t_ciclo","t_labor","div_carga","div_volume","vol_int","disponib","qtd"]
-    ].head(8).copy()
-    df_inp.columns = ["Centro","Peça","Modelo","T.Ciclo","T.Labor","Div.Carga","Div.Volume","Vol.Int","Disponib","Qtd"]
-    st.caption(f"Amostra dos dados de input após JOIN (primeiras 8 linhas de {len(df_intermediario[df_intermediario.mes==mes])} combinações):")
-    st.dataframe(df_inp.reset_index(drop=True), use_container_width=True, hide_index=True)
-
-    # ── PASSO 2: Índice de ciclo ─────────────────────────────────────────────
+    # Passo 2
     st.markdown('<div class="mem-step"><span class="step-num">2</span> <b>Cálculo do índice de ciclo por linha</b></div>', unsafe_allow_html=True)
-    st.markdown('<div class="formula-box">indice_ciclo = (t_ciclo × div_carga × div_volume × vol_interna) ÷ disponibilidade<br><br>→ Representa quantos minutos de máquina são necessários para produzir 1 peça neste centro.</div>', unsafe_allow_html=True)
-    df_p2 = df_intermediario[df_intermediario.mes==mes][
-        ["centro","peca","modelo","t_ciclo","div_carga","div_volume","vol_int","disponib","indice_ciclo"]
-    ].head(8).copy().round(4)
-    df_p2.columns = ["Centro","Peça","Modelo","T.Ciclo","Div.Carga","Div.Volume","Vol.Int","Disponib","Índice Ciclo ✓"]
-    st.caption("Output do passo 2 — índice calculado por linha:")
-    st.dataframe(df_p2.reset_index(drop=True), use_container_width=True, hide_index=True)
+    st.markdown('<div class="formula-box">indice_ciclo = (t_ciclo × div_carga × div_volume × vol_interna) ÷ disponibilidade<br><br>Representa: quantos minutos de máquina são necessários para produzir 1 peça neste centro.</div>', unsafe_allow_html=True)
 
-    # ── PASSO 3: Minutos por linha ───────────────────────────────────────────
-    st.markdown('<div class="mem-step"><span class="step-num">3</span> <b>Minutos necessários por linha</b></div>', unsafe_allow_html=True)
-    st.markdown('<div class="formula-box">min_ciclo = indice_ciclo × qtd_pecas_no_mes<br>min_labor = t_labor × div_carga × qtd_pecas_no_mes</div>', unsafe_allow_html=True)
-    df_p3 = df_intermediario[df_intermediario.mes==mes][
-        ["centro","peca","modelo","indice_ciclo","qtd","min_ciclo","min_labor"]
-    ].head(8).copy().round(2)
-    df_p3.columns = ["Centro","Peça","Modelo","Índice Ciclo","Qtd Peças","Min. Ciclo ✓","Min. Labor ✓"]
-    st.caption("Output do passo 3 — minutos por combinação modelo+centro+peça:")
-    st.dataframe(df_p3.reset_index(drop=True), use_container_width=True, hide_index=True)
+    # Passo 3
+    st.markdown('<div class="mem-step"><span class="step-num">3</span> <b>Minutos necessários por linha (modelo × centro × peça)</b></div>', unsafe_allow_html=True)
+    st.markdown('<div class="formula-box">min_ciclo = indice_ciclo × qtd_pecas_no_mes<br>min_labor = t_labor × div_carga × qtd_pecas_no_mes<br><br>Aplicado para cada combinação de modelo + centro + peça presente na IMPUTAPLICAÇÃO.</div>', unsafe_allow_html=True)
 
-    # ── PASSO 4: Agrupamento por centro ─────────────────────────────────────
+    # Passo 4
     st.markdown('<div class="mem-step"><span class="step-num">4</span> <b>Agrupamento por centro</b></div>', unsafe_allow_html=True)
-    st.markdown('<div class="formula-box">SOMA de min_ciclo e min_labor de todas as combinações do mesmo centro<br>ocup_A = Σmin_ciclo ÷ min_disp_A &nbsp;|&nbsp; ocup_B = Σmin_ciclo ÷ min_disp_B &nbsp;|&nbsp; ocup_C = Σmin_ciclo ÷ min_disp_C</div>', unsafe_allow_html=True)
-    df_p4 = r["centros"][["centro","min_ciclo_total","min_labor_total","min_disp_A","ocup_A","ocup_B","ocup_C"]].copy()
-    df_p4["ocup_A"] = df_p4.ocup_A.map(lambda x: f"{x:.1%}")
-    df_p4["ocup_B"] = df_p4.ocup_B.map(lambda x: f"{x:.1%}")
-    df_p4["ocup_C"] = df_p4.ocup_C.map(lambda x: f"{x:.1%}")
-    df_p4 = df_p4.rename(columns={"centro":"Centro","min_ciclo_total":"Σ Min.Ciclo",
-        "min_labor_total":"Σ Min.Labor","min_disp_A":"Min.Disp.A",
-        "ocup_A":"Ocup. A ✓","ocup_B":"Ocup. B ✓","ocup_C":"Ocup. C ✓"})
-    st.caption("Output do passo 4 — ocupação calculada por centro:")
-    st.dataframe(df_p4.reset_index(drop=True), use_container_width=True, hide_index=True)
+    st.markdown('<div class="formula-box">SOMA de min_ciclo e min_labor de todas as linhas do mesmo centro<br><br>ocup_A = total_min_ciclo ÷ min_disp_A<br>ocup_B = total_min_ciclo ÷ min_disp_B<br>ocup_C = total_min_ciclo ÷ min_disp_C</div>', unsafe_allow_html=True)
 
-    # ── PASSO 5: Ativação de turno ───────────────────────────────────────────
-    st.markdown('<div class="mem-step"><span class="step-num">5</span> <b>Regras de ativação de turno</b></div>', unsafe_allow_html=True)
+    # Passo 5
+    st.markdown('<div class="mem-step"><span class="step-num">5</span> <b>Regras de ativação de turno por centro</b></div>', unsafe_allow_html=True)
     st.markdown(
-        f"- **Turno A** abre se ocup_A > **{thresholds['A']}%**\n"
-        f"- **Turno B** abre se ocup_A > **{thresholds['B']}%** (A não aguenta sozinho)\n"
-        f"- **Turno C** abre se ocup_B > **{thresholds['C']}%** (A+B não suficientes)")
-    df_p5 = r["centros"][["centro","ocup_A","ocup_B","ocup_C","ativo_A","ativo_B","ativo_C"]].copy()
-    df_p5["ocup_A"] = df_p5.ocup_A.map(lambda x: f"{x:.1%}")
-    df_p5["ocup_B"] = df_p5.ocup_B.map(lambda x: f"{x:.1%}")
-    df_p5["ocup_C"] = df_p5.ocup_C.map(lambda x: f"{x:.1%}")
-    df_p5 = df_p5.rename(columns={"centro":"Centro","ocup_A":"Ocup. A","ocup_B":"Ocup. B","ocup_C":"Ocup. C",
-        "ativo_A":"Ativo A ✓","ativo_B":"Ativo B ✓","ativo_C":"Ativo C ✓"})
-    st.caption(f"Output do passo 5 — ativação por centro ({r['op_A']} centros no A, {r['op_B']} no B, {r['op_C']} no C):")
-    st.dataframe(df_p5.reset_index(drop=True), use_container_width=True, hide_index=True)
+        f"- Turno A abre se **ocup_A > {thresholds['A']}%** (centro precisa de pelo menos {thresholds['A']}% da capacidade)\n"
+        f"- Turno B abre se **ocup_A > {thresholds['B']}%** (Turno A sozinho não aguenta — precisa de reforço)\n"
+        f"- Turno C abre se **ocup_B > {thresholds['C']}%** (mesmo com Turno A+B não é suficiente)")
+    st.markdown(f"**Resultado para {mes}:** CEN ativos → A: **{r['op_A']}** centros · B: **{r['op_B']}** centros · C: **{r['op_C']}** centros")
 
-    # ── PASSO 6: Suporte ─────────────────────────────────────────────────────
-    st.markdown('<div class="mem-step"><span class="step-num">6</span> <b>Funções de suporte</b></div>', unsafe_allow_html=True)
-    st.markdown("Cada função só é adicionada se o turno tiver **pelo menos 1 CEN ativo**. Se não tiver CEN no turno → suporte = 0.")
+    # Passo 6 — Suporte
+    st.markdown('<div class="mem-step"><span class="step-num">6</span> <b>Adição das funções de suporte</b></div>', unsafe_allow_html=True)
+    st.markdown("As funções de suporte são adicionadas **somente se o turno tiver pelo menos 1 operador CEN ativo.** Caso contrário = 0.")
     sup_data = []
     for nome, key in [("Lavadora e Inspeção","lavadora"),("Gravação e Estanqueidade","gravacao"),
                       ("Preset","preset"),("Coringa","coringa"),("Facilitador","facilitador")]:
         s = sup[key]
-        sup_data.append({"Função": nome, "Turno A ✓": s["A"], "Turno B ✓": s["B"], "Turno C ✓": s["C"]})
-    st.caption("Output do passo 6 — pessoas de suporte por turno:")
+        sup_data.append({"Função": nome, "Turno A": s["A"], "Turno B": s["B"], "Turno C": s["C"]})
     st.dataframe(pd.DataFrame(sup_data), use_container_width=True, hide_index=True)
 
-    # ── PASSO 7: Totais por turno ────────────────────────────────────────────
+    # Passo 7 — Totais por turno
     st.markdown('<div class="mem-step"><span class="step-num">7</span> <b>Total por turno</b></div>', unsafe_allow_html=True)
-    st.markdown('<div class="formula-box">Total Turno X = Operadores CEN + Lavadora + Gravação + Preset + Coringa + Facilitador</div>', unsafe_allow_html=True)
+    st.markdown('<div class="formula-box">Total Turno X = Operadores CEN ativos + Lavadora + Gravação + Preset + Coringa + Facilitador</div>', unsafe_allow_html=True)
     tot_data = {
-        "Função": ["Operadores CEN","Lavadora","Gravação","Preset","Coringa","Facilitador","TOTAL ✓"],
+        "": ["Operadores CEN", "Lavadora", "Gravação", "Preset", "Coringa", "Facilitador", "**TOTAL**"],
         "Turno A": [r["op_A"], sup["lavadora"]["A"], sup["gravacao"]["A"], sup["preset"]["A"],
-                    sup["coringa"]["A"], sup["facilitador"]["A"], r["tot_A"]],
+                    sup["coringa"]["A"], sup["facilitador"]["A"], f"**{r['tot_A']}**"],
         "Turno B": [r["op_B"], sup["lavadora"]["B"], sup["gravacao"]["B"], sup["preset"]["B"],
-                    sup["coringa"]["B"], sup["facilitador"]["B"], r["tot_B"]],
+                    sup["coringa"]["B"], sup["facilitador"]["B"], f"**{r['tot_B']}**"],
         "Turno C": [r["op_C"], sup["lavadora"]["C"], sup["gravacao"]["C"], sup["preset"]["C"],
-                    sup["coringa"]["C"], sup["facilitador"]["C"], r["tot_C"]],
+                    sup["coringa"]["C"], sup["facilitador"]["C"], f"**{r['tot_C']}**"],
     }
     st.dataframe(pd.DataFrame(tot_data), use_container_width=True, hide_index=True)
-    st.markdown(f"➡️ **Total geral: {r['total']} funcionários** (A: {r['tot_A']} + B: {r['tot_B']} + C: {r['tot_C']})")
+    st.markdown(f"**Total geral de funcionários: {r['total']}** (soma dos 3 turnos)")
 
-    # ── PASSO 8: Horas totais ────────────────────────────────────────────────
-    st.markdown('<div class="mem-step"><span class="step-num">8</span> <b>Horas totais disponíveis</b></div>', unsafe_allow_html=True)
-    st.markdown('<div class="formula-box">Horas CEN ativos = Σ(centros_ativos_A × dias × hA) + Σ(centros_ativos_B × dias × hB) + Σ(centros_ativos_C × dias × hC)<br>Horas todos = Σ(total_A × dias × hA) + Σ(total_B × dias × hB) + Σ(total_C × dias × hC)</div>', unsafe_allow_html=True)
+    # Passo 8 — Produtividades
+    st.markdown('<div class="mem-step"><span class="step-num">8</span> <b>Cálculo das produtividades</b></div>', unsafe_allow_html=True)
     h_todos = r["h_todos"]; h_ativos = r["h_ativos"]
-    c1,c2 = st.columns(2)
-    c1.metric("Horas CEN ativos (denominador operacional)", f"{h_ativos:.1f}h")
-    c2.metric("Horas todos os funcionários (denominador total)", f"{h_todos:.1f}h")
-
-    # ── PASSO 9: Produtividades ──────────────────────────────────────────────
-    st.markdown('<div class="mem-step"><span class="step-num">9</span> <b>Produtividades</b></div>', unsafe_allow_html=True)
-    st.markdown('<div class="formula-box">Ciclo Operacional = horas_ciclo ÷ horas_CEN_ativos<br>Ciclo Total       = horas_ciclo ÷ horas_todos<br>Labor Operacional = horas_labor ÷ horas_CEN_ativos<br>Labor Total ★     = horas_labor ÷ horas_todos</div>', unsafe_allow_html=True)
     h_ciclo = r["h_ciclo"]; h_labor = r["h_labor"]
+    st.markdown('<div class="formula-box">'
+        'Horas CEN ativos = Σ (centros ativos × dias × horas do turno)<br>'
+        'Horas totais = Σ (todos os func. × dias × horas do turno)<br><br>'
+        'Ciclo Operacional = horas_ciclo ÷ horas_CEN_ativos<br>'
+        'Ciclo Total       = horas_ciclo ÷ horas_todos<br>'
+        'Labor Operacional = horas_labor ÷ horas_CEN_ativos<br>'
+        'Labor Total ★     = horas_labor ÷ horas_todos  ← principal indicador'
+        '</div>', unsafe_allow_html=True)
     prod_data = {
         "Indicador": ["Ciclo Operacional","Ciclo Total","Labor Operacional","⭐ Labor Total"],
-        "Numerador (h)": [f"{h_ciclo:.1f}", f"{h_ciclo:.1f}", f"{h_labor:.1f}", f"{h_labor:.1f}"],
-        "Denominador (h)": [f"{h_ativos:.1f} (CEN ativos)", f"{h_todos:.1f} (todos)", f"{h_ativos:.1f} (CEN ativos)", f"{h_todos:.1f} (todos)"],
-        "Resultado ✓": [f"{r['prod_ciclo_op']:.1%}", f"{r['prod_ciclo_tot']:.1%}",
-                        f"{r['prod_labor_op']:.1%}", f"{r['prod_labor_tot']:.1%}"],
+        "Numerador": [f"{h_ciclo:.1f}h ciclo"]*2 + [f"{h_labor:.1f}h labor"]*2,
+        "Denominador": [f"{h_ativos:.1f}h CEN ativos", f"{h_todos:.1f}h todos",
+                        f"{h_ativos:.1f}h CEN ativos", f"{h_todos:.1f}h todos"],
+        "Resultado": [f"{r['prod_ciclo_op']:.1%}", f"{r['prod_ciclo_tot']:.1%}",
+                      f"{r['prod_labor_op']:.1%}", f"{r['prod_labor_tot']:.1%}"],
     }
-    st.caption("Output do passo 9 — produtividades calculadas:")
     st.dataframe(pd.DataFrame(prod_data), use_container_width=True, hide_index=True)
 
-    st.markdown("---")
+    # Tabela intermediária
+    st.markdown('<div class="jd-sub">Tabela detalhada por centro — resultado do passo 4 e 5</div>', unsafe_allow_html=True)
+    df_show = r["centros"][["centro","min_ciclo_total","min_labor_total",
+                              "min_disp_A","ocup_A","ocup_B","ocup_C",
+                              "ativo_A","ativo_B","ativo_C"]].copy()
+    df_show = df_show.rename(columns={
+        "min_ciclo_total":"Min. Ciclo Total","min_labor_total":"Min. Labor Total",
+        "min_disp_A":"Min. Disp. A","ocup_A":"Ocup. A","ocup_B":"Ocup. B","ocup_C":"Ocup. C",
+        "ativo_A":"Ativo A","ativo_B":"Ativo B","ativo_C":"Ativo C"})
+    df_show["Ocup. A"] = df_show["Ocup. A"].map(lambda x: f"{x:.1%}")
+    df_show["Ocup. B"] = df_show["Ocup. B"].map(lambda x: f"{x:.1%}")
+    df_show["Ocup. C"] = df_show["Ocup. C"].map(lambda x: f"{x:.1%}")
+    df_show["Min. Ciclo Total"] = df_show["Min. Ciclo Total"].round(1)
+    df_show["Min. Labor Total"] = df_show["Min. Labor Total"].round(1)
+    st.dataframe(df_show, use_container_width=True, hide_index=True)
+
     buf = BytesIO()
     df_intermediario[df_intermediario.mes==mes].to_excel(buf, index=False)
     buf.seek(0)
-    st.download_button("📥 Baixar base completa pós-JOIN (todas as etapas)",
+    st.download_button("📥 Baixar base tratada (pós-JOIN, pré-agrupamento)",
         data=buf, file_name=f"base_tratada_{mes}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
@@ -2930,8 +2907,7 @@ com as colunas de % ocupação calculadas pelo App. Células em **vermelho** = d
                 if aba_t not in wb_r.sheetnames: continue
                 ws_m_t=wb_r[aba_t]
                 dados_mes_t[mes_t]={
-                    "main":list(ws_m_t.iter_rows(min_row=7,max_row=63,min_col=1,max_col=18,values_only=True)),
-                    "vols":list(ws_m_t.iter_rows(min_row=7,max_row=63,min_col=88,max_col=155,values_only=True))}
+                    "main":list(ws_m_t.iter_rows(min_row=7,max_row=63,min_col=1,max_col=18,values_only=True))}
             wb_r.close()
 
             aplic_orig=pd.read_excel(BytesIO(file_bytes),sheet_name="IMPUTAPLICAÇÃO",header=0)
@@ -2985,7 +2961,7 @@ com as colunas de % ocupação calculadas pelo App. Células em **vermelho** = d
                     xl_pB_t=mrow_t[13] if len(mrow_t)>13 else None
                     xl_ciclo_t=mrow_t[15] if len(mrow_t)>15 else None
                     xl_pecas_t=mrow_t[17] if len(mrow_t)>17 else None
-                    vrow_t=dm_t.get("vols",[])[ri_t_idx] if dm_t.get("vols") and ri_t_idx<len(dm_t["vols"]) else []
+                    vrow_t=[]  # volumes por modelo do Excel não estão disponíveis em data_only
 
                     try: mc_t=float(agg_cp_t.loc[(cen_t,peca_t,mes_t),"min_ciclo"])
                     except: mc_t=0.0
@@ -3043,14 +3019,10 @@ com as colunas de % ocupação calculadas pelo App. Células em **vermelho** = d
                     for mi_t2,mod_t2 in enumerate(modelos_xl_t):
                         ci_t2=19+mi_t2
                         v_app_t=app_mod_v.get(mod_t2,0)
-                        v_xl_t=vrow_t[mi_t2] if mi_t2<len(vrow_t) else None
-                        if v_xl_t is not None:
-                            try: div_vm=abs(float(v_app_t)-float(v_xl_t or 0))>0.5
-                            except: div_vm=False
-                            fill_vm=_F_VERM if div_vm else (_F_CINZA if v_app_t else _F_BRANCO)
-                        else:
-                            fill_vm=_F_CINZA if v_app_t else _F_BRANCO
-                        _ec(ws_out,ri_t,ci_t2,v_app_t if v_app_t else None,fill_vm,False,"000000",7)
+                        # Sem comparação com Excel (valores não disponíveis em data_only)
+                        # Apenas mostra valor do app: cinza se tem valor, branco se zero
+                        _ec(ws_out,ri_t,ci_t2,v_app_t if v_app_t else None,
+                            _F_CINZA if v_app_t else _F_BRANCO,False,"000000",7)
                     ws_out.row_dimensions[ri_t].height=13
 
                 nota_rt=7+len(base_rows_t)+1
