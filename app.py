@@ -418,14 +418,18 @@ def grafico_cenarios(cenarios_dict):
     fig.update_layout(
         barmode="stack",
         title=dict(text="MÃO-DE-OBRA POR TURNO",font=dict(size=14,color=JD_VERDE_ESC)),
-        yaxis_title="Nº Funcionários",
-        yaxis2=dict(title="Labor Total (%)",tickformat=".0f",ticksuffix="%",range=[0,100]),
         legend=dict(orientation="h",y=-0.32,x=0,
                     font=dict(size=10,color="#000000"),
                     bgcolor="rgba(255,255,255,0.95)",
                     bordercolor="#AAAAAA",borderwidth=1),
         height=480,plot_bgcolor="white",paper_bgcolor="white",
-        xaxis=dict(showgrid=False),yaxis=dict(showgrid=True,gridcolor="#E8E8E8"))
+        xaxis=dict(showgrid=False,showticklabels=True,tickfont=dict(size=11,color="#1A1A1A")),
+        yaxis=dict(showgrid=True,gridcolor="#E8E8E8",showticklabels=True,
+                   tickfont=dict(size=11,color="#1A1A1A"),
+                   title="Nº Funcionários",title_font=dict(size=12,color="#1A1A1A")),
+        yaxis2=dict(title="Labor Total (%)",tickformat=".0f",ticksuffix="%",range=[0,100],
+                    showticklabels=True,tickfont=dict(size=11,color="#1A1A1A"),
+                    title_font=dict(size=12,color="#1A1A1A")))
     return fig
 
 # ─────────────────────────────────────────
@@ -1915,14 +1919,18 @@ def grafico_cenarios(cenarios_dict):
     fig.update_layout(
         barmode="stack",
         title=dict(text="MÃO-DE-OBRA POR TURNO",font=dict(size=14,color=JD_VERDE_ESC)),
-        yaxis_title="Nº Funcionários",
-        yaxis2=dict(title="Labor Total (%)",tickformat=".0f",ticksuffix="%",range=[0,100]),
         legend=dict(orientation="h",y=-0.32,x=0,
                     font=dict(size=10,color="#000000"),
                     bgcolor="rgba(255,255,255,0.95)",
                     bordercolor="#AAAAAA",borderwidth=1),
         height=480,plot_bgcolor="white",paper_bgcolor="white",
-        xaxis=dict(showgrid=False),yaxis=dict(showgrid=True,gridcolor="#E8E8E8"))
+        xaxis=dict(showgrid=False,showticklabels=True,tickfont=dict(size=11,color="#1A1A1A")),
+        yaxis=dict(showgrid=True,gridcolor="#E8E8E8",showticklabels=True,
+                   tickfont=dict(size=11,color="#1A1A1A"),
+                   title="Nº Funcionários",title_font=dict(size=12,color="#1A1A1A")),
+        yaxis2=dict(title="Labor Total (%)",tickformat=".0f",ticksuffix="%",range=[0,100],
+                    showticklabels=True,tickfont=dict(size=11,color="#1A1A1A"),
+                    title_font=dict(size=12,color="#1A1A1A")))
     return fig
 
 # ─────────────────────────────────────────
@@ -2912,7 +2920,7 @@ com as colunas de % ocupação calculadas pelo App. Células em **vermelho** = d
                 dv_i=dist[(dist.centro==cen_t)&(dist.peca==peca_t)]["div_volume"].values
                 di_i=dist[(dist.centro==cen_t)&(dist.peca==peca_t)]["disponib"].values
                 vi_val=float(vi_i[0]) if len(vi_i) else 1.0
-                idx_app_t=(float(tc_xl_t or 0)*dc_i[0]*dv_i[0]*vi_val)/di_i[0] if len(dc_i) and di_i[0] else float(idx_xl_t or 0)
+                idx_app_t=(float(tc_xl_t or 0)*dc_i[0]*dv_i[0]*vi_val)/di_i[0] if len(dc_i) and len(di_i) and di_i[0] else float(idx_xl_t or 0)
                 div_idx_t=abs(float(idx_xl_t or 0)-float(idx_app_t or 0))>0.5
 
                 _ec(ws_out,ri_t,1,cen_t,_F_VERM if any_d_t else _F_BRANCO,True,"FFFFFF" if any_d_t else "000000",8,False)
