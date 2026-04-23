@@ -2788,56 +2788,64 @@ with tab_diag:
 with tab_exp:
     st.markdown('<div class="jd-section">Exportação</div>', unsafe_allow_html=True)
 
-    # Diagnóstico em destaque
-    st.markdown('<div class="jd-sub">🔴 Diagnóstico de divergências</div>', unsafe_allow_html=True)
-    st.markdown("""
+    sub_cmp, sub_res = st.tabs(["🔍 Comparação e Diagnóstico", "📊 Resultados"])
+
+    # ══════════════════════════════════════════
+    # SUB-ABA 1 — COMPARAÇÃO E DIAGNÓSTICO
+    # ══════════════════════════════════════════
+    with sub_cmp:
+        st.markdown('<div class="jd-sub">🔴 Diagnóstico de divergências</div>', unsafe_allow_html=True)
+        st.markdown("""
 Gera um Excel com **uma aba por mês** mostrando, centro a centro, onde o App diverge do Excel de referência.
 Células em **vermelho** = divergência de ativação de turno. Inclui a ocupação calculada vs Excel e a causa provável.
-    """)
+        """)
 
-    col_d1, col_d2 = st.columns(2)
-    with col_d1:
-        with st.spinner("Gerando diagnóstico por mês... (~6s)"):
-            diag_mensal = gerar_diagnostico_mensal(
-                file_bytes, res_base, tempo, dist, aplic, pmp, dias,
-                horas_turno, thresholds)
-        st.download_button(
-            "🔴 Baixar diagnóstico por mês (recomendado)",
-            data=diag_mensal,
-            file_name="diagnostico_por_mes.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            type="primary"
-        )
-    with col_d2:
-        with st.spinner("Gerando diagnóstico de inputs..."):
-            diag_inp = gerar_excel_diagnostico(file_bytes)
-        st.download_button(
-            "🔍 Baixar diagnóstico de inputs (IMPUTDISTRIBUIÇÃO vs Excel)",
-            data=diag_inp,
-            file_name="diagnostico_inputs.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+        col_d1, col_d2 = st.columns(2)
+        with col_d1:
+            with st.spinner("Gerando diagnóstico por mês... (~6s)"):
+                diag_mensal = gerar_diagnostico_mensal(
+                    file_bytes, res_base, tempo, dist, aplic, pmp, dias,
+                    horas_turno, thresholds)
+            st.download_button(
+                "🔴 Baixar diagnóstico por mês (recomendado)",
+                data=diag_mensal,
+                file_name="diagnostico_por_mes.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary",
+                key="dl_diag_mensal"
+            )
+        with col_d2:
+            with st.spinner("Gerando diagnóstico de inputs..."):
+                diag_inp = gerar_excel_diagnostico(file_bytes)
+            st.download_button(
+                "🔍 Baixar diagnóstico de inputs (IMPUTDISTRIBUIÇÃO vs Excel)",
+                data=diag_inp,
+                file_name="diagnostico_inputs.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="dl_diag_inp"
+            )
 
-    st.markdown("---")
-    st.markdown('<div class="jd-sub">📊 Resultado no layout do Excel original</div>', unsafe_allow_html=True)
-    st.markdown("""
+        st.markdown("---")
+        st.markdown('<div class="jd-sub">📊 Resultado no layout do Excel original</div>', unsafe_allow_html=True)
+        st.markdown("""
 Gera um Excel **idêntico ao layout do seu Excel de referência** — mesmas colunas, mesmas cores (Verde=Turno A, Amarelo=Turno B, Azul=Turno C).
 **Células em vermelho** = divergência entre o que o App calculou e o que está no seu Excel.
-    """)
-    with st.spinner("Gerando resultado no layout do Excel... (~8s)"):
-        layout_data = gerar_output_layout(
-            file_bytes, res_base, tempo, dist, aplic, pmp, dias,
-            horas_turno, thresholds, suporte_cfg)
-    st.download_button(
-        "📊 Baixar resultado no layout do Excel (com divergências em vermelho)",
-        data=layout_data,
-        file_name="resultado_layout_excel.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        type="primary"
-    )
+        """)
+        with st.spinner("Gerando resultado no layout do Excel... (~8s)"):
+            layout_data = gerar_output_layout(
+                file_bytes, res_base, tempo, dist, aplic, pmp, dias,
+                horas_turno, thresholds, suporte_cfg)
+        st.download_button(
+            "📊 Baixar resultado no layout do Excel (com divergências em vermelho)",
+            data=layout_data,
+            file_name="resultado_layout_excel.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary",
+            key="dl_layout"
+        )
 
-    st.markdown("---")
-    st.markdown('<div class="jd-sub">📋 Tabelona completa — layout idêntico ao IMPUTDISTRIBUIÇÃO</div>', unsafe_allow_html=True)
+        st.markdown("---")
+        st.markdown('<div class="jd-sub">📋 Tabelona completa — layout idêntico ao IMPUTDISTRIBUIÇÃO</div>', unsafe_allow_html=True)
     st.markdown("""
 Gera a **tabelona completa** no mesmo layout do seu Excel — colunas A até os modelos todos —
 com as colunas de % ocupação calculadas pelo App. Células em **vermelho** = divergência com o Excel de referência.
@@ -2989,7 +2997,7 @@ com as colunas de % ocupação calculadas pelo App. Células em **vermelho** = d
                 idx_app_t=(float(tc_xl_t or 0)*dc_i[0]*dv_i[0]*vi_val)/di_i[0] if len(dc_i) and len(di_i) and di_i[0] else float(idx_xl_t or 0)
                 div_idx_t=abs(float(idx_xl_t or 0)-float(idx_app_t or 0))>0.5
 
-                _ec(ws_out,ri_t,1,cen_t,_F_VERM if any_d_t else _F_BRANCO,True,"FFFFFF" if any_d_t else "000000",8,False)
+                _ec(ws_out,ri_t,1,cen_t,_F_BRANCO,False,"000000",8,False)
                 _ec(ws_out,ri_t,2,peca_t,_F_BRANCO,False,"000000",8,False)
                 _ec(ws_out,ri_t,3,base_row_t[2],_F_BRANCO,False,"000000",8,False)
                 _ec(ws_out,ri_t,4,base_row_t[3],_F_BRANCO,False,"000000",8)
@@ -3018,7 +3026,7 @@ com as colunas de % ocupação calculadas pelo App. Células em **vermelho** = d
 
             nota_rt=7+len(base_rows_t)+1
             ws_out.merge_cells(f"A{nota_rt}:{get_column_letter(18+len(modelos_xl_t))}{nota_rt}")
-            nt=ws_out.cell(nota_rt,1,"🔴 Centro vermelho = divergência  |  🔴 JA.A/B/C vermelho = % ocupação difere do Excel  |  🔴 Rosa = totais/peças divergem")
+            nt=ws_out.cell(nota_rt,1,"🔴 JA.A/B/C vermelho = % ocupação difere do Excel  |  🔴 Rosa claro = totais de ciclo ou peças divergem  |  🔴 Índice rosa = índice de ciclo diverge")
             nt.font=_Ft(name="Arial",bold=True,size=8,color="CC0000")
             nt.fill=_PF("solid",fgColor="FFEEEE")
             nt.alignment=_Al(horizontal="left",vertical="center")
@@ -3026,32 +3034,41 @@ com as colunas de % ocupação calculadas pelo App. Células em **vermelho** = d
 
         tabelona_buf=BytesIO(); wb_out.save(tabelona_buf); tabelona_buf.seek(0)
 
-    st.download_button(
-        "📋 Baixar tabelona completa (layout IMPUTDISTRIBUIÇÃO + divergências)",
-        data=tabelona_buf,
-        file_name="tabelona_por_mes.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
+        st.download_button(
+            "📋 Baixar tabelona completa (layout IMPUTDISTRIBUIÇÃO + divergências)",
+            data=tabelona_buf,
+            file_name="tabelona_por_mes.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="dl_tabelona"
+        )
 
-    st.markdown("---")
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("**Resultado completo (todas as abas)**")
-        st.caption("RESUMO MO + uma aba por mês com tabela no formato original")
-        st.download_button("📥 Baixar resultado base",
-            data=exportar(res_base), file_name="resultado_usinagem.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    with c2:
-        st.markdown("**Base tratada (pós-JOIN completo)**")
-        st.caption("Todos os meses, todas as linhas de centro+peça+modelo+minutos")
-        buf=BytesIO(); df_interm.to_excel(buf,index=False); buf.seek(0)
-        st.download_button("📥 Baixar base tratada completa",
-            data=buf, file_name="base_tratada_completa.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    if st.session_state.get("cenarios"):
-        st.markdown('<div class="jd-sub">Cenários salvos</div>', unsafe_allow_html=True)
-        for nm,v in st.session_state.cenarios.items():
-            st.download_button(f"📥 Cenário: {nm}", data=exportar(v["resultados"]),
-                file_name=f"cenario_{nm.replace(' ','_')}.xlsx",
+    # ══════════════════════════════════════════
+    # SUB-ABA 2 — RESULTADOS REAIS
+    # ══════════════════════════════════════════
+    with sub_res:
+        st.markdown('<div class="jd-sub">📋 Resultado completo e base tratada</div>', unsafe_allow_html=True)
+        st.markdown("Exportações dos **resultados reais** calculados pelo App, sem comparação com o Excel de referência.")
+
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("**Resultado completo (todas as abas)**")
+            st.caption("RESUMO MO + uma aba por mês com tabela no formato original")
+            st.download_button("📥 Baixar resultado base",
+                data=exportar(res_base), file_name="resultado_usinagem.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key=f"exp_{nm}")
+                key="dl_res_base")
+        with c2:
+            st.markdown("**Base tratada (pós-JOIN completo)**")
+            st.caption("Todos os meses, todas as linhas de centro+peça+modelo+minutos")
+            buf=BytesIO(); df_interm.to_excel(buf,index=False); buf.seek(0)
+            st.download_button("📥 Baixar base tratada completa",
+                data=buf, file_name="base_tratada_completa.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="dl_base_tratada")
+        if st.session_state.get("cenarios"):
+            st.markdown('<div class="jd-sub">Cenários salvos</div>', unsafe_allow_html=True)
+            for nm,v in st.session_state.cenarios.items():
+                st.download_button(f"📥 Cenário: {nm}", data=exportar(v["resultados"]),
+                    file_name=f"cenario_{nm.replace(' ','_')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"exp_{nm}")
