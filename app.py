@@ -2922,8 +2922,12 @@ com as colunas de % ocupação calculadas pelo App. Células em **vermelho** = d
             ws_nov_t=wb_r[next(a for a in ["NovFY26","DezFY26"] if a in wb_r.sheetnames)]
             base_rows_t=list(ws_nov_t.iter_rows(min_row=7,max_row=63,min_col=1,max_col=87,values_only=True))
             base_rows_t=[r for r in base_rows_t if r[0] and r[1]]
+            # modelos_xl_t: lista de nomes de modelo (col 19-87 com header MODELO X)
+            # modelo_col_idx: dict modelo -> índice dentro do iter_rows (col - 19)
             modelos_xl_t=[str(ws_nov_t.cell(6,c).value) for c in range(19,88)
                           if ws_nov_t.cell(6,c).value and str(ws_nov_t.cell(6,c).value).startswith("MODELO")]
+            modelo_col_idx={str(ws_nov_t.cell(6,c).value):(c-19) for c in range(19,88)
+                            if ws_nov_t.cell(6,c).value and str(ws_nov_t.cell(6,c).value).startswith("MODELO")}
 
             dados_mes_t={}
             for mes_t,aba_t in MAPA_T.items():
@@ -2931,7 +2935,7 @@ com as colunas de % ocupação calculadas pelo App. Células em **vermelho** = d
                 ws_m_t=wb_r[aba_t]
                 dados_mes_t[mes_t]={
                     "main":list(ws_m_t.iter_rows(min_row=7,max_row=63,min_col=1,max_col=18,values_only=True)),
-                    "vols":list(ws_m_t.iter_rows(min_row=7,max_row=63,min_col=88,max_col=155,values_only=True))}
+                    "vols":list(ws_m_t.iter_rows(min_row=7,max_row=63,min_col=19,max_col=87,values_only=True))}
             wb_r.close()
 
             aplic_orig=pd.read_excel(BytesIO(file_bytes),sheet_name="IMPUTAPLICAÇÃO",header=0)
@@ -3043,7 +3047,9 @@ com as colunas de % ocupação calculadas pelo App. Células em **vermelho** = d
                     for mi_t2,mod_t2 in enumerate(modelos_xl_t):
                         ci_t2=19+mi_t2
                         v_app_t=app_mod_v.get(mod_t2,0)
-                        v_xl_t=vrow_t[mi_t2] if mi_t2<len(vrow_t) else None
+                        # Usar índice correto da coluna no iter_rows (pode haver cols sem header)
+                        col_idx=modelo_col_idx.get(mod_t2, mi_t2)
+                        v_xl_t=vrow_t[col_idx] if vrow_t and col_idx<len(vrow_t) else None
                         if v_xl_t is not None:
                             try: div_vm=abs(float(v_app_t)-float(v_xl_t or 0))>0.5
                             except: div_vm=False
