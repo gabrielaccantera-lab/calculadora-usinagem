@@ -546,6 +546,72 @@ def exportar(resultados):
     return out
 
 # ─────────────────────────────────────────
+# HELPERS GLOBAIS
+# ─────────────────────────────────────────
+def safe_int(v):
+    try: return int(float(v)) if v is not None else 0
+    except: return 0
+
+def safe_float(v):
+    try: return float(v) if v is not None else 0.0
+    except: return 0.0
+
+# Fills globais para diagnóstico
+_BRD_DIAG = Border(
+    left=Side(style='thin',color='CCCCCC'), right=Side(style='thin',color='CCCCCC'),
+    top=Side(style='thin',color='CCCCCC'),  bottom=Side(style='thin',color='CCCCCC'))
+
+VERDE_HEADER   = PatternFill("solid", fgColor="1F4D19")
+VERMELHO_HEADER= PatternFill("solid", fgColor="C62828")
+CINZA_HEADER   = PatternFill("solid", fgColor="555555")
+VERMELHO_CLARO = PatternFill("solid", fgColor="FFCDD2")
+VERMELHO_ESCURO= PatternFill("solid", fgColor="C62828")
+AMARELO        = PatternFill("solid", fgColor="FFDE00")
+VERDE          = PatternFill("solid", fgColor="E8F5E9")
+
+# Fills para gerar_diagnostico_mensal / gerar_output_layout
+F_HDR_VERD  = PatternFill("solid", fgColor="1F4D19")
+F_HDR_AMAR  = PatternFill("solid", fgColor="FFDE00")
+F_HDR_CINZA = PatternFill("solid", fgColor="555555")
+F_CINZA_CLR = PatternFill("solid", fgColor="F4F4F4")
+F_BRANCO    = PatternFill("solid", fgColor="FFFFFF")
+F_VERM_CLR  = PatternFill("solid", fgColor="FFCDD2")
+F_AMAR      = PatternFill("solid", fgColor="FFDE00")
+F_VERDE     = PatternFill("solid", fgColor="E8F5E9")
+F_VERDE_MED = PatternFill("solid", fgColor="C8E6C9")
+F_AZUL_CLR  = PatternFill("solid", fgColor="E3F2FD")
+
+# Fills para gerar_output_layout
+C_VERDE    = PatternFill("solid", fgColor="92D050")
+C_AMAR     = PatternFill("solid", fgColor="FFFF00")
+C_AZUL     = PatternFill("solid", fgColor="00B0F0")
+C_PRETO    = PatternFill("solid", fgColor="000000")
+C_CINZA    = PatternFill("solid", fgColor="D9D9D9")
+C_BRANCO   = PatternFill("solid", fgColor="FFFFFF")
+C_ROSA     = PatternFill("solid", fgColor="FFB6C1")
+C_VERM_DIV = PatternFill("solid", fgColor="FF0000")
+
+def cor_ocup(pct):
+    try:
+        v = float(pct)
+        if v >= 1.06: return PatternFill("solid", fgColor="FF0000")
+        if v >= 1.00: return PatternFill("solid", fgColor="FFFF00")
+        if v >= 0.40: return PatternFill("solid", fgColor="92D050")
+        return PatternFill("solid", fgColor="FFFFFF")
+    except: return PatternFill("solid", fgColor="FFFFFF")
+
+def ec(ws, r, c, val, fill=None, bold=False, color="000000", size=9, center=True, italic=False, comment_text=None):
+    cell = ws.cell(row=r, column=c, value=val)
+    cell.font = Font(name="Arial", bold=bold, color=color, size=size, italic=italic)
+    cell.fill = fill or F_BRANCO
+    cell.alignment = Alignment(horizontal="center" if center else "left", vertical="center", wrap_text=True)
+    cell.border = _BRD_DIAG
+    return cell
+
+def cell_style(ws, r, c, val, fill=None, bold=False, color="000000", font_size=9, center=True, italic=False, comment_text=None):
+    return ec(ws, r, c, val, fill, bold, color, font_size, center, italic, comment_text)
+
+# ─────────────────────────────────────────
 # DIAGNÓSTICO DE DIVERGÊNCIAS — EXCEL DE SAÍDA
 # ─────────────────────────────────────────
 def gerar_excel_diagnostico(file_bytes):
