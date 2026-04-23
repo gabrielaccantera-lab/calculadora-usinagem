@@ -1899,9 +1899,9 @@ def calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg
     return resultados
 
 # ─────────────────────────────────────────
-# TABELA RESULTADO
+# TABELA RESULTADO (versão principal — com horas/minutos + comparação real)
 # ─────────────────────────────────────────
-def show_tabela(r):
+def show_tabela(r, real_mensal=None, mes=None):
     dias=r["dias"]; hA,hB,hC=r["hA"],r["hB"],r["hC"]
     rows=[]
     for _,row in r["centros"].iterrows():
@@ -1953,8 +1953,15 @@ def show_tabela(r):
     c3.metric("Labor operacional",f"{r['prod_labor_op']:.0%}")
     c4.metric("⭐ Labor total",f"{r['prod_labor_tot']:.0%}")
 
-# ─────────────────────────────────────────
-# GRÁFICO
+    # ── TABELA DE HORAS E MINUTOS ─────────────────────────────────────────
+    st.markdown('<div class="jd-sub">📊 Horas e minutos disponíveis no mês</div>', unsafe_allow_html=True)
+    show_horas_minutos_table(r, None, mes)
+
+    # ── COMPARAÇÃO COM EXCEL DADOS AUTOMÁTICOS ─────────────────────────────
+    if real_mensal is not None and mes:
+        st.markdown('<div class="jd-sub">🔄 App vs Excel — DADOS AUTOMÁTICOS (comparação com o real)</div>', unsafe_allow_html=True)
+        show_real_vs_app(r, real_mensal, mes)
+
 # ─────────────────────────────────────────
 def grafico_cenarios(cenarios_dict):
     fig=make_subplots(specs=[[{"secondary_y":True}]])
@@ -2114,6 +2121,327 @@ def exportar(resultados):
 # ─────────────────────────────────────────
 # COMPARAÇÃO COM EXCEL REFERÊNCIA
 # ─────────────────────────────────────────
+# ─────────────────────────────────────────
+# LEITURA DE DADOS REAIS DO EXCEL (DADOS AUTOMÁTICOS)
+# ─────────────────────────────────────────
+def read_real_data(file_bytes):
+    """Lê os dados reais calculados pelo Excel:
+    - RESUMO_MO: totais por turno e produtividade por mês
+    - Abas mensais: DADOS AUTOMÁTICOS (cols W-AF, linhas 68-96) + horas por turno (linha 67)
+    """
+    MAPA = {
+        "Novembro":"NovFY26","Dezembro":"DezFY26","Janeiro":"JanFY26",
+        "Fevereiro":"FevFY26","Março":"MarFY26","Abril":"AbrFY26",
+        "Maio":"MaiFY26","Junho":"JunFY26","Julho":"JulFY26",
+        "Agosto":"AgoFY26","Setembro":"SetFY26","Outubro":"OutFY26",
+    }
+    MESES_ABREV_MAP = dict(zip(
+        ["Novembro","Dezembro","Janeiro","Fevereiro","Março","Abril",
+         "Maio","Junho","Julho","Agosto","Setembro","Outubro"],
+        ["NOV","DEZ","JAN","FEV","MAR","ABR","MAI","JUN","JUL","AGO","SET","OUT"]
+    ))
+    try:
+        wb = openpyxl.load_workbook(BytesIO(file_bytes), read_only=True, data_only=True)
+    except Exception as e:
+        return {}, {}
+
+    abas = wb.sheetnames
+
+    # ── RESUMO_MO: totais por turno e produtividade ──────────────────────────
+    resumo_real = {}
+    if "RESUMO_MO" in abas:
+        ws_r = wb["RESUMO_MO"]
+        # R3=TURNO A, R4=B, R5=C, R6=TOTAL, R7=PROD
+        # cols: 3=NOV, 4=DEZ, ..., 14=OUT, 15=ANO
+        meses_list = list(MESES_ABREV_MAP.keys())
+        for idx, mes in enumerate(meses_list, 3):
+            tA = safe_int(ws_r.cell(3, idx).value)
+            tB = safe_int(ws_r.cell(4, idx).value)
+            tC = safe_int(ws_r.cell(5, idx).value)
+            tot = safe_int(ws_r.cell(6, idx).value)
+            prod_raw = ws_r.cell(7, idx).value
+            try:
+                prod = float(prod_raw) if prod_raw not in (None, "#DIV/0!") else None
+            except:
+                prod = None
+            resumo_real[mes] = {"tot_A": tA, "tot_B": tB, "tot_C": tC,
+                                 "total": tot, "prod_esperada": prod}
+        # ANO (col 15)
+        resumo_real["_ANO"] = {
+            "tot_A": safe_int(ws_r.cell(3, 15).value),
+            "tot_B": safe_int(ws_r.cell(4, 15).value),
+            "tot_C": safe_int(ws_r.cell(5, 15).value),
+            "total": safe_int(ws_r.cell(6, 15).value),
+        }
+
+    # ── Abas mensais: DADOS AUTOMÁTICOS (cols W=23 a AF=32, linhas 68-96) ──
+    mensal_real = {}
+    for mes, aba in MAPA.items():
+        if aba not in abas:
+            continue
+        ws_m = wb[aba]
+        # Linha 67 col 30=AF: horas por turno (W=col23=hA, X=24=hB, Y=25 n/a, Z=26 n/a)
+        # Row 67: cols 30(AF)=hA, 31=hB, 32=hC  based on image: 8.8, 8.23, 7.68
+        # Actually from our inspection: R67 col 30=hA=8.8, 31=hB=8.23, 32=hC=7.68
+        hA_r = safe_float(ws_m.cell(67, 30).value)
+        hB_r = safe_float(ws_m.cell(67, 31).value)
+        hC_r = safe_float(ws_m.cell(67, 32).value)
+        # Row 66: col 34=data revisao; col 28=horas por turno label
+        # Days from header row 66 col 29 area? Actually dias comes from INPUT_PMP
+        # But we have it in res_app already. Let's just read totais.
+        # Rows 69-88: centros (col 23=centro, 24=ocup_A, 25=ocup_B, 26=ocup_C, 27=ativo_A, 28=ativo_B, 29=ativo_C, 30=horas_A, 31=horas_B, 32=horas_C)
+        centros_r = {}
+        for row_i in range(69, 89):
+            cen_v = ws_m.cell(row_i, 23).value
+            if not cen_v:
+                continue
+            centros_r[str(cen_v).strip()] = {
+                "ocup_A": safe_float(ws_m.cell(row_i, 24).value),
+                "ocup_B": safe_float(ws_m.cell(row_i, 25).value),
+                "ocup_C": safe_float(ws_m.cell(row_i, 26).value),
+                "ativo_A": safe_int(ws_m.cell(row_i, 27).value),
+                "ativo_B": safe_int(ws_m.cell(row_i, 28).value),
+                "ativo_C": safe_int(ws_m.cell(row_i, 29).value),
+                "horas_A": safe_float(ws_m.cell(row_i, 30).value),
+                "horas_B": safe_float(ws_m.cell(row_i, 31).value),
+                "horas_C": safe_float(ws_m.cell(row_i, 32).value),
+            }
+        # Row 89: TOTAL DE OPERADORES
+        op_A_r = safe_int(ws_m.cell(89, 27).value)
+        op_B_r = safe_int(ws_m.cell(89, 28).value)
+        op_C_r = safe_int(ws_m.cell(89, 29).value)
+        # Row 95: TOTAL POR TURNO
+        tot_A_r = safe_int(ws_m.cell(95, 27).value)
+        tot_B_r = safe_int(ws_m.cell(95, 28).value)
+        tot_C_r = safe_int(ws_m.cell(95, 29).value)
+        h_tot_A_r = safe_float(ws_m.cell(95, 30).value)
+        h_tot_B_r = safe_float(ws_m.cell(95, 31).value)
+        h_tot_C_r = safe_float(ws_m.cell(95, 32).value)
+        # Row 96: TOTAL FUNCIONARIOS
+        total_r = safe_int(ws_m.cell(96, 27).value)
+        h_total_r = safe_float(ws_m.cell(96, 30).value)
+        # Rows 98-101: produtividades (col 30)
+        ciclo_op_r  = safe_float(ws_m.cell(98, 30).value)
+        ciclo_tot_r = safe_float(ws_m.cell(99, 30).value)
+        labor_op_r  = safe_float(ws_m.cell(100, 30).value)
+        labor_tot_r = safe_float(ws_m.cell(101, 30).value)
+
+        mensal_real[mes] = {
+            "hA": hA_r, "hB": hB_r, "hC": hC_r,
+            "centros": centros_r,
+            "op_A": op_A_r, "op_B": op_B_r, "op_C": op_C_r,
+            "tot_A": tot_A_r, "tot_B": tot_B_r, "tot_C": tot_C_r,
+            "total": total_r,
+            "h_tot_A": h_tot_A_r, "h_tot_B": h_tot_B_r, "h_tot_C": h_tot_C_r,
+            "h_total": h_total_r,
+            "prod_ciclo_op": ciclo_op_r, "prod_ciclo_tot": ciclo_tot_r,
+            "prod_labor_op": labor_op_r, "prod_labor_tot": labor_tot_r,
+        }
+
+    wb.close()
+    return resumo_real, mensal_real
+
+
+def show_horas_minutos_table(r, dias_dict, mes):
+    """Exibe a tabela de TOTAL DE MINUTOS / TOTAL DE HORAS / DIAS TRABALHADOS / HORAS POR TURNO."""
+    d = r["dias"]; hA = r["hA"]; hB = r["hB"]; hC = r["hC"]
+    # Horas por turno = acumuladas (hA, hB, hC são acumuladas)
+    # Minutos por turno = dias * horas_acumuladas * 60
+    min_A = d * hA * 60
+    min_B = d * hB * 60
+    min_C = d * hC * 60
+    h_A = d * hA
+    h_B = d * hB
+    h_C = d * hC
+
+    df_hm = pd.DataFrame([
+        {"": "TOTAL DE MINUTOS", "Turno A": round(min_A, 1), "Turno B": round(min_B, 1), "Turno C": round(min_C, 1)},
+        {"": "TOTAL DE HORAS",   "Turno A": round(h_A, 2),   "Turno B": round(h_B, 2),   "Turno C": round(h_C, 2)},
+        {"": "DIAS TRABALHADOS", "Turno A": d,                "Turno B": d,                "Turno C": d},
+        {"": "HORAS POR TURNO",  "Turno A": hA,               "Turno B": hB,               "Turno C": hC},
+    ])
+
+    def style_hm(row):
+        label = row[""]
+        if "MINUTOS" in label:
+            return ["background-color:#1F4D19;color:#FFDE00;font-weight:700"]*4
+        if "HORAS" in label and "TURNO" not in label:
+            return ["background-color:#1F4D19;color:#FFFFFF;font-weight:700"]*4
+        if "DIAS" in label:
+            return ["background-color:#2E7D32;color:#FFFFFF;font-weight:600"]*4
+        return ["background-color:#F4F4F4;color:#1A1A1A"]*4
+
+    st.dataframe(df_hm.style.apply(style_hm, axis=1), use_container_width=True, hide_index=True)
+
+
+def show_real_vs_app(r_app, real_mensal, mes):
+    """Compara App calculado vs Excel DADOS AUTOMÁTICOS para o mês."""
+    if not real_mensal:
+        st.info("Dados reais do Excel não encontrados. Suba o arquivo com as abas mensais calculadas.")
+        return
+    real = real_mensal.get(mes)
+    if not real:
+        st.info(f"Aba {mes} não encontrada no Excel de referência.")
+        return
+
+    # Construir tabela de comparação de totais
+    rows_cmp = []
+    for label, app_v, xl_v in [
+        ("Turno A — Operadores CEN", r_app["op_A"],  real["op_A"]),
+        ("Turno B — Operadores CEN", r_app["op_B"],  real["op_B"]),
+        ("Turno C — Operadores CEN", r_app["op_C"],  real["op_C"]),
+        ("TOTAL POR TURNO — A",      r_app["tot_A"], real["tot_A"]),
+        ("TOTAL POR TURNO — B",      r_app["tot_B"], real["tot_B"]),
+        ("TOTAL POR TURNO — C",      r_app["tot_C"], real["tot_C"]),
+        ("TOTAL FUNCIONÁRIOS",       r_app["total"], real["total"]),
+    ]:
+        delta = int(app_v) - int(xl_v)
+        icon = "✅" if delta == 0 else ("🟡" if abs(delta) <= 2 else "🔴")
+        rows_cmp.append({"Indicador": label, "App": app_v, "Excel (Real)": xl_v,
+                          "Δ": f"{delta:+d}", "Status": icon})
+
+    # Produtividades
+    for label, app_v, xl_v in [
+        ("Ciclo Operacional",  r_app["prod_ciclo_op"],  real["prod_ciclo_op"]),
+        ("Ciclo Total",        r_app["prod_ciclo_tot"], real["prod_ciclo_tot"]),
+        ("Labor Operacional",  r_app["prod_labor_op"],  real["prod_labor_op"]),
+        ("⭐ Labor Total",      r_app["prod_labor_tot"], real["prod_labor_tot"]),
+    ]:
+        delta_p = app_v - xl_v if xl_v else 0
+        icon_p = "✅" if abs(delta_p) < 0.005 else ("🟡" if abs(delta_p) < 0.02 else "🔴")
+        rows_cmp.append({"Indicador": label,
+                          "App": f"{app_v:.1%}", "Excel (Real)": f"{xl_v:.1%}" if xl_v else "—",
+                          "Δ": f"{delta_p:+.1%}", "Status": icon_p})
+
+    df_cmp = pd.DataFrame(rows_cmp)
+
+    def style_cmp(row):
+        st_val = str(row.get("Status", ""))
+        if "✅" in st_val:   base = "background-color:#003D10;color:#B9F6CA"
+        elif "🟡" in st_val: base = "background-color:#3D2D00;color:#FFE57F"
+        else:                base = "background-color:#3D0000;color:#FF8A80"
+        return ["", "", "", "", base]
+
+    st.dataframe(df_cmp.style.apply(style_cmp, axis=1), use_container_width=True, hide_index=True)
+
+
+def show_fy26_anual(res_base, real_resumo, dias, horas_turno):
+    """Exibe resumo FY26 anual: app calculado vs real do Excel, e totais acumulados."""
+    st.markdown('<div class="jd-section">📅 Resumo FY26 — Visão Anual</div>', unsafe_allow_html=True)
+
+    rows_ano = []
+    totais_app = {"tot_A": 0, "tot_B": 0, "tot_C": 0, "h_ciclo": 0, "h_labor": 0, "h_ativos": 0, "h_todos": 0}
+    totais_xl  = {"tot_A": 0, "tot_B": 0, "tot_C": 0}
+
+    for mes, abr in zip(MESES, MESES_ABREV):
+        r = res_base.get(mes)
+        d = dias.get(mes, 0)
+        real = real_resumo.get(mes, {}) if real_resumo else {}
+        if not r:
+            continue
+
+        # Acumular para totais anuais
+        totais_app["tot_A"]   += r["tot_A"]
+        totais_app["tot_B"]   += r["tot_B"]
+        totais_app["tot_C"]   += r["tot_C"]
+        totais_app["h_ciclo"] += r["h_ciclo"]
+        totais_app["h_labor"] += r["h_labor"]
+        totais_app["h_ativos"]+= r["h_ativos"]
+        totais_app["h_todos"] += r["h_todos"]
+        if real:
+            totais_xl["tot_A"] += real.get("tot_A", 0)
+            totais_xl["tot_B"] += real.get("tot_B", 0)
+            totais_xl["tot_C"] += real.get("tot_C", 0)
+
+        hA = horas_turno["A"]; hB = horas_turno["B"]; hC = horas_turno["C"]
+        min_A = d * hA * 60; min_B = d * hB * 60; min_C = d * hC * 60
+
+        xl_tot = real.get("total", None)
+        delta_tot = r["total"] - xl_tot if xl_tot else None
+        icon = "—" if xl_tot is None else ("✅" if delta_tot == 0 else ("🟡" if abs(delta_tot) <= 2 else "🔴"))
+
+        xl_labor = real.get("prod_esperada", None)
+        row = {
+            "Mês":          abr,
+            "Dias":         d,
+            "Min. Turno A": round(min_A, 0),
+            "Min. Turno B": round(min_B, 0),
+            "Min. Turno C": round(min_C, 0),
+            "H. Turno A":   round(d * hA, 1),
+            "H. Turno B":   round(d * hB, 1),
+            "H. Turno C":   round(d * hC, 1),
+            "App — A":      r["tot_A"],
+            "App — B":      r["tot_B"],
+            "App — C":      r["tot_C"],
+            "App — Total":  r["total"],
+            "Excel — Total": xl_tot if xl_tot else "—",
+            "Δ Total":      f"{delta_tot:+d}" if delta_tot is not None else "—",
+            "Labor App":    f"{r['prod_labor_tot']:.1%}",
+            "Labor Excel":  f"{xl_labor:.1%}" if xl_labor else "—",
+            "Status":       icon,
+        }
+        rows_ano.append(row)
+
+    df_ano = pd.DataFrame(rows_ano)
+
+    def style_ano(row):
+        st_val = str(row.get("Status", ""))
+        styles = []
+        for col in df_ano.columns:
+            if col == "Status":
+                if "✅" in st_val:   styles.append("background-color:#003D10;color:#B9F6CA;font-weight:700")
+                elif "🟡" in st_val: styles.append("background-color:#3D2D00;color:#FFE57F;font-weight:700")
+                elif "🔴" in st_val: styles.append("background-color:#3D0000;color:#FF8A80;font-weight:700")
+                else:                styles.append("")
+            elif col in ("Min. Turno A", "Min. Turno B", "Min. Turno C"):
+                styles.append("background-color:#1F4D19;color:#FFDE00;font-weight:600")
+            elif col in ("H. Turno A", "H. Turno B", "H. Turno C"):
+                styles.append("background-color:#2E7D32;color:#FFFFFF")
+            elif col in ("App — A", "App — B", "App — C", "App — Total"):
+                styles.append("background-color:#E3F2FD;color:#01579B")
+            elif col == "Δ Total":
+                v = str(row.get("Δ Total", "0"))
+                try:
+                    n = int(v.replace("+",""))
+                    if n == 0:   styles.append("background-color:#003D10;color:#B9F6CA;font-weight:700")
+                    elif abs(n) <= 2: styles.append("background-color:#3D2D00;color:#FFE57F;font-weight:700")
+                    else:        styles.append("background-color:#3D0000;color:#FF8A80;font-weight:700")
+                except:          styles.append("")
+            else:
+                styles.append("")
+        return styles
+
+    st.dataframe(df_ano.style.apply(style_ano, axis=1), use_container_width=True, hide_index=True)
+
+    # Métricas resumo anuais
+    st.markdown('<div class="jd-sub">Totais acumulados FY26</div>', unsafe_allow_html=True)
+    prod_labor_tot_ano = totais_app["h_labor"] / totais_app["h_todos"] if totais_app["h_todos"] > 0 else 0
+    prod_ciclo_tot_ano = totais_app["h_ciclo"] / totais_app["h_todos"] if totais_app["h_todos"] > 0 else 0
+    c1,c2,c3,c4,c5 = st.columns(5)
+    c1.metric("Total h. ciclo acum.", f"{totais_app['h_ciclo']:.0f}h")
+    c2.metric("Total h. labor acum.", f"{totais_app['h_labor']:.0f}h")
+    c3.metric("Total h. disponíveis", f"{totais_app['h_todos']:.0f}h")
+    c4.metric("⭐ Labor Total FY26",   f"{prod_labor_tot_ano:.1%}")
+    c5.metric("Ciclo Total FY26",     f"{prod_ciclo_tot_ano:.1%}")
+
+    # Comparação anual com Excel RESUMO_MO
+    if real_resumo and real_resumo.get("_ANO"):
+        ano_xl = real_resumo["_ANO"]
+        st.markdown('<div class="jd-sub">App vs Excel — Totais por turno FY26</div>', unsafe_allow_html=True)
+        rows_diff = []
+        for turno, app_v, xl_v in [
+            ("Turno A", totais_app["tot_A"], ano_xl["tot_A"]),
+            ("Turno B", totais_app["tot_B"], ano_xl["tot_B"]),
+            ("Turno C", totais_app["tot_C"], ano_xl["tot_C"]),
+        ]:
+            delta = app_v - xl_v
+            icon = "✅" if delta == 0 else ("🟡" if abs(delta) <= 5 else "🔴")
+            rows_diff.append({"Turno": turno, "App (acum.)": app_v,
+                               "Excel RESUMO_MO (acum.)": xl_v,
+                               "Δ": f"{delta:+d}", "Status": icon})
+        st.dataframe(pd.DataFrame(rows_diff), use_container_width=True, hide_index=True)
+
+
 def show_memoria(r, mes, df_intermediario, agg, horas_turno, thresholds):
     st.markdown(f'<div class="jd-section">Memória de cálculo — {mes}</div>', unsafe_allow_html=True)
     st.caption("Cada passo mostra a fórmula usada e os dados reais calculados para esse mês.")
@@ -2313,6 +2641,9 @@ file_bytes = uploaded.read()
 if "log_leitura" not in st.session_state:
     st.session_state.log_leitura = []
 st.session_state.log_leitura = []
+# Clear real data cache on new upload
+for _k in ("real_resumo", "real_mensal"):
+    if _k in st.session_state: del st.session_state[_k]
 
 with st.spinner("Lendo planilha..."):
     try:
@@ -2409,6 +2740,16 @@ dias_hash = hash(str(dias))
 res_base, df_interm, agg_interm = calcular(
     pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg,
     retornar_intermediarios=True)
+
+# ── Carregar dados reais do Excel (DADOS AUTOMÁTICOS e RESUMO_MO) ─────────────
+if "real_resumo" not in st.session_state:
+    with st.spinner("Lendo dados reais do Excel..."):
+        _real_resumo, _real_mensal = read_real_data(file_bytes)
+        st.session_state["real_resumo"]  = _real_resumo
+        st.session_state["real_mensal"]  = _real_mensal
+        n_meses_real = len(_real_mensal)
+        if n_meses_real:
+            st.success(f"✅ Dados reais carregados: {n_meses_real} abas mensais + RESUMO_MO")
 
 # ══════════════════════════════════════════
 # TAB 1 — VISÃO GERAL
@@ -2548,7 +2889,11 @@ Turno C: <b>{r['tot_C']} pessoas</b> &nbsp;|&nbsp;
 - A linha **TOTAL POR TURNO** já inclui operadores CEN + suporte
             """)
 
-        show_tabela(r)
+        show_tabela(r, real_mensal=st.session_state.get("real_mensal"), mes=mes_r)
+
+    # ── FY26 ANUAL ──────────────────────────────────────────────────────
+    st.markdown("---")
+    show_fy26_anual(res_base, st.session_state.get("real_resumo", {}), dias, horas_turno)
 
     st.markdown('<div class="jd-section">Simulador de cenários</div>', unsafe_allow_html=True)
     with st.expander("➕ Criar novo cenário", expanded=len(st.session_state.cenarios)==0):
