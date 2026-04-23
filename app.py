@@ -8,6 +8,17 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from datetime import datetime
+import json as _json
+
+# ─── Helpers globais ─────────────────────────────────────────────────────────
+def safe_int(v):
+    try: return int(float(v)) if v is not None else 0
+    except: return 0
+
+def safe_float(v):
+    try: return float(v) if v is not None else 0.0
+    except: return 0.0
+
 
 st.set_page_config(page_title="Calculadora de Recursos — Usinagem", layout="wide", page_icon="🏭")
 
@@ -1886,6 +1897,20 @@ def calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg
     return resultados
 
 # ─────────────────────────────────────────
+# CACHE DE CÁLCULO (nível de módulo — obrigatório para st.cache_data)
+# ─────────────────────────────────────────
+@st.cache_data(show_spinner=False, ttl=3600)
+def _calcular_cached(pmp_hash, _pmp, _tempo, _dist, _aplic,
+                     dias_hash, _dias, hA, hB, hC, tA, tB, tC, sup_str):
+    """Wrapper cacheável: suporte_cfg passa como string para ser hashável."""
+    import json as _json
+    _sup = _json.loads(sup_str)
+    return calcular(_pmp, _tempo, _dist, _aplic, _dias,
+                    {"A":hA,"B":hB,"C":hC}, {"A":tA,"B":tB,"C":tC}, _sup,
+                    retornar_intermediarios=True)
+
+
+# ─────────────────────────────────────────
 # TABELA RESULTADO (versão principal — com horas/minutos + comparação real)
 # ─────────────────────────────────────────
 def show_tabela(r, real_mensal=None, mes=None):
@@ -1959,7 +1984,7 @@ def exportar(resultados):
         c.alignment=Alignment(horizontal="center" if center else "left",vertical="center")
         c.border=brd
         if fmt and isinstance(fmt, str) and len(fmt) > 0:
-            try: c.number_format=fmt
+            try: c.number_format=str(fmt)
             except: pass
     ws=wb.active; ws.title="RESUMO MO"
     JD_V=JD_VERDE_ESC.replace("#",""); JD_Y=JD_AMARELO.replace("#","")
@@ -1972,10 +1997,12 @@ def exportar(resultados):
             abr,r["dias"],r["tot_A"],r["tot_B"],r["tot_C"],r["total"],
             r["prod_ciclo_op"],r["prod_ciclo_tot"],r["prod_labor_op"],r["prod_labor_tot"]]
         for ci,v in enumerate(vals,1):
-            c=ws.cell(ri,ci,v); fmt="0%" if ci>=7 and isinstance(v,float) else None
+            # Format percentages as strings to avoid openpyxl number_format issues
+            v_cell = f"{v:.1%}" if ci>=7 and isinstance(v,float) else v
+            c=ws.cell(ri,ci,v_cell)
             ec(c,JD_Y if ci==10 and isinstance(v,float) else bg,
                JD_V if ci==10 and isinstance(v,float) else "000000",
-               ci==10 and isinstance(v,float),fmt)
+               bool(ci==10 and isinstance(v,float)))
         ws.row_dimensions[ri].height=15
     for mes in MESES:
         r=resultados.get(mes)
@@ -2668,19 +2695,15 @@ tab_vis, tab_inp, tab_mem, tab_res, tab_cmp, tab_diag, tab_exp = st.tabs([
     "📊 Resultado por Mês", "🔄 Comparar com Excel", "🩺 Diagnóstico", "📥 Exportar"
 ])
 
-# Cache do resultado base
-@st.cache_data(show_spinner=False)
-def calcular_cached(pmp_hash, _pmp, _tempo, _dist, _aplic, dias_hash, _dias, hA, hB, hC, tA, tB, tC, _sup):
-    return calcular(_pmp, _tempo, _dist, _aplic, _dias,
-                    {"A":hA,"B":hB,"C":hC}, {"A":tA,"B":tB,"C":tC}, _sup,
-                    retornar_intermediarios=True)
-
-pmp_hash = hash(pmp.to_json())
+pmp_hash  = hash(pmp.to_json())
 dias_hash = hash(str(dias))
-res_base, df_interm, agg_interm = calcular_cached(
+import json as _json
+_sup_str = _json.dumps(suporte_cfg, sort_keys=True)
+res_base, df_interm, agg_interm = _calcular_cached(
     pmp_hash, pmp, tempo, dist, aplic, dias_hash, dias,
     horas_turno["A"], horas_turno["B"], horas_turno["C"],
-    thresholds["A"], thresholds["B"], thresholds["C"], suporte_cfg)
+    thresholds["A"], thresholds["B"], thresholds["C"],
+    _sup_str)
 
 # ── Dados reais carregados sob demanda (primeira vez que a aba precisar) ──────
 # (não bloqueia o startup)
@@ -2853,9 +2876,9 @@ Turno C: <b>{r['tot_C']} pessoas</b> &nbsp;|&nbsp;
                 eC="🔴" if rc.ocup_C>1 else ("🟡" if rc.ocup_C>=0.85 else "🟢")
                 c0,c1,c2,c3 = st.columns([3,1,1,1])
                 c0.markdown(f"`{cen}` {eA}{rc.ocup_A:.0%}/{eB}{rc.ocup_B:.0%}/{eC}{rc.ocup_C:.0%}")
-                vA=c1.number_input("",0,5,int(rc.ativo_A),key=f"n_{novo_nome}_{cen}_A",label_visibility="collapsed",help=f"Base:{rc.ativo_A}")
-                vB=c2.number_input("",0,5,int(rc.ativo_B),key=f"n_{novo_nome}_{cen}_B",label_visibility="collapsed",help=f"Base:{rc.ativo_B}")
-                vC=c3.number_input("",0,5,int(rc.ativo_C),key=f"n_{novo_nome}_{cen}_C",label_visibility="collapsed",help=f"Base:{rc.ativo_C}")
+                vA=c1.number_input(" ",0,5,int(rc.ativo_A),key=f"n_{novo_nome}_{cen}_A",label_visibility="collapsed",help=f"Base:{rc.ativo_A}")
+                vB=c2.number_input(" ",0,5,int(rc.ativo_B),key=f"n_{novo_nome}_{cen}_B",label_visibility="collapsed",help=f"Base:{rc.ativo_B}")
+                vC=c3.number_input(" ",0,5,int(rc.ativo_C),key=f"n_{novo_nome}_{cen}_C",label_visibility="collapsed",help=f"Base:{rc.ativo_C}")
                 novo_ov[cen]={"A":vA,"B":vB,"C":vC}
             if st.button("💾 Salvar cenário", type="primary"):
                 ov_c={mes_novo:novo_ov}
@@ -2983,6 +3006,10 @@ está diferente do que foi usado para gerar aquele Excel. O diagnóstico abaixo 
                     styles.append("")
             return styles
 
+        # Ensure all columns are string type to avoid Arrow type inference issues
+        for _col in ["Turno A","Turno B","Turno C","Total","Labor"]:
+            if _col in df_vis.columns:
+                df_vis[_col] = df_vis[_col].astype(str)
         st.dataframe(
             df_vis.style.apply(style_resumo, axis=1),
             use_container_width=True, hide_index=True
