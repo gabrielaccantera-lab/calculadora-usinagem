@@ -9,6 +9,7 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from datetime import datetime
 import json as _json
+import hashlib
 
 # ─── Helpers globais ─────────────────────────────────────────────────────────
 def safe_int(v):
@@ -18,6 +19,36 @@ def safe_int(v):
 def safe_float(v):
     try: return float(v) if v is not None else 0.0
     except: return 0.0
+
+# ─── Cache de objetos openpyxl (evita recriar Font/PatternFill em loops) ─────
+_FONT_CACHE      = {}
+_ALIGN_CACHE     = {}
+_FILL_CACHE      = {}
+_BORDER_INSTANCE = None
+
+def _get_font(bold=False, color="000000", size=9, italic=False):
+    k = (bold, color, size, italic)
+    if k not in _FONT_CACHE:
+        _FONT_CACHE[k] = Font(name="Arial", bold=bold, color=color, size=size, italic=italic)
+    return _FONT_CACHE[k]
+
+def _get_align(center=True):
+    if center not in _ALIGN_CACHE:
+        _ALIGN_CACHE[center] = Alignment(
+            horizontal="center" if center else "left", vertical="center", wrap_text=True)
+    return _ALIGN_CACHE[center]
+
+def _get_fill(color_hex):
+    if color_hex not in _FILL_CACHE:
+        _FILL_CACHE[color_hex] = PatternFill("solid", fgColor=color_hex)
+    return _FILL_CACHE[color_hex]
+
+def _get_border():
+    global _BORDER_INSTANCE
+    if _BORDER_INSTANCE is None:
+        s = Side(style='thin', color='CCCCCC')
+        _BORDER_INSTANCE = Border(left=s, right=s, top=s, bottom=s)
+    return _BORDER_INSTANCE
 
 
 st.set_page_config(page_title="Calculadora de Recursos — Usinagem", layout="wide", page_icon="🏭")
@@ -153,11 +184,9 @@ def grafico_cenarios(cenarios_dict):
 # ─────────────────────────────────────────
 # Fills globais para diagnóstico
 def _make_brd():
-    return Border(
-        left=Side(style='thin',color='CCCCCC'), right=Side(style='thin',color='CCCCCC'),
-        top=Side(style='thin',color='CCCCCC'),  bottom=Side(style='thin',color='CCCCCC'))
+    return _get_border()
 
-def _pf(color): return PatternFill("solid", fgColor=color)
+def _pf(color): return _get_fill(color)
 
 # Lazy globals — só instanciados na primeira chamada de função que precisar deles
 class _Fills:
@@ -240,10 +269,10 @@ def cor_ocup(pct):
 
 def ec(ws, r, c, val, fill=None, bold=False, color="000000", size=9, center=True, italic=False, comment_text=None):
     cell = ws.cell(row=r, column=c, value=val)
-    cell.font = Font(name="Arial", bold=bold, color=color, size=size, italic=italic)
+    cell.font = _get_font(bold, color, size, italic)
     cell.fill = fill or F_BRANCO
-    cell.alignment = Alignment(horizontal="center" if center else "left", vertical="center", wrap_text=True)
-    cell.border = _BRD_DIAG
+    cell.alignment = _get_align(center)
+    cell.border = _get_border()
     return cell
 
 def cell_style(ws, r, c, val, fill=None, bold=False, color="000000", font_size=9, center=True, italic=False, comment_text=None):
@@ -252,6 +281,7 @@ def cell_style(ws, r, c, val, fill=None, bold=False, color="000000", font_size=9
 # ─────────────────────────────────────────
 # DIAGNÓSTICO DE DIVERGÊNCIAS — EXCEL DE SAÍDA
 # ─────────────────────────────────────────
+@st.cache_data(show_spinner=False, ttl=3600)
 def gerar_excel_diagnostico(file_bytes):
     """Gera Excel com diagnóstico completo de divergências entre inputs e Excel de referência."""
     MESES = ["Novembro","Dezembro","Janeiro","Fevereiro","Março","Abril",
@@ -532,6 +562,7 @@ def gerar_excel_diagnostico(file_bytes):
     return output
 
 
+@st.cache_data(show_spinner=False, ttl=3600)
 def gerar_diagnostico_mensal(file_bytes, res_app, tempo, dist, aplic, pmp, dias, horas_turno, thresholds):
     """Gera Excel com uma aba por mês mostrando App vs Excel célula a célula."""
     MAPA = {
@@ -1435,6 +1466,7 @@ def _gerar_tabelona(file_bytes, res_base, tempo, dist, aplic, pmp, dias, horas_t
 # ─────────────────────────────────────────
 # COMPARAÇÃO COM EXCEL REFERÊNCIA
 # ─────────────────────────────────────────
+@st.cache_data(show_spinner=False, ttl=3600)
 def comparar_com_excel(res_app, file_bytes, tempo, dist, aplic, pmp, dias, horas_turno, thresholds, suporte_cfg):
     """Compara app vs Excel. Otimizado: JOIN e agrupamento feitos uma vez para todos os meses."""
     MAPA = {
@@ -1651,19 +1683,19 @@ def read_pmp(fb, log):
         dias[m] = int(v) if pd.notna(v) else 0
     log.append(f"   Dias trabalhados: { {m:d for m,d in dias.items() if d>0} }")
 
-    rows = []
-    modelos_lidos = 0
-    for r in range(2, len(df)):
-        modelo = df.iloc[r, 0]
-        if pd.isna(modelo): continue
-        modelos_lidos += 1
-        for i, m in enumerate(MESES, 1):
-            v = df.iloc[r, i] if i < df.shape[1] else None
-            qtd = int(v) if pd.notna(v) else 0
-            if qtd > 0:
-                rows.append({"modelo": str(modelo).strip(), "mes": m, "qtd": qtd})
-    log.append(f"   {modelos_lidos} modelos · {len(rows)} registros com qtd > 0")
-    return pd.DataFrame(rows), dias
+    # Leitura vetorizada: melt em vez de duplo loop Python
+    df_data = df.iloc[2:].copy()
+    df_data = df_data.dropna(subset=[0])
+    df_data[0] = df_data[0].astype(str).str.strip()
+    modelos_lidos = len(df_data)
+    # Renomear colunas: 0=modelo, 1..12=meses
+    mes_cols = {i: m for i, m in enumerate(MESES, 1) if i < df.shape[1]}
+    df_data = df_data[[0] + list(mes_cols.keys())].rename(columns={0: "modelo", **mes_cols})
+    df_melt = df_data.melt(id_vars="modelo", var_name="mes", value_name="qtd")
+    df_melt["qtd"] = pd.to_numeric(df_melt["qtd"], errors="coerce").fillna(0).astype(int)
+    rows_df = df_melt[df_melt["qtd"] > 0].reset_index(drop=True)
+    log.append(f"   {modelos_lidos} modelos · {len(rows_df)} registros com qtd > 0")
+    return rows_df, dias
 
 def read_indices(fb, log):
     """Lê os índices de ciclo e labor diretamente da primeira aba mensal disponível.
@@ -1768,7 +1800,7 @@ def validar(pmp, tempo, dist, aplic, dias):
 
     zero_disp = dist[dist.disponib == 0]
     if len(zero_disp):
-        ex = ", ".join([f"{r.centro}/{r.peca}" for _,r in zero_disp.iterrows()][:5])
+        ex = ", ".join([f"{c}/{p}" for c,p in zip(zero_disp.centro[:5], zero_disp.peca[:5])])
         erros.append(f"Disponibilidade = 0 em {len(zero_disp)} linha(s) — divisão por zero: {ex}")
     diff_td = chaves_tempo - chaves_dist
     if diff_td:
@@ -1782,9 +1814,11 @@ def validar(pmp, tempo, dist, aplic, dias):
     merged = tempo.merge(dist, on=["centro","peca"], how="inner")
     labor_maior = merged[merged.t_labor > merged.t_ciclo]
     if len(labor_maior):
-        alertas.append(f"{len(labor_maior)} linha(s) com t_labor > t_ciclo (fisicamente improvável): {[(r.centro,r.peca) for _,r in labor_maior.iterrows()][:3]}")
+        exemplos = list(zip(labor_maior.centro[:3], labor_maior.peca[:3]))
+        alertas.append(f"{len(labor_maior)} linha(s) com t_labor > t_ciclo (fisicamente improvável): {exemplos}")
+    _pmp_por_mes = pmp.groupby("mes")["qtd"].sum()
     for m in MESES:
-        qtd_m = pmp[pmp.mes==m].qtd.sum() if len(pmp[pmp.mes==m]) else 0
+        qtd_m = _pmp_por_mes.get(m, 0)
         if qtd_m > 0 and dias.get(m,0) == 0:
             alertas.append(f"Mês '{m}' tem {int(qtd_m)} peças de demanda mas dias trabalhados = 0.")
     nulos_t = tempo[["t_ciclo","t_labor"]].isna().sum()
@@ -1828,30 +1862,28 @@ def calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg
         if sub.empty: resultados[mes] = None; continue
 
         minA = d*hA*60; minB = d*hB*60; minC = d*hC*60
-        centros = []
-        for _, row in sub.iterrows():
-            cen = row.centro; mc = row.min_ciclo; ml = row.min_labor
-            pA = mc/minA if minA>0 else 0
-            pB = mc/minB if minB>0 else 0
-            pC = mc/minC if minC>0 else 0
-            aA = 1 if pA > thr_A else 0
-            aB = 1 if pA > thr_B else 0
-            aC = 1 if pB > thr_C else 0
-            if overrides and mes in overrides and cen in overrides[mes]:
-                ov = overrides[mes][cen]
-                if "A" in ov: aA = ov["A"]
-                if "B" in ov: aB = ov["B"]
-                if "C" in ov: aC = ov["C"]
-            centros.append({
-                "centro":cen,"ocup_A":pA,"ocup_B":pB,"ocup_C":pC,
-                "ativo_A":aA,"ativo_B":aB,"ativo_C":aC,
-                "min_ciclo_total":mc,"min_labor_total":ml,
-                "min_disp_A":minA,"min_disp_B":minB,"min_disp_C":minC,
-                "horas_ciclo":mc/60,"horas_labor":ml/60,
-                "horas_disp_A":d*hA*aA,"horas_disp_B":d*hB*aB,"horas_disp_C":d*hC*aC,
-            })
-
-        df_c = pd.DataFrame(centros)
+        # ── Cálculo vetorizado — sem loop Python por centro ──────────────────
+        df_c = sub[["centro","min_ciclo","min_labor"]].copy()
+        df_c["ocup_A"] = (df_c.min_ciclo / minA) if minA > 0 else 0.0
+        df_c["ocup_B"] = (df_c.min_ciclo / minB) if minB > 0 else 0.0
+        df_c["ocup_C"] = (df_c.min_ciclo / minC) if minC > 0 else 0.0
+        df_c["ativo_A"] = (df_c.ocup_A > thr_A).astype(int)
+        df_c["ativo_B"] = (df_c.ocup_A > thr_B).astype(int)
+        df_c["ativo_C"] = (df_c.ocup_B > thr_C).astype(int)
+        # Aplicar overrides pontuais (raramente usado)
+        if overrides and mes in overrides:
+            for cen, ov in overrides[mes].items():
+                mask = df_c.centro == cen
+                if "A" in ov: df_c.loc[mask, "ativo_A"] = ov["A"]
+                if "B" in ov: df_c.loc[mask, "ativo_B"] = ov["B"]
+                if "C" in ov: df_c.loc[mask, "ativo_C"] = ov["C"]
+        df_c = df_c.rename(columns={"min_ciclo":"min_ciclo_total","min_labor":"min_labor_total"})
+        df_c["min_disp_A"] = minA; df_c["min_disp_B"] = minB; df_c["min_disp_C"] = minC
+        df_c["horas_ciclo"]  = df_c.min_ciclo_total / 60
+        df_c["horas_labor"]  = df_c.min_labor_total / 60
+        df_c["horas_disp_A"] = d * hA * df_c.ativo_A
+        df_c["horas_disp_B"] = d * hB * df_c.ativo_B
+        df_c["horas_disp_C"] = d * hC * df_c.ativo_C
         op_A = int(df_c.ativo_A.sum()); op_B = int(df_c.ativo_B.sum()); op_C = int(df_c.ativo_C.sum())
 
         def get_sup(key, t, op_count):
@@ -2091,6 +2123,7 @@ def exportar(resultados):
 # ─────────────────────────────────────────
 # LEITURA DE DADOS REAIS DO EXCEL (DADOS AUTOMÁTICOS)
 # ─────────────────────────────────────────
+@st.cache_data(show_spinner=False, ttl=3600)
 def read_real_data(file_bytes):
     """Lê os dados reais calculados pelo Excel:
     - RESUMO_MO: totais por turno e produtividade por mês
@@ -2605,25 +2638,37 @@ if not uploaded:
 
 file_bytes = uploaded.read()
 
+# ── Hash do arquivo para detectar troca de upload ────────────────────────────
+_file_hash = hashlib.md5(file_bytes).hexdigest()
+_is_new_file = st.session_state.get("_file_hash") != _file_hash
+if _is_new_file:
+    st.session_state["_file_hash"] = _file_hash
+    st.session_state["log_leitura"] = []
+    for _k in ("real_resumo", "real_mensal", "turnos_arq"):
+        st.session_state.pop(_k, None)
+
 if "log_leitura" not in st.session_state:
     st.session_state.log_leitura = []
-st.session_state.log_leitura = []
-# Clear real data cache on new upload
-for _k in ("real_resumo", "real_mensal"):
-    if _k in st.session_state: del st.session_state[_k]
+
+# ── Leitura cacheada: todas as abas em uma só chamada ────────────────────────
+@st.cache_data(show_spinner=False, ttl=3600)
+def _ler_todas_abas(fb):
+    _log = []
+    _pmp, _dias   = read_pmp(fb, _log)
+    _tempo        = read_tempo(fb, _log)
+    _dist         = read_dist(fb, _log)
+    _aplic        = read_aplic(fb, _log)
+    _turnos       = read_turnos(fb)
+    _log.append(f"✅ IMPUTTURNOS lido: A={_turnos['A']}h · B={_turnos['B']}h · C={_turnos['C']}h (acumulados)")
+    _log.append(f"✅ Leitura concluída")
+    return _pmp, _dias, _tempo, _dist, _aplic, _turnos, _log
 
 with st.spinner("Lendo planilha..."):
     try:
-        log = st.session_state.log_leitura
-        pmp, dias  = read_pmp(file_bytes, log)
-        tempo       = read_tempo(file_bytes, log)
-        dist        = read_dist(file_bytes, log)
-        aplic       = read_aplic(file_bytes, log)
-        turnos_arq  = read_turnos(file_bytes)
+        pmp, dias, tempo, dist, aplic, turnos_arq, _cached_log = _ler_todas_abas(file_bytes)
         st.session_state["turnos_arq"] = turnos_arq
-        log.append(f"✅ IMPUTTURNOS lido: A={turnos_arq['A']}h · B={turnos_arq['B']}h · C={turnos_arq['C']}h (acumulados)")
-
-        log.append(f"✅ Leitura concluída em {datetime.now().strftime('%H:%M:%S')}")
+        if not st.session_state.log_leitura:
+            st.session_state.log_leitura = list(_cached_log)
     except Exception as e:
         st.error(f"Erro ao ler: {e}"); st.stop()
 
@@ -2695,8 +2740,9 @@ tab_vis, tab_inp, tab_mem, tab_res, tab_cmp, tab_diag, tab_exp = st.tabs([
     "📊 Resultado por Mês", "🔄 Comparar com Excel", "🩺 Diagnóstico", "📥 Exportar"
 ])
 
-pmp_hash  = hash(pmp.to_json())
-dias_hash = hash(str(dias))
+# Hash rápido usando hashlib (pmp.to_json() é muito lento para DataFrames grandes)
+pmp_hash  = hashlib.md5(pd.util.hash_pandas_object(pmp, index=True).values.tobytes()).hexdigest()
+dias_hash = hashlib.md5(str(dias).encode()).hexdigest()
 import json as _json
 _sup_str = _json.dumps(suporte_cfg, sort_keys=True)
 res_base, df_interm, agg_interm = _calcular_cached(
