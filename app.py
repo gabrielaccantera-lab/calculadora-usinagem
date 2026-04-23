@@ -8,48 +8,6 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from datetime import datetime
-import json as _json
-import hashlib
-
-# ─── Helpers globais ─────────────────────────────────────────────────────────
-def safe_int(v):
-    try: return int(float(v)) if v is not None else 0
-    except: return 0
-
-def safe_float(v):
-    try: return float(v) if v is not None else 0.0
-    except: return 0.0
-
-
-
-# ─── Cache de objetos openpyxl (evita recriar Font/PatternFill em loops pesados) ──
-_FONT_CACHE  = {}
-_ALIGN_CACHE = {}
-_FILL_CACHE  = {}
-_BRD_CACHE   = [None]
-
-def _get_font(bold=False, color="000000", size=9, italic=False):
-    k = (bold, color, size, italic)
-    if k not in _FONT_CACHE:
-        _FONT_CACHE[k] = Font(name="Arial", bold=bold, color=color, size=size, italic=italic)
-    return _FONT_CACHE[k]
-
-def _get_align(center=True):
-    if center not in _ALIGN_CACHE:
-        _ALIGN_CACHE[center] = Alignment(
-            horizontal="center" if center else "left", vertical="center", wrap_text=True)
-    return _ALIGN_CACHE[center]
-
-def _get_fill(hex_color):
-    if hex_color not in _FILL_CACHE:
-        _FILL_CACHE[hex_color] = PatternFill("solid", fgColor=hex_color)
-    return _FILL_CACHE[hex_color]
-
-def _get_brd():
-    if _BRD_CACHE[0] is None:
-        s = Side(style='thin', color='CCCCCC')
-        _BRD_CACHE[0] = Border(left=s, right=s, top=s, bottom=s)
-    return _BRD_CACHE[0]
 
 st.set_page_config(page_title="Calculadora de Recursos — Usinagem", layout="wide", page_icon="🏭")
 
@@ -136,6 +94,301 @@ COL_MAP = {
     },
 }
 
+def find_col(df, candidates, aba, campo):
+    """Busca coluna por lista de nomes candidatos. Fallback por índice com aviso."""
+    for c in candidates:
+        if c in df.columns:
+            return c
+    # fallback posicional com aviso
+    idx_fallback = {"centro":0,"peca":1,"t_ciclo":5,"t_labor":6,
+                    "div_carga":7,"vol_int":8,"div_volume":9,"disponib":10}
+    if campo in idx_fallback:
+        idx = idx_fallback[campo]
+        if idx < len(df.columns):
+            st.session_state.setdefault("log_leitura",[]).append(
+                f"⚠️ [{aba}] Campo '{campo}' não encontrado por nome — usando coluna {idx} ({df.columns[idx]}) como fallback")
+            return df.columns[idx]
+    raise ValueError(f"[{aba}] Campo '{campo}' não encontrado. Colunas disponíveis: {list(df.columns)}")
+
+# ─────────────────────────────────────────
+# LEITURA COM LOG
+# ─────────────────────────────────────────
+def read_pmp(fb, log):
+    df = pd.read_excel(BytesIO(fb), sheet_name='INPUT_PMP', header=None)
+    log.append(f"✅ INPUT_PMP lido: {df.shape[0]} linhas × {df.shape[1]} colunas")
+    dias = {}
+    for i, m in enumerate(MESES, 1):
+        v = df.iloc[0, i] if i < df.shape[1] else None
+        dias[m] = int(v) if pd.notna(v) else 0
+    log.append(f"   Dias trabalhados: { {m:d for m,d in dias.items() if d>0} }")
+
+    rows = []
+    modelos_lidos = 0
+    for r in range(2, len(df)):
+        modelo = df.iloc[r, 0]
+        if pd.isna(modelo): continue
+        modelos_lidos += 1
+        for i, m in enumerate(MESES, 1):
+            v = df.iloc[r, i] if i < df.shape[1] else None
+            qtd = int(v) if pd.notna(v) else 0
+            if qtd > 0:
+                rows.append({"modelo": str(modelo).strip(), "mes": m, "qtd": qtd})
+    log.append(f"   {modelos_lidos} modelos · {len(rows)} registros com qtd > 0")
+    return pd.DataFrame(rows), dias
+
+def read_turnos(fb):
+    """Lê IMPUTTURNOS — retorna horas acumuladas por turno (7.5, 14.25, 19.5)."""
+    try:
+        df = pd.read_excel(BytesIO(fb), sheet_name='IMPUTTURNOS', header=None)
+        hA = float(df.iloc[0,1]) if pd.notna(df.iloc[0,1]) else 7.5
+        hB = float(df.iloc[0,2]) if pd.notna(df.iloc[0,2]) else 14.25
+        hC = float(df.iloc[0,3]) if pd.notna(df.iloc[0,3]) else 19.5
+        return {"A": hA, "B": hB, "C": hC}
+    except:
+        return {"A": 7.5, "B": 14.25, "C": 19.5}
+
+def read_tempo(fb, log):
+    df = pd.read_excel(BytesIO(fb), sheet_name='IMPUTTEMPO', header=0)
+    log.append(f"✅ IMPUTTEMPO lido: {df.shape[0]} linhas · colunas: {list(df.columns[:4])}")
+    mp = COL_MAP["IMPUTTEMPO"]
+    c = {k: find_col(df, v, "IMPUTTEMPO", k) for k,v in mp.items()}
+    out = df[[c["centro"],c["peca"],c["t_ciclo"],c["t_labor"]]].copy()
+    out.columns = ["centro","peca","t_ciclo","t_labor"]
+    out = out.dropna(subset=["centro"])
+    nulos_ciclo = out["t_ciclo"].isna().sum()
+    nulos_labor = out["t_labor"].isna().sum()
+    if nulos_ciclo: log.append(f"⚠️ IMPUTTEMPO: {nulos_ciclo} linhas com t_ciclo nulo")
+    if nulos_labor: log.append(f"⚠️ IMPUTTEMPO: {nulos_labor} linhas com t_labor nulo")
+    log.append(f"   {len(out)} combinações centro+peça carregadas")
+    return out.copy()
+
+def read_dist(fb, log):
+    df = pd.read_excel(BytesIO(fb), sheet_name='IMPUTDISTRIBUIÇÃO', header=0)
+    log.append(f"✅ IMPUTDISTRIBUIÇÃO lido: {df.shape[0]} linhas")
+    mp = COL_MAP["IMPUTDISTRIBUIÇÃO"]
+    c = {k: find_col(df, v, "IMPUTDISTRIBUIÇÃO", k) for k,v in mp.items()}
+    out = df[[c["centro"],c["peca"],c["div_carga"],c["vol_int"],c["div_volume"],c["disponib"]]].copy()
+    out.columns = ["centro","peca","div_carga","vol_int","div_volume","disponib"]
+    out["vol_int"] = pd.to_numeric(out["vol_int"], errors="coerce").fillna(1.0)
+    out = out.dropna(subset=["centro"])
+    zero_d = (out["disponib"] == 0).sum()
+    if zero_d: log.append(f"⚠️ IMPUTDISTRIBUIÇÃO: {zero_d} linhas com disponib=0")
+    log.append(f"   {len(out)} combinações carregadas")
+    return out.copy()
+
+def read_aplic(fb, log):
+    df = pd.read_excel(BytesIO(fb), sheet_name='IMPUTAPLICAÇÃO', header=0)
+    log.append(f"✅ IMPUTAPLICAÇÃO lido: {df.shape[0]} linhas")
+    df = df.rename(columns={df.columns[0]:"centro", df.columns[1]:"peca"})
+    mcols = [c for c in df.columns if str(c).startswith("MODELO")]
+    log.append(f"   {len(mcols)} modelos encontrados na matriz")
+    melted = df[["centro","peca"]+mcols].melt(id_vars=["centro","peca"], var_name="modelo", value_name="ativo")
+    out = melted[melted["ativo"]==1][["centro","peca","modelo"]].reset_index(drop=True)
+    log.append(f"   {len(out)} combinações centro+peça+modelo ativas (flag=1)")
+    return out
+
+# ─────────────────────────────────────────
+# VALIDAÇÕES
+# ─────────────────────────────────────────
+def validar(pmp, tempo, dist, aplic, dias):
+    erros, alertas, oks = [], [], []
+    chaves_tempo = set(zip(tempo.centro, tempo.peca))
+    chaves_dist  = set(zip(dist.centro,  dist.peca))
+    chaves_aplic = set(zip(aplic.centro, aplic.peca))
+
+    zero_disp = dist[dist.disponib == 0]
+    if len(zero_disp):
+        ex = ", ".join([f"{r.centro}/{r.peca}" for _,r in zero_disp.iterrows()][:5])
+        erros.append(f"Disponibilidade = 0 em {len(zero_disp)} linha(s) — divisão por zero: {ex}")
+    diff_td = chaves_tempo - chaves_dist
+    if diff_td:
+        erros.append(f"{len(diff_td)} combinação(ões) centro+peça em IMPUTTEMPO sem IMPUTDISTRIBUIÇÃO: {list(diff_td)[:3]}")
+    sem_aplic = chaves_tempo - chaves_aplic
+    if sem_aplic:
+        alertas.append(f"{len(sem_aplic)} centro+peça sem nenhum modelo em IMPUTAPLICAÇÃO (não gerarão carga): {list(sem_aplic)[:3]}")
+    modelos_sem = set(pmp.modelo.unique()) - set(aplic.modelo.unique())
+    if modelos_sem:
+        alertas.append(f"{len(modelos_sem)} modelo(s) com demanda mas sem aplicação: {', '.join(list(modelos_sem)[:5])}")
+    merged = tempo.merge(dist, on=["centro","peca"], how="inner")
+    labor_maior = merged[merged.t_labor > merged.t_ciclo]
+    if len(labor_maior):
+        alertas.append(f"{len(labor_maior)} linha(s) com t_labor > t_ciclo (fisicamente improvável): {[(r.centro,r.peca) for _,r in labor_maior.iterrows()][:3]}")
+    for m in MESES:
+        qtd_m = pmp[pmp.mes==m].qtd.sum() if len(pmp[pmp.mes==m]) else 0
+        if qtd_m > 0 and dias.get(m,0) == 0:
+            alertas.append(f"Mês '{m}' tem {int(qtd_m)} peças de demanda mas dias trabalhados = 0.")
+    nulos_t = tempo[["t_ciclo","t_labor"]].isna().sum()
+    if nulos_t.sum() > 0:
+        alertas.append(f"Valores nulos em IMPUTTEMPO: t_ciclo={nulos_t['t_ciclo']}, t_labor={nulos_t['t_labor']}")
+    nulos_d = dist[["div_carga","div_volume","disponib"]].isna().sum()
+    if nulos_d.sum() > 0:
+        alertas.append(f"Valores nulos em IMPUTDISTRIBUIÇÃO: {dict(nulos_d[nulos_d>0])}")
+    if not erros and not alertas:
+        oks.append("Todos os inputs foram validados sem inconsistências.")
+    return erros, alertas, oks
+
+# ─────────────────────────────────────────
+# CÁLCULO COM RASTREABILIDADE
+# ─────────────────────────────────────────
+def calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg,
+             overrides=None, retornar_intermediarios=False):
+
+    # JOIN completo — rastreável
+    # Cálculo 100% baseado nos inputs — IMPUTDISTRIBUIÇÃO é a fonte de verdade
+    df = (aplic.merge(pmp, on="modelo")
+               .merge(tempo, on=["centro","peca"])
+               .merge(dist,  on=["centro","peca"]))
+    if "vol_int" not in df.columns: df["vol_int"] = 1.0
+    df["vol_int"] = pd.to_numeric(df["vol_int"], errors="coerce").fillna(1.0)
+    df["indice_ciclo"] = (df.t_ciclo * df.div_carga * df.div_volume * df.vol_int) / df.disponib
+    df["min_ciclo"]    = df.indice_ciclo * df.qtd
+    df["min_labor"]    = df.t_labor * df.div_carga * df.qtd
+    agg = df.groupby(["centro","mes"])[["min_ciclo","min_labor"]].sum().reset_index()
+
+    thr_A = thresholds["A"] / 100
+    thr_B = thresholds["B"] / 100
+    thr_C = thresholds["C"] / 100
+    hA, hB, hC = horas_turno["A"], horas_turno["B"], horas_turno["C"]
+
+    resultados = {}
+    for mes in MESES:
+        d = dias.get(mes, 0)
+        if d == 0: resultados[mes] = None; continue
+        sub = agg[agg.mes == mes].copy()
+        if sub.empty: resultados[mes] = None; continue
+
+        minA = d*hA*60; minB = d*hB*60; minC = d*hC*60
+        centros = []
+        for _, row in sub.iterrows():
+            cen = row.centro; mc = row.min_ciclo; ml = row.min_labor
+            pA = mc/minA if minA>0 else 0
+            pB = mc/minB if minB>0 else 0
+            pC = mc/minC if minC>0 else 0
+            aA = 1 if pA > thr_A else 0
+            aB = 1 if pA > thr_B else 0
+            aC = 1 if pB > thr_C else 0
+            if overrides and mes in overrides and cen in overrides[mes]:
+                ov = overrides[mes][cen]
+                if "A" in ov: aA = ov["A"]
+                if "B" in ov: aB = ov["B"]
+                if "C" in ov: aC = ov["C"]
+            centros.append({
+                "centro":cen,"ocup_A":pA,"ocup_B":pB,"ocup_C":pC,
+                "ativo_A":aA,"ativo_B":aB,"ativo_C":aC,
+                "min_ciclo_total":mc,"min_labor_total":ml,
+                "min_disp_A":minA,"min_disp_B":minB,"min_disp_C":minC,
+                "horas_ciclo":mc/60,"horas_labor":ml/60,
+                "horas_disp_A":d*hA*aA,"horas_disp_B":d*hB*aB,"horas_disp_C":d*hC*aC,
+            })
+
+        df_c = pd.DataFrame(centros)
+        op_A = int(df_c.ativo_A.sum()); op_B = int(df_c.ativo_B.sum()); op_C = int(df_c.ativo_C.sum())
+
+        def get_sup(key, t, op_count):
+            """Retorna qtd de suporte para o turno.
+            Regra: se não há operador CEN ativo no turno, suporte = 0 sempre.
+            No modo manual, o usuário define o valor, mas a regra de presença prevalece."""
+            cfg = suporte_cfg[key]
+            if op_count == 0:
+                return 0  # sem CEN no turno → sem suporte, independente do modo
+            if cfg["modo"] == "auto":
+                defaults = {"lavadora":{"A":1,"B":1,"C":0},"gravacao":{"A":1,"B":1,"C":0},
+                            "preset":{"A":2,"B":1,"C":1},"coringa":{"A":1,"B":0,"C":0},
+                            "facilitador":{"A":1,"B":1,"C":0}}
+                return defaults[key][t]
+            return cfg[t]  # manual — valor do usuário, mas só chega aqui se op_count > 0
+
+        lav={t:get_sup("lavadora",t,[op_A,op_B,op_C]["ABC".index(t)]) for t in "ABC"}
+        gra={t:get_sup("gravacao",t,[op_A,op_B,op_C]["ABC".index(t)]) for t in "ABC"}
+        pre={t:get_sup("preset",t,[op_A,op_B,op_C]["ABC".index(t)]) for t in "ABC"}
+        cor={t:get_sup("coringa",t,[op_A,op_B,op_C]["ABC".index(t)]) for t in "ABC"}
+        fac={t:get_sup("facilitador",t,[op_A,op_B,op_C]["ABC".index(t)]) for t in "ABC"}
+
+        tot_A = op_A+lav["A"]+gra["A"]+pre["A"]+cor["A"]+fac["A"]
+        tot_B = op_B+lav["B"]+gra["B"]+pre["B"]+cor["B"]+fac["B"]
+        tot_C = op_C+lav["C"]+gra["C"]+pre["C"]+cor["C"]+fac["C"]
+        total = tot_A+tot_B+tot_C
+        h_ciclo = float(df_c.horas_ciclo.sum()); h_labor = float(df_c.horas_labor.sum())
+        h_ativos = float((df_c.horas_disp_A+df_c.horas_disp_B+df_c.horas_disp_C).sum())
+        h_todos  = tot_A*d*hA+tot_B*d*hB+tot_C*d*hC
+
+        resultados[mes] = {
+            "centros":df_c,
+            "op_A":op_A,"op_B":op_B,"op_C":op_C,
+            "tot_A":tot_A,"tot_B":tot_B,"tot_C":tot_C,"total":total,
+            "suporte":{"lavadora":lav,"gravacao":gra,"preset":pre,"coringa":cor,"facilitador":fac},
+            "h_ciclo":h_ciclo,"h_labor":h_labor,"h_ativos":h_ativos,"h_todos":h_todos,
+            "prod_ciclo_op":  h_ciclo/h_ativos if h_ativos>0 else 0,
+            "prod_ciclo_tot": h_ciclo/h_todos  if h_todos>0 else 0,
+            "prod_labor_op":  h_labor/h_ativos if h_ativos>0 else 0,
+            "prod_labor_tot": h_labor/h_todos  if h_todos>0 else 0,
+            "dias":d,"hA":hA,"hB":hB,"hC":hC,
+            "thr_A":thr_A,"thr_B":thr_B,"thr_C":thr_C,
+            "minA":d*hA*60,"minB":d*hB*60,"minC":d*hC*60,
+        }
+
+    if retornar_intermediarios:
+        return resultados, df, agg
+    return resultados
+
+# ─────────────────────────────────────────
+# TABELA RESULTADO
+# ─────────────────────────────────────────
+def show_tabela(r):
+    dias=r["dias"]; hA,hB,hC=r["hA"],r["hB"],r["hC"]
+    rows=[]
+    for _,row in r["centros"].iterrows():
+        rows.append({"Centro":row.centro,
+            "Ocup. A":row.ocup_A,"Ocup. B":row.ocup_B,"Ocup. C":row.ocup_C,
+            "Ativo A":int(row.ativo_A),"Ativo B":int(row.ativo_B),"Ativo C":int(row.ativo_C),
+            "Horas A":round(row.horas_disp_A,2),"Horas B":round(row.horas_disp_B,2),"Horas C":round(row.horas_disp_C,2)})
+    df=pd.DataFrame(rows)
+
+    def sr(row):
+        s=[""]*len(row)
+        for i,col in enumerate(df.columns):
+            v=row.iloc[i]
+            if col in("Ocup. A","Ocup. B","Ocup. C"):
+                if v>1.0: s[i]="background-color:#FFCDD2;color:#B71C1C;font-weight:600"
+                elif v>=0.85: s[i]="background-color:#FFFDE7;color:#7B5800;font-weight:600"
+                else: s[i]=f"background-color:#E8F5E9;color:{JD_VERDE_ESC};font-weight:600"
+            elif col in("Ativo A","Ativo B","Ativo C"):
+                s[i]="background-color:#B3E5FC;color:#01579B;font-weight:700" if v else "background-color:#FFFDE7;color:#888"
+            elif col in("Horas A","Horas B","Horas C"):
+                s[i]="background-color:#B3E5FC;color:#01579B" if v>0 else "background-color:#F5F5F5;color:#AAA"
+        return s
+
+    st.dataframe(df.style.apply(sr,axis=1).format({
+        "Ocup. A":"{:.0%}","Ocup. B":"{:.0%}","Ocup. C":"{:.0%}",
+        "Horas A":"{:.1f}","Horas B":"{:.1f}","Horas C":"{:.1f}"}),
+        use_container_width=True,hide_index=True)
+
+    sup=r["suporte"]
+    srows=[]
+    for nm,k in [("Lavadora e Inspeção","lavadora"),("Gravação e Estanqueidade","gravacao"),
+                 ("Preset","preset"),("Coringa","coringa"),("Facilitador","facilitador")]:
+        s=sup[k]
+        srows.append({"Função":nm,"Qtd A":s["A"],"Qtd B":s["B"],"Qtd C":s["C"],
+            "Horas A":round(s["A"]*hA*dias,1),"Horas B":round(s["B"]*hB*dias,1),"Horas C":round(s["C"]*hC*dias,1)})
+    srows.append({"Função":"▶ TOTAL POR TURNO",
+        "Qtd A":r["tot_A"],"Qtd B":r["tot_B"],"Qtd C":r["tot_C"],
+        "Horas A":round(r["tot_A"]*hA*dias,1),"Horas B":round(r["tot_B"]*hB*dias,1),"Horas C":round(r["tot_C"]*hC*dias,1)})
+    df_s=pd.DataFrame(srows)
+    def ss(row):
+        is_t="TOTAL" in str(row["Função"])
+        return [f"background-color:{JD_AMARELO};color:{JD_VERDE_ESC};font-weight:700" if is_t else ""]*len(row)
+    st.dataframe(df_s.style.apply(ss,axis=1).format({"Horas A":"{:.1f}","Horas B":"{:.1f}","Horas C":"{:.1f}"}),
+        use_container_width=True,hide_index=True)
+
+    c1,c2,c3,c4=st.columns(4)
+    c1.metric("Total funcionários",r["total"])
+    c2.metric("Ciclo operacional",f"{r['prod_ciclo_op']:.0%}")
+    c3.metric("Labor operacional",f"{r['prod_labor_op']:.0%}")
+    c4.metric("⭐ Labor total",f"{r['prod_labor_tot']:.0%}")
+
+# ─────────────────────────────────────────
+# GRÁFICO
+# ─────────────────────────────────────────
 def grafico_cenarios(cenarios_dict):
     fig=make_subplots(specs=[[{"secondary_y":True}]])
     cores_A=[JD_VERDE,"#66BB6A","#A5D6A7","#1B5E20"]
@@ -182,79 +435,161 @@ def grafico_cenarios(cenarios_dict):
 # ─────────────────────────────────────────
 # EXPORTAÇÃO
 # ─────────────────────────────────────────
-# Fills globais para diagnóstico — usa cache para não recriar objetos
-def _make_brd(): return _get_brd()
-def _pf(color): return _get_fill(color)
+def exportar(resultados):
+    out=BytesIO(); wb=openpyxl.Workbook()
+    brd=Border(left=Side(style='thin',color='CCCCCC'),right=Side(style='thin',color='CCCCCC'),
+               top=Side(style='thin',color='CCCCCC'),bottom=Side(style='thin',color='CCCCCC'))
+    def ec(c,bg="FFFFFF",fg="000000",bold=False,fmt=None,center=True):
+        c.font=Font(name="Arial",bold=bold,color=fg,size=9)
+        c.fill=PatternFill("solid",fgColor=bg)
+        c.alignment=Alignment(horizontal="center" if center else "left",vertical="center")
+        c.border=brd
+        if fmt and isinstance(fmt, str) and len(fmt) > 0:
+            try: c.number_format=fmt
+            except: pass
+    ws=wb.active; ws.title="RESUMO MO"
+    JD_V=JD_VERDE_ESC.replace("#",""); JD_Y=JD_AMARELO.replace("#","")
+    for i,h in enumerate(["Mês","Dias","Turno A","Turno B","Turno C","Total",
+                           "Ciclo Op.","Ciclo Total","Labor Op.","Labor Total ★"],1):
+        ec(ws.cell(1,i,h),JD_V,"FFFFFF",True)
+    for ri,(m,abr) in enumerate(zip(MESES,MESES_ABREV),2):
+        r=resultados.get(m); bg="EAF3FB" if ri%2==0 else "FFFFFF"
+        vals=[abr,0,"-","-","-","-","-","-","-","-"] if not r else [
+            abr,r["dias"],r["tot_A"],r["tot_B"],r["tot_C"],r["total"],
+            r["prod_ciclo_op"],r["prod_ciclo_tot"],r["prod_labor_op"],r["prod_labor_tot"]]
+        for ci,v in enumerate(vals,1):
+            v_cell = f"{v:.1%}" if ci>=7 and isinstance(v,float) else v
+            c=ws.cell(ri,ci,v_cell)
+            ec(c,JD_Y if ci==10 and isinstance(v,float) else bg,
+               JD_V if ci==10 and isinstance(v,float) else "000000",
+               ci==10 and isinstance(v,float))
+        ws.row_dimensions[ri].height=15
+    for mes in MESES:
+        r=resultados.get(mes)
+        if not r: continue
+        wsm=wb.create_sheet(mes[:10]); hA,hB,hC,dias=r["hA"],r["hB"],r["hC"],r["dias"]
+        # Linha 1 — mês + grupos
+        for ci,txt in [(1,""),(2,"TURNO A"),(3,"TURNO B"),(4,"TURNO C"),
+                       (5,"TURNO A"),(6,"TURNO B"),(7,"TURNO C"),
+                       (8,"TURNO A"),(9,"TURNO B"),(10,"TURNO C")]:
+            ec(wsm.cell(1,ci,txt),JD_V,"FFFFFF",True)
+        wsm.cell(1,1,mes.upper()); ec(wsm.cell(1,1),JD_V,"FFFFFF",True)
 
-# Lazy globals — só instanciados na primeira chamada de função que precisar deles
-class _Fills:
-    """Instancia PatternFill só quando acessado (lazy), evitando custo no startup."""
-    _cache = {}
-    def __getattr__(self, name):
-        _map = {
-            "_BRD_DIAG":      _make_brd,
-            "VERDE_HEADER":   lambda: _pf("1F4D19"),
-            "VERMELHO_HEADER":lambda: _pf("C62828"),
-            "CINZA_HEADER":   lambda: _pf("555555"),
-            "VERMELHO_CLARO": lambda: _pf("FFCDD2"),
-            "VERMELHO_ESCURO":lambda: _pf("C62828"),
-            "AMARELO":        lambda: _pf("FFDE00"),
-            "VERDE":          lambda: _pf("E8F5E9"),
-            "F_HDR_VERD":     lambda: _pf("1F4D19"),
-            "F_HDR_AMAR":     lambda: _pf("FFDE00"),
-            "F_HDR_CINZA":    lambda: _pf("555555"),
-            "F_CINZA_CLR":    lambda: _pf("F4F4F4"),
-            "F_BRANCO":       lambda: _pf("FFFFFF"),
-            "F_VERM_CLR":     lambda: _pf("FFCDD2"),
-            "F_AMAR":         lambda: _pf("FFDE00"),
-            "F_VERDE":        lambda: _pf("E8F5E9"),
-            "F_VERDE_MED":    lambda: _pf("C8E6C9"),
-            "F_AZUL_CLR":     lambda: _pf("E3F2FD"),
-            "C_VERDE":        lambda: _pf("92D050"),
-            "C_AMAR":         lambda: _pf("FFFF00"),
-            "C_AZUL":         lambda: _pf("00B0F0"),
-            "C_PRETO":        lambda: _pf("000000"),
-            "C_CINZA":        lambda: _pf("D9D9D9"),
-            "C_BRANCO":       lambda: _pf("FFFFFF"),
-            "C_ROSA":         lambda: _pf("FFB6C1"),
-            "C_VERM_DIV":     lambda: _pf("FF0000"),
-        }
-        if name not in self._cache and name in _map:
-            self._cache[name] = _map[name]()
-        if name in self._cache:
-            return self._cache[name]
-        raise AttributeError(name)
+        # Linha 2 — descrição de cada bloco de colunas
+        JD_V2 = JD_VERDE_ESC.replace("#","")
+        JD_Y2 = JD_AMARELO.replace("#","")
+        JD_V3 = JD_VERDE_ESC.replace("#","")
+        wsm.merge_cells("B2:D2")
+        c2=wsm.cell(2,1,"CENTRO"); c2.font=Font(name="Arial",bold=True,color="FFFFFF",size=9); c2.fill=PatternFill("solid",fgColor=JD_V2); c2.alignment=Alignment(horizontal="center",vertical="center"); c2.border=brd
+        c2=wsm.cell(2,2,"% OCUPAÇÃO"); c2.font=Font(name="Arial",bold=True,color="FFFFFF",size=9); c2.fill=PatternFill("solid",fgColor=JD_V2); c2.alignment=Alignment(horizontal="center",vertical="center"); c2.border=brd
+        wsm.merge_cells("E2:G2")
+        c2=wsm.cell(2,5,"TURNO ATIVO  (0=inativo  1=ativo)"); c2.font=Font(name="Arial",bold=True,color=JD_V3,size=9); c2.fill=PatternFill("solid",fgColor=JD_Y2); c2.alignment=Alignment(horizontal="center",vertical="center"); c2.border=brd
+        wsm.merge_cells("H2:J2")
+        c2=wsm.cell(2,8,"HORAS DISPONIVEIS NO MES"); c2.font=Font(name="Arial",bold=True,color="FFFFFF",size=9); c2.fill=PatternFill("solid",fgColor="1565C0"); c2.alignment=Alignment(horizontal="center",vertical="center"); c2.border=brd
+        wsm.row_dimensions[2].height = 16
 
-_F = _Fills()
+        def cbg(v):
+            if v>1.0: return "FFCDD2"
+            if v>=0.85: return "FFFDE7"
+            return "E8F5E9"
+        ri=3
+        for _,row in r["centros"].iterrows():
+            for ci,(val,bg,ctr) in enumerate([
+                (row.centro,"FFFFFF",False),
+                (f"{row.ocup_A:.1%}",cbg(row.ocup_A),True),(f"{row.ocup_B:.1%}",cbg(row.ocup_B),True),(f"{row.ocup_C:.1%}",cbg(row.ocup_C),True),
+                (row.ativo_A,"B3E5FC" if row.ativo_A else "FFFDE7",True),(row.ativo_B,"B3E5FC" if row.ativo_B else "FFFDE7",True),(row.ativo_C,"B3E5FC" if row.ativo_C else "FFFDE7",True),
+                (f"{row.horas_disp_A:.2f}" if row.ativo_A else "0","B3E5FC" if row.ativo_A else "F5F5F5",True),
+                (f"{row.horas_disp_B:.2f}" if row.ativo_B else "0","B3E5FC" if row.ativo_B else "F5F5F5",True),
+                (f"{row.horas_disp_C:.2f}" if row.ativo_C else "0","B3E5FC" if row.ativo_C else "F5F5F5",True)],1):
+                ec(wsm.cell(ri,ci,val),bg,center=ctr)
+            ri+=1
+        sup=r["suporte"]
+        for nome,key in [("TOTAL DE OPERADORES",None),("LAVADORA E INSPEÇÃO","lavadora"),
+                         ("GRAVAÇÃO E ESTANQUEIDADE","gravacao"),("PRESET","preset"),
+                         ("CORINGA","coringa"),("FACILITADOR","facilitador"),
+                         ("TOTAL POR TURNO",None),("TOTAL FUNCIONÁRIOS",None)]:
+            bold="TOTAL" in nome; bg_r=JD_Y if bold else "FFFFFF"; fg_r=JD_V if bold else "000000"
+            ec(wsm.cell(ri,1,nome),bg_r,fg_r,bold,center=False)
+            if key:
+                s=sup[key]
+                for ci,t in [(5,"A"),(6,"B"),(7,"C")]:
+                    ec(wsm.cell(ri,ci,s[t]),"B3E5FC" if s[t] else "FFFDE7",bold=bold)
+                for ci,t,h in [(8,"A",hA),(9,"B",hB),(10,"C",hC)]:
+                    v=s[t]*h*dias; ec(wsm.cell(ri,ci,f"{v:.2f}" if v else "0"),"B3E5FC" if v else "F5F5F5",bold=bold)
+            elif "TOTAL DE OPERADORES" in nome:
+                for ci,v in [(5,r["op_A"]),(6,r["op_B"]),(7,r["op_C"])]:
+                    ec(wsm.cell(ri,ci,v),JD_Y,JD_V,True)
+                for ci,v,h in [(8,r["op_A"],hA),(9,r["op_B"],hB),(10,r["op_C"],hC)]:
+                    ec(wsm.cell(ri,ci,f"{v*h*dias:.2f}"),JD_Y,JD_V,True)
+            elif "TOTAL POR TURNO" in nome:
+                for ci,v in [(5,r["tot_A"]),(6,r["tot_B"]),(7,r["tot_C"])]:
+                    ec(wsm.cell(ri,ci,v),JD_Y,JD_V,True)
+                for ci,v,h in [(8,r["tot_A"],hA),(9,r["tot_B"],hB),(10,r["tot_C"],hC)]:
+                    ec(wsm.cell(ri,ci,f"{v*h*dias:.2f}"),JD_Y,JD_V,True)
+            elif "FUNCIONÁRIOS" in nome:
+                ec(wsm.cell(ri,4,r["total"]),JD_Y,JD_V,True)
+                tot_h=r["tot_A"]*hA*dias+r["tot_B"]*hB*dias+r["tot_C"]*hC*dias
+                ec(wsm.cell(ri,8,f"{tot_h:.2f}"),JD_Y,JD_V,True)
+            ri+=1
+        ri+=1
+        for nm,v,dest in [("PROD. CICLO OPERACIONAL",r["prod_ciclo_op"],False),
+                          ("PROD. CICLO TOTAL",r["prod_ciclo_tot"],False),
+                          ("PROD. LABOR OPERACIONAL",r["prod_labor_op"],False),
+                          ("PROD. LABOR TOTAL ★",r["prod_labor_tot"],True)]:
+            wsm.merge_cells(f"H{ri}:I{ri}")
+            ec(wsm.cell(ri,8,nm),JD_Y if dest else "FFFFFF",JD_V if dest else "000000",dest,center=False)
+            ec(wsm.cell(ri,10,f"{v:.1%}" if isinstance(v,float) else v),JD_Y if dest else "FFFFFF",JD_V if dest else "000000",dest)
+            ri+=1
+        for ci,w in enumerate([14,8,8,8,8,8,8,24,10,10],1):
+            wsm.column_dimensions[get_column_letter(ci)].width=w
+    wb.save(out); out.seek(0)
+    return out
 
-# Aliases diretos para compatibilidade com o código existente
-_BRD_DIAG      = property(lambda s: _F._BRD_DIAG)
-VERDE_HEADER    = _F.VERDE_HEADER
-VERMELHO_HEADER = _F.VERMELHO_HEADER
-CINZA_HEADER    = _F.CINZA_HEADER
-VERMELHO_CLARO  = _F.VERMELHO_CLARO
-VERMELHO_ESCURO = _F.VERMELHO_ESCURO
-AMARELO         = _F.AMARELO
-VERDE           = _F.VERDE
-F_HDR_VERD      = _F.F_HDR_VERD
-F_HDR_AMAR      = _F.F_HDR_AMAR
-F_HDR_CINZA     = _F.F_HDR_CINZA
-F_CINZA_CLR     = _F.F_CINZA_CLR
-F_BRANCO        = _F.F_BRANCO
-F_VERM_CLR      = _F.F_VERM_CLR
-F_AMAR          = _F.F_AMAR
-F_VERDE         = _F.F_VERDE
-F_VERDE_MED     = _F.F_VERDE_MED
-F_AZUL_CLR      = _F.F_AZUL_CLR
-C_VERDE         = _F.C_VERDE
-C_AMAR          = _F.C_AMAR
-C_AZUL          = _F.C_AZUL
-C_PRETO         = _F.C_PRETO
-C_CINZA         = _F.C_CINZA
-C_BRANCO        = _F.C_BRANCO
-C_ROSA          = _F.C_ROSA
-C_VERM_DIV      = _F.C_VERM_DIV
-_BRD_DIAG       = _make_brd()
+# ─────────────────────────────────────────
+# HELPERS GLOBAIS
+# ─────────────────────────────────────────
+def safe_int(v):
+    try: return int(float(v)) if v is not None else 0
+    except: return 0
+
+def safe_float(v):
+    try: return float(v) if v is not None else 0.0
+    except: return 0.0
+
+# Fills globais para diagnóstico
+_BRD_DIAG = Border(
+    left=Side(style='thin',color='CCCCCC'), right=Side(style='thin',color='CCCCCC'),
+    top=Side(style='thin',color='CCCCCC'),  bottom=Side(style='thin',color='CCCCCC'))
+
+VERDE_HEADER   = PatternFill("solid", fgColor="1F4D19")
+VERMELHO_HEADER= PatternFill("solid", fgColor="C62828")
+CINZA_HEADER   = PatternFill("solid", fgColor="555555")
+VERMELHO_CLARO = PatternFill("solid", fgColor="FFCDD2")
+VERMELHO_ESCURO= PatternFill("solid", fgColor="C62828")
+AMARELO        = PatternFill("solid", fgColor="FFDE00")
+VERDE          = PatternFill("solid", fgColor="E8F5E9")
+
+# Fills para gerar_diagnostico_mensal / gerar_output_layout
+F_HDR_VERD  = PatternFill("solid", fgColor="1F4D19")
+F_HDR_AMAR  = PatternFill("solid", fgColor="FFDE00")
+F_HDR_CINZA = PatternFill("solid", fgColor="555555")
+F_CINZA_CLR = PatternFill("solid", fgColor="F4F4F4")
+F_BRANCO    = PatternFill("solid", fgColor="FFFFFF")
+F_VERM_CLR  = PatternFill("solid", fgColor="FFCDD2")
+F_AMAR      = PatternFill("solid", fgColor="FFDE00")
+F_VERDE     = PatternFill("solid", fgColor="E8F5E9")
+F_VERDE_MED = PatternFill("solid", fgColor="C8E6C9")
+F_AZUL_CLR  = PatternFill("solid", fgColor="E3F2FD")
+
+# Fills para gerar_output_layout
+C_VERDE    = PatternFill("solid", fgColor="92D050")
+C_AMAR     = PatternFill("solid", fgColor="FFFF00")
+C_AZUL     = PatternFill("solid", fgColor="00B0F0")
+C_PRETO    = PatternFill("solid", fgColor="000000")
+C_CINZA    = PatternFill("solid", fgColor="D9D9D9")
+C_BRANCO   = PatternFill("solid", fgColor="FFFFFF")
+C_ROSA     = PatternFill("solid", fgColor="FFB6C1")
+C_VERM_DIV = PatternFill("solid", fgColor="FF0000")
 
 def cor_ocup(pct):
     try:
@@ -267,10 +602,10 @@ def cor_ocup(pct):
 
 def ec(ws, r, c, val, fill=None, bold=False, color="000000", size=9, center=True, italic=False, comment_text=None):
     cell = ws.cell(row=r, column=c, value=val)
-    cell.font      = _get_font(bold, color, size, italic)
-    cell.fill      = fill or F_BRANCO
-    cell.alignment = _get_align(center)
-    cell.border    = _get_brd()
+    cell.font = Font(name="Arial", bold=bold, color=color, size=size, italic=italic)
+    cell.fill = fill or F_BRANCO
+    cell.alignment = Alignment(horizontal="center" if center else "left", vertical="center", wrap_text=True)
+    cell.border = _BRD_DIAG
     return cell
 
 def cell_style(ws, r, c, val, fill=None, bold=False, color="000000", font_size=9, center=True, italic=False, comment_text=None):
@@ -279,7 +614,6 @@ def cell_style(ws, r, c, val, fill=None, bold=False, color="000000", font_size=9
 # ─────────────────────────────────────────
 # DIAGNÓSTICO DE DIVERGÊNCIAS — EXCEL DE SAÍDA
 # ─────────────────────────────────────────
-@st.cache_data(show_spinner=False, ttl=3600)
 def gerar_excel_diagnostico(file_bytes):
     """Gera Excel com diagnóstico completo de divergências entre inputs e Excel de referência."""
     MESES = ["Novembro","Dezembro","Janeiro","Fevereiro","Março","Abril",
@@ -560,7 +894,6 @@ def gerar_excel_diagnostico(file_bytes):
     return output
 
 
-@st.cache_data(show_spinner=False, ttl=3600)
 def gerar_diagnostico_mensal(file_bytes, res_app, tempo, dist, aplic, pmp, dias, horas_turno, thresholds):
     """Gera Excel com uma aba por mês mostrando App vs Excel célula a célula."""
     MAPA = {
@@ -1102,369 +1435,8 @@ def gerar_output_layout(file_bytes, res_app, tempo, dist, aplic, pmp, dias, hora
     return output
 
 # ─────────────────────────────────────────
-# TABELONA COMPLETA (extraído para função — chamado só no botão)
-# ─────────────────────────────────────────
-def _gerar_tabelona(file_bytes, res_base, tempo, dist, aplic, pmp, dias, horas_turno, thresholds, suporte_cfg):
-    """Gera a tabelona completa: layout IMPUTDISTRIBUIÇÃO + DADOS AUTOMÁTICOS por mês."""
-    import openpyxl as _opx
-    from openpyxl.styles import PatternFill as _PF, Font as _Ft, Alignment as _Al, Border as _Bd, Side as _Sd
-
-    MAPA_T = {"Novembro":"NovFY26","Dezembro":"DezFY26","Janeiro":"JanFY26",
-              "Fevereiro":"FevFY26","Março":"MarFY26","Abril":"AbrFY26",
-              "Maio":"MaiFY26","Junho":"JunFY26","Julho":"JulFY26",
-              "Agosto":"AgoFY26","Setembro":"SetFY26","Outubro":"OutFY26"}
-
-    _F_VERDE  = _PF("solid",fgColor="66FF66"); _F_AMAR   = _PF("solid",fgColor="FFFF00")
-    _F_AZUL   = _PF("solid",fgColor="00B0F0"); _F_PRETO  = _PF("solid",fgColor="000000")
-    _F_CINZA  = _PF("solid",fgColor="D9D9D9"); _F_CINZA2 = _PF("solid",fgColor="BFBFBF")
-    _F_BRANCO = _PF("solid",fgColor="FFFFFF"); _F_VERM   = _PF("solid",fgColor="FF0000")
-    _F_VERM_S = _PF("solid",fgColor="FFCCCC"); _F_VERDE_JD = _PF("solid",fgColor="1F4D19")
-    _BRD = _Bd(left=_Sd(style="thin",color="AAAAAA"),right=_Sd(style="thin",color="AAAAAA"),
-               top=_Sd(style="thin",color="AAAAAA"),bottom=_Sd(style="thin",color="AAAAAA"))
-
-    def _ec(ws,r,c,val,fill=None,bold=False,color="000000",size=8,center=True,wrap=False):
-        cell=ws.cell(row=r,column=c,value=val)
-        cell.font=_Ft(name="Arial",bold=bold,color=color,size=size)
-        cell.fill=fill or _F_BRANCO
-        cell.alignment=_Al(horizontal="center" if center else "left",vertical="center",wrap_text=wrap)
-        cell.border=_BRD
-        return cell
-
-    def _cor_pct(v):
-        try:
-            f=float(v)
-            if f>=1.06: return _PF("solid",fgColor="FF0000")
-            if f>=1.00: return _F_AMAR
-            if f>=0.40: return _PF("solid",fgColor="92D050")
-            return _F_BRANCO
-        except: return _F_BRANCO
-
-    hA_t=horas_turno["A"]; hB_t=horas_turno["B"]; hC_t=horas_turno["C"]
-    thr_A_t=thresholds["A"]/100; thr_B_t=thresholds["B"]/100; thr_C_t=thresholds["C"]/100
-
-    # JOIN único para todos os meses
-    df_all_t = (aplic.merge(pmp,on="modelo").merge(tempo,on=["centro","peca"]).merge(dist,on=["centro","peca"]))
-    if "vol_int" not in df_all_t.columns: df_all_t["vol_int"]=1.0
-    df_all_t["vol_int"] = pd.to_numeric(df_all_t["vol_int"],errors="coerce").fillna(1.0)
-    df_all_t["indice_ciclo"]=(df_all_t.t_ciclo*df_all_t.div_carga*df_all_t.div_volume*df_all_t.vol_int)/df_all_t.disponib
-    df_all_t["min_ciclo"]=df_all_t.indice_ciclo*df_all_t.qtd
-    df_all_t["min_labor"]=df_all_t.t_labor*df_all_t.div_carga*df_all_t.qtd
-    agg_cp_t = df_all_t.groupby(["centro","peca","mes"])[["min_ciclo","min_labor"]].sum()
-
-    # Ler Excel de referência UMA ÚNICA VEZ
-    wb_r = _opx.load_workbook(BytesIO(file_bytes),read_only=True,data_only=True)
-    # Ler aba base (NovFY26 ou primeira disponível)
-    aba_base = next((a for a in ["NovFY26","DezFY26","JanFY26"] if a in wb_r.sheetnames),None)
-    if not aba_base:
-        wb_r.close()
-        return BytesIO()
-    ws_base = wb_r[aba_base]
-    base_rows_t = list(ws_base.iter_rows(min_row=7,max_row=63,min_col=1,max_col=87,values_only=True))
-    base_rows_t = [r for r in base_rows_t if r[0] and r[1]]
-    modelos_xl_t = [str(ws_base.cell(6,c).value) for c in range(19,88)
-                    if ws_base.cell(6,c).value and str(ws_base.cell(6,c).value).startswith("MODELO")]
-    modelo_col_idx = {str(ws_base.cell(6,c).value):(c-19) for c in range(19,88)
-                      if ws_base.cell(6,c).value and str(ws_base.cell(6,c).value).startswith("MODELO")}
-
-    # Ler dados mensais de uma vez
-    dados_mes_t = {}
-    for mes_t, aba_t in MAPA_T.items():
-        if aba_t not in wb_r.sheetnames: continue
-        ws_m_t = wb_r[aba_t]
-        dados_mes_t[mes_t] = {
-            "main": list(ws_m_t.iter_rows(min_row=7,max_row=63,min_col=1,max_col=18,values_only=True)),
-            "vols": list(ws_m_t.iter_rows(min_row=7,max_row=63,min_col=19,max_col=87,values_only=True))
-        }
-    wb_r.close()
-
-    aplic_orig = pd.read_excel(BytesIO(file_bytes),sheet_name="IMPUTAPLICAÇÃO",header=0)
-    aplic_orig = aplic_orig.rename(columns={aplic_orig.columns[0]:"centro",aplic_orig.columns[1]:"peca"})
-
-    wb_out = _opx.Workbook(); primeira_t = True
-
-    from datetime import date as _date
-
-    for mes_t in MESES:
-        d_t = dias.get(mes_t,0)
-        if d_t == 0: continue
-        minA_t=d_t*hA_t*60; minB_t=d_t*hB_t*60; minC_t=d_t*hC_t*60
-        dm_t = dados_mes_t.get(mes_t,{}); pmp_mes_t = pmp[pmp.mes==mes_t]
-
-        if primeira_t: ws_out=wb_out.active; ws_out.title=mes_t[:10]; primeira_t=False
-        else: ws_out=wb_out.create_sheet(mes_t[:10])
-        ws_out.freeze_panes="F7"
-
-        # Larguras das colunas fixas
-        col_widths={1:5,2:9,3:16,4:6,5:5,6:9,7:9,8:8,9:8,10:8,11:8,12:9,13:9,14:9,15:9,16:12,17:12,18:8}
-        for c,w in col_widths.items(): ws_out.column_dimensions[get_column_letter(c)].width=w
-
-        # Linha 5 — título
-        ws_out.merge_cells(f"A5:{get_column_letter(18+len(modelos_xl_t))}5")
-        _ec(ws_out,5,1,f"RESUMO DA CARGA — {mes_t.upper()} ({d_t} dias)",_F_VERDE_JD,True,"FFFFFF",10,True)
-        ws_out.row_dimensions[5].height=18
-
-        # Linha 6 — cabeçalhos
-        hdrs_f=[("Máquina",_F_CINZA2,"000000"),("PEÇA",_F_CINZA2,"000000"),("DESCRIÇÃO",_F_CINZA2,"000000"),
-                ("PÇ/TRAT",_F_CINZA2,"000000"),("UM",_F_CINZA2,"000000"),
-                ("Tempo Ciclo (min)",_F_PRETO,"FFFFFF"),("Tempo Labor (min)",_F_PRETO,"FFFFFF"),
-                ("Div. Carga",_PF("solid",fgColor="FF0000"),"FFFF00"),("Vol. Interna",_F_CINZA2,"000000"),
-                ("Div. Volume",_PF("solid",fgColor="FF0000"),"FFFF00"),("Disponib.",_F_CINZA2,"000000"),
-                ("Indice Ciclo",_F_CINZA2,"000000"),
-                ("JA.A",_F_VERDE,"000000"),("JA.B",_F_AMAR,"000000"),("JA.C",_F_AZUL,"000000"),
-                ("TOTAL CICLOS (MIN)",_F_CINZA,"000000"),("TOTAL LABOR (MIN)",_F_CINZA,"000000"),
-                ("TOTAL PECAS",_F_CINZA,"000000")]
-        for ci_t,(h_t,f_t,cor_t) in enumerate(hdrs_f,1):
-            _ec(ws_out,6,ci_t,h_t,f_t,True,cor_t,8,True,True)
-        for mi_t,mod_t in enumerate(modelos_xl_t):
-            ci_t=19+mi_t
-            _ec(ws_out,6,ci_t,mod_t,_F_CINZA,True,"000000",7,True,True)
-            ws_out.column_dimensions[get_column_letter(ci_t)].width=7
-        ws_out.row_dimensions[6].height=42
-
-        # Linhas de dados
-        main_data_t=dm_t.get("main",[]); vols_data_t=dm_t.get("vols",[])
-        for ri_t_idx,base_row_t in enumerate(base_rows_t):
-            cen_t=str(base_row_t[0]).strip(); peca_t=str(base_row_t[1]).strip()
-            ri_t=7+ri_t_idx
-            tc_xl_t=base_row_t[5]; tl_xl_t=base_row_t[6]
-            dc_xl_t=base_row_t[7]; vi_xl_t=base_row_t[8]; dv_xl_t=base_row_t[9]
-            di_xl_t=base_row_t[10]; idx_xl_t=base_row_t[11]
-            mrow_t=main_data_t[ri_t_idx] if ri_t_idx<len(main_data_t) else [None]*18
-            xl_pA_t=mrow_t[12] if len(mrow_t)>12 else None
-            xl_pB_t=mrow_t[13] if len(mrow_t)>13 else None
-            xl_ciclo_t=mrow_t[15] if len(mrow_t)>15 else None
-            xl_pecas_t=mrow_t[17] if len(mrow_t)>17 else None
-            vrow_t=vols_data_t[ri_t_idx] if vols_data_t and ri_t_idx<len(vols_data_t) else []
-            try: mc_t=float(agg_cp_t.loc[(cen_t,peca_t,mes_t),"min_ciclo"])
-            except: mc_t=0.0
-            try: ml_t=float(agg_cp_t.loc[(cen_t,peca_t,mes_t),"min_labor"])
-            except: ml_t=0.0
-            pA_t=mc_t/minA_t if minA_t>0 else 0
-            pB_t=mc_t/minB_t if minB_t>0 else 0
-            pC_t=mc_t/minC_t if minC_t>0 else 0
-            app_mod_v={}
-            for mod_t2 in modelos_xl_t:
-                qtd_t=int(pmp_mes_t[pmp_mes_t.modelo==mod_t2]["qtd"].sum()) if mod_t2 in pmp_mes_t.modelo.values else 0
-                fr_t=aplic_orig[(aplic_orig.centro==cen_t)&(aplic_orig.peca==peca_t)]
-                flag_t=int(fr_t[mod_t2].values[0]) if len(fr_t)>0 and mod_t2 in fr_t.columns and not pd.isna(fr_t[mod_t2].values[0] if len(fr_t)>0 else 0) else 0
-                app_mod_v[mod_t2]=qtd_t*flag_t
-            app_tot_t=sum(app_mod_v.values())
-            def _df(a,b,tol=0.02):
-                if b is None: return False
-                try: return abs(float(a or 0)-float(b))>tol
-                except: return False
-            div_A_t=_df(pA_t,xl_pA_t,0.02); div_B_t=_df(pB_t,xl_pB_t,0.02)
-            div_c_t=_df(mc_t,xl_ciclo_t,1); div_p_t=_df(app_tot_t,xl_pecas_t,0.5)
-            dc_i=dist[(dist.centro==cen_t)&(dist.peca==peca_t)]["div_carga"].values
-            vi_i=dist[(dist.centro==cen_t)&(dist.peca==peca_t)]["vol_int"].values
-            dv_i=dist[(dist.centro==cen_t)&(dist.peca==peca_t)]["div_volume"].values
-            di_i=dist[(dist.centro==cen_t)&(dist.peca==peca_t)]["disponib"].values
-            vi_val=float(vi_i[0]) if len(vi_i) else 1.0
-            idx_app_t=(float(tc_xl_t or 0)*dc_i[0]*dv_i[0]*vi_val)/di_i[0] if len(dc_i) and len(di_i) and di_i[0] else float(idx_xl_t or 0)
-            div_idx_t=abs(float(idx_xl_t or 0)-float(idx_app_t or 0))>0.5
-            _ec(ws_out,ri_t,1,cen_t,_F_BRANCO,False,"000000",8,False)
-            _ec(ws_out,ri_t,2,peca_t,_F_BRANCO,False,"000000",8,False)
-            _ec(ws_out,ri_t,3,base_row_t[2],_F_BRANCO,False,"000000",8,False)
-            _ec(ws_out,ri_t,4,base_row_t[3],_F_BRANCO,False,"000000",8)
-            _ec(ws_out,ri_t,5,base_row_t[4],_F_BRANCO,False,"000000",8)
-            _ec(ws_out,ri_t,6,tc_xl_t,_F_PRETO,False,"FFFFFF",8)
-            _ec(ws_out,ri_t,7,tl_xl_t,_F_PRETO,False,"FFFFFF",8)
-            _ec(ws_out,ri_t,8,dc_xl_t,_PF("solid",fgColor="FF0000"),False,"FFFF00",8)
-            _ec(ws_out,ri_t,9,vi_xl_t,_F_BRANCO,False,"000000",8)
-            _ec(ws_out,ri_t,10,dv_xl_t,_PF("solid",fgColor="FF0000"),False,"FFFF00",8)
-            _ec(ws_out,ri_t,11,di_xl_t,_F_CINZA2,False,"000000",8)
-            _ec(ws_out,ri_t,12,round(float(idx_app_t),4),_F_VERM_S if div_idx_t else _F_BRANCO,False,"000000",8)
-            _ec(ws_out,ri_t,13,f"{pA_t:.1%}",_F_VERM if div_A_t else _cor_pct(pA_t),False,"000000",8)
-            _ec(ws_out,ri_t,14,f"{pB_t:.1%}",_F_VERM if div_B_t else _cor_pct(pB_t),False,"000000",8)
-            _ec(ws_out,ri_t,15,f"{pC_t:.1%}",_cor_pct(pC_t),False,"000000",8)
-            _ec(ws_out,ri_t,16,round(mc_t,1),_F_VERM_S if div_c_t else _F_BRANCO,False,"000000",8)
-            _ec(ws_out,ri_t,17,round(ml_t,1),_F_BRANCO,False,"000000",8)
-            _ec(ws_out,ri_t,18,app_tot_t,_F_VERM_S if div_p_t else _F_BRANCO,False,"000000",8)
-            for mi_t2,mod_t2 in enumerate(modelos_xl_t):
-                ci_t2=19+mi_t2
-                v_app_t=app_mod_v.get(mod_t2,0)
-                col_idx=modelo_col_idx.get(mod_t2,mi_t2)
-                v_xl_t=vrow_t[col_idx] if vrow_t and col_idx<len(vrow_t) else None
-                if v_xl_t is not None:
-                    try: div_vm=abs(float(v_app_t)-float(v_xl_t or 0))>0.5
-                    except: div_vm=False
-                    fill_vm=_F_VERM if div_vm else (_F_CINZA if v_app_t else _F_BRANCO)
-                else: fill_vm=_F_CINZA if v_app_t else _F_BRANCO
-                _ec(ws_out,ri_t,ci_t2,v_app_t if v_app_t else None,fill_vm,False,"000000",7)
-            ws_out.row_dimensions[ri_t].height=13
-
-        # ── Linha de nota ─────────────────────────────────────────────────────
-        nota_rt=7+len(base_rows_t)+1
-        ws_out.merge_cells(f"A{nota_rt}:{get_column_letter(18+len(modelos_xl_t))}{nota_rt}")
-        nt=ws_out.cell(nota_rt,1,"🔴 JA.A/JA.B vermelho = % ocupação difere do Excel  |  🔴 Rosa = total ciclos ou peças difere  |  Cinza = presente no App")
-        nt.font=_Ft(name="Arial",bold=True,size=8,color="CC0000")
-        nt.fill=_PF("solid",fgColor="FFEEEE")
-        nt.alignment=_Al(horizontal="left",vertical="center")
-        ws_out.row_dimensions[nota_rt].height=14
-
-        # ════════════════════════════════════════════════════════════════
-        # BLOCO DADOS AUTOMÁTICOS — coluna L (12) em diante
-        # ════════════════════════════════════════════════════════════════
-        res_t=res_base.get(mes_t)
-        if res_t:
-            d_t2=res_t["dias"]; hA_v=res_t["hA"]; hB_v=res_t["hB"]; hC_v=res_t["hC"]
-            sup_t=res_t["suporte"]
-            _F_HDR_VERD=_PF("solid",fgColor="1F4D19"); _F_HDR_AMAR=_PF("solid",fgColor="FFDE00")
-            _F_HDR_GRAY=_PF("solid",fgColor="D9D9D9"); _F_VERM_L=_PF("solid",fgColor="FFCDD2")
-            _F_AMAR_L=_PF("solid",fgColor="FFFF00"); _F_VERDE_L=_PF("solid",fgColor="92D050")
-            _F_AZUL_L=_PF("solid",fgColor="B3E5FC"); _F_CINZA_L=_PF("solid",fgColor="F4F4F4")
-            _F_AMAR_TOT=_PF("solid",fgColor="FFDE00")
-            COL_OFF=12; da_row=nota_rt+2
-
-            def _da(r,c,val,fill=None,bold=False,color="000000",size=9,center=True,merge_end=None):
-                cell=ws_out.cell(row=r,column=c,value=val)
-                cell.font=_Ft(name="Arial",bold=bold,color=color,size=size)
-                cell.fill=fill or _F_BRANCO
-                cell.alignment=_Al(horizontal="center" if center else "left",vertical="center",wrap_text=True)
-                cell.border=_BRD
-                if merge_end: ws_out.merge_cells(start_row=r,start_column=c,end_row=r,end_column=merge_end)
-                return cell
-
-            # TOTAL DE MINUTOS / HORAS / DIAS / HORAS POR TURNO
-            min_A=d_t2*hA_v*60; min_B=d_t2*hB_v*60; min_C=d_t2*hC_v*60
-            for ri_hm,(label,vA,vB,vC) in enumerate([
-                ("TOTAL DE MINUTOS",round(min_A,1),round(min_B,1),round(min_C,1)),
-                ("TOTAL DE HORAS",  round(d_t2*hA_v,2),round(d_t2*hB_v,2),round(d_t2*hC_v,2)),
-                ("DIAS TRABALHADOS",d_t2,d_t2,d_t2),
-                ("HORAS POR TURNO", hA_v,hB_v,hC_v),
-            ]):
-                r_hm=da_row+ri_hm
-                fill_l=_F_VERM_L if "DIAS" in label else _F_HDR_GRAY
-                _da(r_hm,COL_OFF,label,fill_l,bold=True,center=False)
-                _da(r_hm,COL_OFF+1,vA,fill_l,bold=True)
-                _da(r_hm,COL_OFF+2,vB,fill_l,bold=True)
-                _da(r_hm,COL_OFF+3,vC,fill_l,bold=True)
-                ws_out.row_dimensions[r_hm].height=14
-
-            # Cabeçalho RESUMO DA CARGA
-            r_titulo=da_row+5
-            _da(r_titulo,COL_OFF,"RESUMO DA CARGA MÁQUINA X QUADRO DE LOTAÇÃO",
-                _F_HDR_GRAY,bold=True,center=True,merge_end=COL_OFF+9)
-            ws_out.row_dimensions[r_titulo].height=16
-
-            # PERÍODO / DATA / HORAS POR TURNO
-            r_per=r_titulo+1
-            _da(r_per,COL_OFF,"PERÍODO:",_F_HDR_GRAY,bold=True,center=False)
-            _da(r_per,COL_OFF+1,mes_t,_PF("solid",fgColor="FF0000"),bold=True,color="FFFFFF")
-            _da(r_per,COL_OFF+3,"DATA DE REVISÃO:",_F_HDR_GRAY,bold=True,center=False)
-            _da(r_per,COL_OFF+5,_date.today().strftime("%d/%m/%Y"),_PF("solid",fgColor="FF0000"),bold=True,color="FFFFFF")
-            _da(r_per,COL_OFF+7,"HORAS POR TURNO DE TRABALHO",_F_HDR_GRAY,bold=True,merge_end=COL_OFF+9)
-            ws_out.row_dimensions[r_per].height=14
-
-            # Horas por turno
-            r_h=r_per+1
-            _da(r_h,COL_OFF+7,hA_v,_F_HDR_GRAY,bold=True)
-            _da(r_h,COL_OFF+8,hB_v,_F_HDR_GRAY,bold=True)
-            _da(r_h,COL_OFF+9,hC_v,_F_HDR_GRAY,bold=True)
-            ws_out.row_dimensions[r_h].height=14
-
-            # Cabeçalho Turnos
-            r_hdr=r_h+1
-            for ci_da,txt_da,fill_da in [
-                (COL_OFF,"",_F_HDR_VERD),(COL_OFF+1,"TURNO A",_F_VERDE),(COL_OFF+2,"TURNO B",_F_AMAR),
-                (COL_OFF+3,"TURNO C",_F_AZUL),(COL_OFF+4,"TURNO A",_F_VERDE),(COL_OFF+5,"TURNO B",_F_AMAR),
-                (COL_OFF+6,"TURNO C",_F_AZUL),(COL_OFF+7,"TURNO A",_F_VERDE),(COL_OFF+8,"TURNO B",_F_AMAR),
-                (COL_OFF+9,"TURNO C",_F_AZUL)
-            ]:
-                _da(r_hdr,ci_da,txt_da,fill_da,bold=True,color="FFFFFF" if fill_da==_F_HDR_VERD else "000000")
-            ws_out.row_dimensions[r_hdr].height=14
-
-            # Sub-cabeçalho
-            r_sub=r_hdr+1
-            for ci_da,txt_da,fill_da in [
-                (COL_OFF,"CENTRO",_F_HDR_VERD),(COL_OFF+1,"% Ocup",_F_VERDE),(COL_OFF+2,"% Ocup",_F_AMAR),
-                (COL_OFF+3,"% Ocup",_F_AZUL),(COL_OFF+4,"Ativo",_F_VERDE),(COL_OFF+5,"Ativo",_F_AMAR),
-                (COL_OFF+6,"Ativo",_F_AZUL),(COL_OFF+7,"Horas",_F_VERDE),(COL_OFF+8,"Horas",_F_AMAR),
-                (COL_OFF+9,"Horas",_F_AZUL)
-            ]:
-                _da(r_sub,ci_da,txt_da,fill_da,bold=True,
-                    color="FFFFFF" if fill_da==_F_HDR_VERD else "000000",
-                    center=fill_da!=_F_HDR_VERD)
-            ws_out.row_dimensions[r_sub].height=14
-
-            # Linhas de centros
-            def _ocup_fill(v):
-                try:
-                    f=float(v)
-                    if f>1.06: return _PF("solid",fgColor="FF0000")
-                    if f>=1.00: return _F_AMAR_L
-                    if f>=0.40: return _F_VERDE_L
-                    return _F_BRANCO
-                except: return _F_BRANCO
-
-            r_cen=r_sub+1
-            for _,crow in res_t["centros"].iterrows():
-                oA,oB,oC=crow.ocup_A,crow.ocup_B,crow.ocup_C
-                aA,aB,aC=int(crow.ativo_A),int(crow.ativo_B),int(crow.ativo_C)
-                hA_d,hB_d,hC_d=crow.horas_disp_A,crow.horas_disp_B,crow.horas_disp_C
-                _da(r_cen,COL_OFF,crow.centro,_F_BRANCO,center=False)
-                _da(r_cen,COL_OFF+1,f"{oA:.0%}",_ocup_fill(oA))
-                _da(r_cen,COL_OFF+2,f"{oB:.0%}",_ocup_fill(oB))
-                _da(r_cen,COL_OFF+3,f"{oC:.0%}",_ocup_fill(oC))
-                _da(r_cen,COL_OFF+4,aA,_F_VERDE if aA else _F_BRANCO,bold=True)
-                _da(r_cen,COL_OFF+5,aB,_F_AMAR  if aB else _F_BRANCO,bold=True)
-                _da(r_cen,COL_OFF+6,aC,_F_AZUL  if aC else _F_BRANCO,bold=True)
-                _da(r_cen,COL_OFF+7,round(hA_d,2) if hA_d else 0,_F_VERDE if hA_d else _F_BRANCO)
-                _da(r_cen,COL_OFF+8,round(hB_d,2) if hB_d else 0,_F_AMAR  if hB_d else _F_BRANCO)
-                _da(r_cen,COL_OFF+9,round(hC_d,2) if hC_d else 0,_F_AZUL  if hC_d else _F_BRANCO)
-                ws_out.row_dimensions[r_cen].height=13; r_cen+=1
-
-            def _da_sup(ri,nome,qA,qB,qC,is_total=False):
-                ft=_F_AMAR_TOT if is_total else _F_CINZA_L
-                fq=_F_AMAR_TOT if is_total else _F_VERDE_L
-                fh=_F_AMAR_TOT if is_total else _F_VERDE
-                ct="1F4D19" if is_total else "000000"
-                _da(ri,COL_OFF,nome,ft,bold=is_total,center=False,color=ct)
-                _da(ri,COL_OFF+4,qA,fq if qA else _F_AMAR_L,bold=is_total,color=ct)
-                _da(ri,COL_OFF+5,qB,fq if qB else _F_AMAR_L,bold=is_total,color=ct)
-                _da(ri,COL_OFF+6,qC,fq if qC else _F_AMAR_L,bold=is_total,color=ct)
-                _da(ri,COL_OFF+7,round(qA*hA_v*d_t2,2) if qA else 0,fh if qA else _F_BRANCO,bold=is_total,color=ct)
-                _da(ri,COL_OFF+8,round(qB*hB_v*d_t2,2) if qB else 0,fh if qB else _F_BRANCO,bold=is_total,color=ct)
-                _da(ri,COL_OFF+9,round(qC*hC_v*d_t2,2) if qC else 0,fh if qC else _F_BRANCO,bold=is_total,color=ct)
-                ws_out.row_dimensions[ri].height=14
-
-            _da_sup(r_cen,"TOTAL DE OPERADORES",res_t["op_A"],res_t["op_B"],res_t["op_C"],True); r_cen+=1
-            for nm_s,ks in [("LAVADORA E INSPEÇÃO","lavadora"),("GRAVAÇÃO E ESTANQUEIDADE","gravacao"),
-                             ("PRESET","preset"),("CORINGA","coringa"),("FACILITADOR","facilitador")]:
-                s=sup_t[ks]; _da_sup(r_cen,nm_s,s["A"],s["B"],s["C"],False); r_cen+=1
-            _da_sup(r_cen,"TOTAL POR TURNO",res_t["tot_A"],res_t["tot_B"],res_t["tot_C"],True); r_cen+=1
-
-            _da(r_cen,COL_OFF,"TOTAL FUNCIONÁRIOS",_F_AMAR_TOT,bold=True,center=False,color="1F4D19")
-            _da(r_cen,COL_OFF+4,res_t["total"],_F_AMAR_TOT,bold=True,color="1F4D19")
-            tot_h_da=res_t["tot_A"]*hA_v*d_t2+res_t["tot_B"]*hB_v*d_t2+res_t["tot_C"]*hC_v*d_t2
-            _da(r_cen,COL_OFF+7,round(tot_h_da,2),_F_AMAR_TOT,bold=True,color="1F4D19")
-            ws_out.row_dimensions[r_cen].height=15; r_cen+=2
-
-            for nm_p,vl_p,dest_p in [
-                ("PRODUTIVIDADE POR TEMPO DE CICLO OPERACIONAL",res_t["prod_ciclo_op"],False),
-                ("PRODUTIVIDADE POR TEMPO DE CICLO TOTAL",      res_t["prod_ciclo_tot"],False),
-                ("PRODUTIVIDADE POR TEMPO DE LABOR OPERACIONAL",res_t["prod_labor_op"],False),
-                ("PRODUTIVIDADE POR TEMPO DE LABOR TOTAL",      res_t["prod_labor_tot"],True),
-            ]:
-                fp=_F_AMAR_TOT if dest_p else _F_CINZA_L; cp="1F4D19" if dest_p else "000000"
-                _da(r_cen,COL_OFF,nm_p,fp,bold=dest_p,center=False,color=cp,merge_end=COL_OFF+8)
-                _da(r_cen,COL_OFF+9,f"{vl_p:.0%}" if isinstance(vl_p,float) else vl_p,fp,bold=dest_p,color=cp)
-                ws_out.row_dimensions[r_cen].height=14; r_cen+=1
-
-            # Larguras bloco DADOS AUTOMÁTICOS
-            for ci_adj,w_adj in [(COL_OFF,16),(COL_OFF+1,8),(COL_OFF+2,8),(COL_OFF+3,8),
-                                  (COL_OFF+4,7),(COL_OFF+5,7),(COL_OFF+6,7),
-                                  (COL_OFF+7,10),(COL_OFF+8,10),(COL_OFF+9,10)]:
-                ws_out.column_dimensions[get_column_letter(ci_adj)].width=w_adj
-
-    tabelona_buf=BytesIO(); wb_out.save(tabelona_buf); tabelona_buf.seek(0)
-    return tabelona_buf
-
-
-# ─────────────────────────────────────────
 # COMPARAÇÃO COM EXCEL REFERÊNCIA
 # ─────────────────────────────────────────
-@st.cache_data(show_spinner=False, ttl=3600)
 def comparar_com_excel(res_app, file_bytes, tempo, dist, aplic, pmp, dias, horas_turno, thresholds, suporte_cfg):
     """Compara app vs Excel. Otimizado: JOIN e agrupamento feitos uma vez para todos os meses."""
     MAPA = {
@@ -1798,7 +1770,7 @@ def validar(pmp, tempo, dist, aplic, dias):
 
     zero_disp = dist[dist.disponib == 0]
     if len(zero_disp):
-        ex = ", ".join([f"{c}/{p}" for c,p in zip(zero_disp.centro[:5], zero_disp.peca[:5])])
+        ex = ", ".join([f"{r.centro}/{r.peca}" for _,r in zero_disp.iterrows()][:5])
         erros.append(f"Disponibilidade = 0 em {len(zero_disp)} linha(s) — divisão por zero: {ex}")
     diff_td = chaves_tempo - chaves_dist
     if diff_td:
@@ -1812,11 +1784,9 @@ def validar(pmp, tempo, dist, aplic, dias):
     merged = tempo.merge(dist, on=["centro","peca"], how="inner")
     labor_maior = merged[merged.t_labor > merged.t_ciclo]
     if len(labor_maior):
-        exemplos = list(zip(labor_maior.centro.head(3), labor_maior.peca.head(3)))
-        alertas.append(f"{len(labor_maior)} linha(s) com t_labor > t_ciclo (fisicamente improvável): {exemplos}")
-    _qtd_mes = pmp.groupby("mes")["qtd"].sum()
+        alertas.append(f"{len(labor_maior)} linha(s) com t_labor > t_ciclo (fisicamente improvável): {[(r.centro,r.peca) for _,r in labor_maior.iterrows()][:3]}")
     for m in MESES:
-        qtd_m = _qtd_mes.get(m, 0)
+        qtd_m = pmp[pmp.mes==m].qtd.sum() if len(pmp[pmp.mes==m]) else 0
         if qtd_m > 0 and dias.get(m,0) == 0:
             alertas.append(f"Mês '{m}' tem {int(qtd_m)} peças de demanda mas dias trabalhados = 0.")
     nulos_t = tempo[["t_ciclo","t_labor"]].isna().sum()
@@ -1860,27 +1830,30 @@ def calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg
         if sub.empty: resultados[mes] = None; continue
 
         minA = d*hA*60; minB = d*hB*60; minC = d*hC*60
-        # Vetorização — elimina loop Python por centro
-        df_c = sub[["centro","min_ciclo","min_labor"]].copy()
-        df_c["ocup_A"] = df_c.min_ciclo / minA if minA > 0 else 0.0
-        df_c["ocup_B"] = df_c.min_ciclo / minB if minB > 0 else 0.0
-        df_c["ocup_C"] = df_c.min_ciclo / minC if minC > 0 else 0.0
-        df_c["ativo_A"] = (df_c.ocup_A > thr_A).astype(int)
-        df_c["ativo_B"] = (df_c.ocup_A > thr_B).astype(int)
-        df_c["ativo_C"] = (df_c.ocup_B > thr_C).astype(int)
-        if overrides and mes in overrides:
-            for cen, ov in overrides[mes].items():
-                msk = df_c.centro == cen
-                if "A" in ov: df_c.loc[msk, "ativo_A"] = ov["A"]
-                if "B" in ov: df_c.loc[msk, "ativo_B"] = ov["B"]
-                if "C" in ov: df_c.loc[msk, "ativo_C"] = ov["C"]
-        df_c = df_c.rename(columns={"min_ciclo":"min_ciclo_total","min_labor":"min_labor_total"})
-        df_c["min_disp_A"]   = minA; df_c["min_disp_B"] = minB; df_c["min_disp_C"] = minC
-        df_c["horas_ciclo"]  = df_c.min_ciclo_total / 60
-        df_c["horas_labor"]  = df_c.min_labor_total / 60
-        df_c["horas_disp_A"] = d * hA * df_c.ativo_A
-        df_c["horas_disp_B"] = d * hB * df_c.ativo_B
-        df_c["horas_disp_C"] = d * hC * df_c.ativo_C
+        centros = []
+        for _, row in sub.iterrows():
+            cen = row.centro; mc = row.min_ciclo; ml = row.min_labor
+            pA = mc/minA if minA>0 else 0
+            pB = mc/minB if minB>0 else 0
+            pC = mc/minC if minC>0 else 0
+            aA = 1 if pA > thr_A else 0
+            aB = 1 if pA > thr_B else 0
+            aC = 1 if pB > thr_C else 0
+            if overrides and mes in overrides and cen in overrides[mes]:
+                ov = overrides[mes][cen]
+                if "A" in ov: aA = ov["A"]
+                if "B" in ov: aB = ov["B"]
+                if "C" in ov: aC = ov["C"]
+            centros.append({
+                "centro":cen,"ocup_A":pA,"ocup_B":pB,"ocup_C":pC,
+                "ativo_A":aA,"ativo_B":aB,"ativo_C":aC,
+                "min_ciclo_total":mc,"min_labor_total":ml,
+                "min_disp_A":minA,"min_disp_B":minB,"min_disp_C":minC,
+                "horas_ciclo":mc/60,"horas_labor":ml/60,
+                "horas_disp_A":d*hA*aA,"horas_disp_B":d*hB*aB,"horas_disp_C":d*hC*aC,
+            })
+
+        df_c = pd.DataFrame(centros)
         op_A = int(df_c.ativo_A.sum()); op_B = int(df_c.ativo_B.sum()); op_C = int(df_c.ativo_C.sum())
 
         def get_sup(key, t, op_count):
@@ -1926,23 +1899,9 @@ def calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg
     return resultados
 
 # ─────────────────────────────────────────
-# CACHE DE CÁLCULO (nível de módulo — obrigatório para st.cache_data)
+# TABELA RESULTADO
 # ─────────────────────────────────────────
-@st.cache_data(show_spinner=False, ttl=3600)
-def _calcular_cached(pmp_hash, _pmp, _tempo, _dist, _aplic,
-                     dias_hash, _dias, hA, hB, hC, tA, tB, tC, sup_str):
-    """Wrapper cacheável: suporte_cfg passa como string para ser hashável."""
-    import json as _json
-    _sup = _json.loads(sup_str)
-    return calcular(_pmp, _tempo, _dist, _aplic, _dias,
-                    {"A":hA,"B":hB,"C":hC}, {"A":tA,"B":tB,"C":tC}, _sup,
-                    retornar_intermediarios=True)
-
-
-# ─────────────────────────────────────────
-# TABELA RESULTADO (versão principal — com horas/minutos + comparação real)
-# ─────────────────────────────────────────
-def show_tabela(r, real_mensal=None, mes=None):
+def show_tabela(r):
     dias=r["dias"]; hA,hB,hC=r["hA"],r["hB"],r["hC"]
     rows=[]
     for _,row in r["centros"].iterrows():
@@ -1994,15 +1953,55 @@ def show_tabela(r, real_mensal=None, mes=None):
     c3.metric("Labor operacional",f"{r['prod_labor_op']:.0%}")
     c4.metric("⭐ Labor total",f"{r['prod_labor_tot']:.0%}")
 
-    # ── TABELA DE HORAS E MINUTOS ─────────────────────────────────────────
-    st.markdown('<div class="jd-sub">📊 Horas e minutos disponíveis no mês</div>', unsafe_allow_html=True)
-    show_horas_minutos_table(r, None, mes)
+# ─────────────────────────────────────────
+# GRÁFICO
+# ─────────────────────────────────────────
+def grafico_cenarios(cenarios_dict):
+    fig=make_subplots(specs=[[{"secondary_y":True}]])
+    cores_A=[JD_VERDE,"#66BB6A","#A5D6A7","#1B5E20"]
+    cores_B=[JD_AMARELO_ESC,"#FFD54F","#FFE082","#FF6F00"]
+    cores_C=["#1565C0","#64B5F6","#BBDEFB","#0D47A1"]
+    cores_p=["#C62828","#FF6D00","#7B1FA2","#00695C"]
+    for i,(nome,res) in enumerate(cenarios_dict.items()):
+        mv,tA,tB,tC,prod=[],[],[],[],[]
+        for m,abr in zip(MESES,MESES_ABREV):
+            r=res.get(m)
+            if not r: continue
+            mv.append(abr); tA.append(r["tot_A"]); tB.append(r["tot_B"])
+            tC.append(r["tot_C"]); prod.append(r["prod_labor_tot"]*100)
+        op=0.9 if i==0 else 0.65
+        fig.add_trace(go.Bar(name=f"A—{nome}",x=mv,y=tA,marker_color=cores_A[i%4],opacity=op,
+            offsetgroup=i,legendgroup=nome,text=tA,textposition="inside",textfont=dict(color="white",size=9)),secondary_y=False)
+        fig.add_trace(go.Bar(name=f"B—{nome}",x=mv,y=tB,marker_color=cores_B[i%4],opacity=op,
+            offsetgroup=i,legendgroup=nome,base=tA,text=tB,textposition="inside",textfont=dict(size=9)),secondary_y=False)
+        fig.add_trace(go.Bar(name=f"C—{nome}",x=mv,y=tC,marker_color=cores_C[i%4],opacity=op,
+            offsetgroup=i,legendgroup=nome,base=[a+b for a,b in zip(tA,tB)],
+            text=tC,textposition="inside",textfont=dict(color="white",size=9)),secondary_y=False)
+        fig.add_trace(go.Scatter(name=f"Labor—{nome}",x=mv,y=prod,mode="lines+markers+text",
+            marker=dict(color=cores_p[i%4],size=10,symbol="circle" if i==0 else "diamond"),
+            line=dict(color=cores_p[i%4],width=2,dash="solid" if i==0 else "dot"),
+            text=[f"{p:.0f}%" for p in prod],textposition="top center",
+            textfont=dict(color=cores_p[i%4],size=11)),secondary_y=True)
+    fig.update_layout(
+        barmode="stack",
+        title=dict(text="MÃO-DE-OBRA POR TURNO",font=dict(size=14,color=JD_VERDE_ESC)),
+        legend=dict(orientation="h",y=-0.32,x=0,
+                    font=dict(size=10,color="#000000"),
+                    bgcolor="rgba(255,255,255,0.95)",
+                    bordercolor="#AAAAAA",borderwidth=1),
+        height=480,plot_bgcolor="white",paper_bgcolor="white",
+        xaxis=dict(showgrid=False,showticklabels=True,tickfont=dict(size=11,color="#1A1A1A")),
+        yaxis=dict(showgrid=True,gridcolor="#E8E8E8",showticklabels=True,
+                   tickfont=dict(size=11,color="#1A1A1A"),
+                   title="Nº Funcionários",title_font=dict(size=12,color="#1A1A1A")),
+        yaxis2=dict(title="Labor Total (%)",tickformat=".0f",ticksuffix="%",range=[0,100],
+                    showticklabels=True,tickfont=dict(size=11,color="#1A1A1A"),
+                    title_font=dict(size=12,color="#1A1A1A")))
+    return fig
 
-    # ── COMPARAÇÃO COM EXCEL DADOS AUTOMÁTICOS ─────────────────────────────
-    if real_mensal is not None and mes:
-        st.markdown('<div class="jd-sub">🔄 App vs Excel — DADOS AUTOMÁTICOS (comparação com o real)</div>', unsafe_allow_html=True)
-        show_real_vs_app(r, real_mensal, mes)
-
+# ─────────────────────────────────────────
+# EXPORTAÇÃO
+# ─────────────────────────────────────────
 def exportar(resultados):
     out=BytesIO(); wb=openpyxl.Workbook()
     brd=Border(left=Side(style='thin',color='CCCCCC'),right=Side(style='thin',color='CCCCCC'),
@@ -2013,7 +2012,7 @@ def exportar(resultados):
         c.alignment=Alignment(horizontal="center" if center else "left",vertical="center")
         c.border=brd
         if fmt and isinstance(fmt, str) and len(fmt) > 0:
-            try: c.number_format=str(fmt)
+            try: c.number_format=fmt
             except: pass
     ws=wb.active; ws.title="RESUMO MO"
     JD_V=JD_VERDE_ESC.replace("#",""); JD_Y=JD_AMARELO.replace("#","")
@@ -2026,12 +2025,10 @@ def exportar(resultados):
             abr,r["dias"],r["tot_A"],r["tot_B"],r["tot_C"],r["total"],
             r["prod_ciclo_op"],r["prod_ciclo_tot"],r["prod_labor_op"],r["prod_labor_tot"]]
         for ci,v in enumerate(vals,1):
-            # Format percentages as strings to avoid openpyxl number_format issues
-            v_cell = f"{v:.1%}" if ci>=7 and isinstance(v,float) else v
-            c=ws.cell(ri,ci,v_cell)
+            c=ws.cell(ri,ci,v); fmt="0%" if ci>=7 and isinstance(v,float) else None
             ec(c,JD_Y if ci==10 and isinstance(v,float) else bg,
                JD_V if ci==10 and isinstance(v,float) else "000000",
-               bool(ci==10 and isinstance(v,float)))
+               ci==10 and isinstance(v,float),fmt)
         ws.row_dimensions[ri].height=15
     for mes in MESES:
         r=resultados.get(mes)
@@ -2117,341 +2114,6 @@ def exportar(resultados):
 # ─────────────────────────────────────────
 # COMPARAÇÃO COM EXCEL REFERÊNCIA
 # ─────────────────────────────────────────
-# ─────────────────────────────────────────
-# LEITURA DE DADOS REAIS DO EXCEL (DADOS AUTOMÁTICOS)
-# ─────────────────────────────────────────
-@st.cache_data(show_spinner=False, ttl=3600)
-def read_real_data(file_bytes):
-    """Lê os dados reais calculados pelo Excel:
-    - RESUMO_MO: totais por turno e produtividade por mês
-    - Abas mensais: DADOS AUTOMÁTICOS (cols W-AF, linhas 68-96) + horas por turno (linha 67)
-    """
-    MAPA = {
-        "Novembro":"NovFY26","Dezembro":"DezFY26","Janeiro":"JanFY26",
-        "Fevereiro":"FevFY26","Março":"MarFY26","Abril":"AbrFY26",
-        "Maio":"MaiFY26","Junho":"JunFY26","Julho":"JulFY26",
-        "Agosto":"AgoFY26","Setembro":"SetFY26","Outubro":"OutFY26",
-    }
-    MESES_ABREV_MAP = dict(zip(
-        ["Novembro","Dezembro","Janeiro","Fevereiro","Março","Abril",
-         "Maio","Junho","Julho","Agosto","Setembro","Outubro"],
-        ["NOV","DEZ","JAN","FEV","MAR","ABR","MAI","JUN","JUL","AGO","SET","OUT"]
-    ))
-    try:
-        wb = openpyxl.load_workbook(BytesIO(file_bytes), read_only=True, data_only=True)
-    except Exception as e:
-        return {}, {}
-
-    abas = wb.sheetnames
-
-    # ── RESUMO_MO: totais por turno e produtividade ──────────────────────────
-    resumo_real = {}
-    if "RESUMO_MO" in abas:
-        ws_r = wb["RESUMO_MO"]
-        # R3=TURNO A, R4=B, R5=C, R6=TOTAL, R7=PROD
-        # cols: 3=NOV, 4=DEZ, ..., 14=OUT, 15=ANO
-        meses_list = list(MESES_ABREV_MAP.keys())
-        for idx, mes in enumerate(meses_list, 3):
-            tA = safe_int(ws_r.cell(3, idx).value)
-            tB = safe_int(ws_r.cell(4, idx).value)
-            tC = safe_int(ws_r.cell(5, idx).value)
-            tot = safe_int(ws_r.cell(6, idx).value)
-            prod_raw = ws_r.cell(7, idx).value
-            try:
-                prod = float(prod_raw) if prod_raw not in (None, "#DIV/0!") else None
-            except:
-                prod = None
-            resumo_real[mes] = {"tot_A": tA, "tot_B": tB, "tot_C": tC,
-                                 "total": tot, "prod_esperada": prod}
-        # ANO (col 15)
-        resumo_real["_ANO"] = {
-            "tot_A": safe_int(ws_r.cell(3, 15).value),
-            "tot_B": safe_int(ws_r.cell(4, 15).value),
-            "tot_C": safe_int(ws_r.cell(5, 15).value),
-            "total": safe_int(ws_r.cell(6, 15).value),
-        }
-
-    # ── Abas mensais: DADOS AUTOMÁTICOS (cols W=23 a AF=32, linhas 68-96) ──
-    mensal_real = {}
-    for mes, aba in MAPA.items():
-        if aba not in abas:
-            continue
-        ws_m = wb[aba]
-        # Linha 67 col 30=AF: horas por turno (W=col23=hA, X=24=hB, Y=25 n/a, Z=26 n/a)
-        # Row 67: cols 30(AF)=hA, 31=hB, 32=hC  based on image: 8.8, 8.23, 7.68
-        # Actually from our inspection: R67 col 30=hA=8.8, 31=hB=8.23, 32=hC=7.68
-        hA_r = safe_float(ws_m.cell(67, 30).value)
-        hB_r = safe_float(ws_m.cell(67, 31).value)
-        hC_r = safe_float(ws_m.cell(67, 32).value)
-        # Row 66: col 34=data revisao; col 28=horas por turno label
-        # Days from header row 66 col 29 area? Actually dias comes from INPUT_PMP
-        # But we have it in res_app already. Let's just read totais.
-        # Rows 69-88: centros (col 23=centro, 24=ocup_A, 25=ocup_B, 26=ocup_C, 27=ativo_A, 28=ativo_B, 29=ativo_C, 30=horas_A, 31=horas_B, 32=horas_C)
-        centros_r = {}
-        for row_i in range(69, 89):
-            cen_v = ws_m.cell(row_i, 23).value
-            if not cen_v:
-                continue
-            centros_r[str(cen_v).strip()] = {
-                "ocup_A": safe_float(ws_m.cell(row_i, 24).value),
-                "ocup_B": safe_float(ws_m.cell(row_i, 25).value),
-                "ocup_C": safe_float(ws_m.cell(row_i, 26).value),
-                "ativo_A": safe_int(ws_m.cell(row_i, 27).value),
-                "ativo_B": safe_int(ws_m.cell(row_i, 28).value),
-                "ativo_C": safe_int(ws_m.cell(row_i, 29).value),
-                "horas_A": safe_float(ws_m.cell(row_i, 30).value),
-                "horas_B": safe_float(ws_m.cell(row_i, 31).value),
-                "horas_C": safe_float(ws_m.cell(row_i, 32).value),
-            }
-        # Row 89: TOTAL DE OPERADORES
-        op_A_r = safe_int(ws_m.cell(89, 27).value)
-        op_B_r = safe_int(ws_m.cell(89, 28).value)
-        op_C_r = safe_int(ws_m.cell(89, 29).value)
-        # Row 95: TOTAL POR TURNO
-        tot_A_r = safe_int(ws_m.cell(95, 27).value)
-        tot_B_r = safe_int(ws_m.cell(95, 28).value)
-        tot_C_r = safe_int(ws_m.cell(95, 29).value)
-        h_tot_A_r = safe_float(ws_m.cell(95, 30).value)
-        h_tot_B_r = safe_float(ws_m.cell(95, 31).value)
-        h_tot_C_r = safe_float(ws_m.cell(95, 32).value)
-        # Row 96: TOTAL FUNCIONARIOS
-        total_r = safe_int(ws_m.cell(96, 27).value)
-        h_total_r = safe_float(ws_m.cell(96, 30).value)
-        # Rows 98-101: produtividades (col 30)
-        ciclo_op_r  = safe_float(ws_m.cell(98, 30).value)
-        ciclo_tot_r = safe_float(ws_m.cell(99, 30).value)
-        labor_op_r  = safe_float(ws_m.cell(100, 30).value)
-        labor_tot_r = safe_float(ws_m.cell(101, 30).value)
-
-        mensal_real[mes] = {
-            "hA": hA_r, "hB": hB_r, "hC": hC_r,
-            "centros": centros_r,
-            "op_A": op_A_r, "op_B": op_B_r, "op_C": op_C_r,
-            "tot_A": tot_A_r, "tot_B": tot_B_r, "tot_C": tot_C_r,
-            "total": total_r,
-            "h_tot_A": h_tot_A_r, "h_tot_B": h_tot_B_r, "h_tot_C": h_tot_C_r,
-            "h_total": h_total_r,
-            "prod_ciclo_op": ciclo_op_r, "prod_ciclo_tot": ciclo_tot_r,
-            "prod_labor_op": labor_op_r, "prod_labor_tot": labor_tot_r,
-        }
-
-    wb.close()
-    return resumo_real, mensal_real
-
-
-def show_horas_minutos_table(r, dias_dict, mes):
-    """Exibe a tabela de TOTAL DE MINUTOS / TOTAL DE HORAS / DIAS TRABALHADOS / HORAS POR TURNO."""
-    d = r["dias"]; hA = r["hA"]; hB = r["hB"]; hC = r["hC"]
-    # Horas por turno = acumuladas (hA, hB, hC são acumuladas)
-    # Minutos por turno = dias * horas_acumuladas * 60
-    min_A = d * hA * 60
-    min_B = d * hB * 60
-    min_C = d * hC * 60
-    h_A = d * hA
-    h_B = d * hB
-    h_C = d * hC
-
-    df_hm = pd.DataFrame([
-        {"": "TOTAL DE MINUTOS", "Turno A": round(min_A, 1), "Turno B": round(min_B, 1), "Turno C": round(min_C, 1)},
-        {"": "TOTAL DE HORAS",   "Turno A": round(h_A, 2),   "Turno B": round(h_B, 2),   "Turno C": round(h_C, 2)},
-        {"": "DIAS TRABALHADOS", "Turno A": d,                "Turno B": d,                "Turno C": d},
-        {"": "HORAS POR TURNO",  "Turno A": hA,               "Turno B": hB,               "Turno C": hC},
-    ])
-
-    def style_hm(row):
-        label = row[""]
-        if "MINUTOS" in label:
-            return ["background-color:#1F4D19;color:#FFDE00;font-weight:700"]*4
-        if "HORAS" in label and "TURNO" not in label:
-            return ["background-color:#1F4D19;color:#FFFFFF;font-weight:700"]*4
-        if "DIAS" in label:
-            return ["background-color:#2E7D32;color:#FFFFFF;font-weight:600"]*4
-        return ["background-color:#F4F4F4;color:#1A1A1A"]*4
-
-    st.dataframe(df_hm.style.apply(style_hm, axis=1), use_container_width=True, hide_index=True)
-
-
-def show_real_vs_app(r_app, real_mensal, mes):
-    """Compara App calculado vs Excel DADOS AUTOMÁTICOS para o mês."""
-    if not real_mensal:
-        st.info("Dados reais do Excel não encontrados. Suba o arquivo com as abas mensais calculadas.")
-        return
-    real = real_mensal.get(mes)
-    if not real:
-        st.info(f"Aba {mes} não encontrada no Excel de referência.")
-        return
-
-    # Construir tabela de comparação de totais
-    rows_cmp = []
-    for label, app_v, xl_v in [
-        ("Turno A — Operadores CEN", r_app["op_A"],  real["op_A"]),
-        ("Turno B — Operadores CEN", r_app["op_B"],  real["op_B"]),
-        ("Turno C — Operadores CEN", r_app["op_C"],  real["op_C"]),
-        ("TOTAL POR TURNO — A",      r_app["tot_A"], real["tot_A"]),
-        ("TOTAL POR TURNO — B",      r_app["tot_B"], real["tot_B"]),
-        ("TOTAL POR TURNO — C",      r_app["tot_C"], real["tot_C"]),
-        ("TOTAL FUNCIONÁRIOS",       r_app["total"], real["total"]),
-    ]:
-        delta = int(app_v) - int(xl_v)
-        icon = "✅" if delta == 0 else ("🟡" if abs(delta) <= 2 else "🔴")
-        rows_cmp.append({"Indicador": label, "App": app_v, "Excel (Real)": xl_v,
-                          "Δ": f"{delta:+d}", "Status": icon})
-
-    # Produtividades
-    for label, app_v, xl_v in [
-        ("Ciclo Operacional",  r_app["prod_ciclo_op"],  real["prod_ciclo_op"]),
-        ("Ciclo Total",        r_app["prod_ciclo_tot"], real["prod_ciclo_tot"]),
-        ("Labor Operacional",  r_app["prod_labor_op"],  real["prod_labor_op"]),
-        ("⭐ Labor Total",      r_app["prod_labor_tot"], real["prod_labor_tot"]),
-    ]:
-        delta_p = app_v - xl_v if xl_v else 0
-        icon_p = "✅" if abs(delta_p) < 0.005 else ("🟡" if abs(delta_p) < 0.02 else "🔴")
-        rows_cmp.append({"Indicador": label,
-                          "App": f"{app_v:.1%}", "Excel (Real)": f"{xl_v:.1%}" if xl_v else "—",
-                          "Δ": f"{delta_p:+.1%}", "Status": icon_p})
-
-    # Separar linhas de inteiros e percentuais para evitar coluna de tipo misto (ArrowInvalid)
-    rows_int = [r for r in rows_cmp if isinstance(r["App"], (int, float)) and not isinstance(r["App"], bool)]
-    rows_pct = [r for r in rows_cmp if isinstance(r["App"], str)]
-
-    def _style_cmp(row, cols):
-        st_val = str(row.get("Status", ""))
-        if "✅" in st_val:   base = "background-color:#003D10;color:#B9F6CA"
-        elif "🟡" in st_val: base = "background-color:#3D2D00;color:#FFE57F"
-        else:                base = "background-color:#3D0000;color:#FF8A80"
-        return ["" if c != "Status" else base for c in cols]
-
-    if rows_int:
-        df_int = pd.DataFrame(rows_int)
-        df_int["App"] = df_int["App"].astype(int)
-        df_int["Excel (Real)"] = pd.to_numeric(df_int["Excel (Real)"], errors="coerce").fillna(0).astype(int)
-        cols_int = list(df_int.columns)
-        st.dataframe(df_int.style.apply(lambda r: _style_cmp(r, cols_int), axis=1),
-                     use_container_width=True, hide_index=True)
-    if rows_pct:
-        df_pct = pd.DataFrame(rows_pct)
-        cols_pct = list(df_pct.columns)
-        st.dataframe(df_pct.style.apply(lambda r: _style_cmp(r, cols_pct), axis=1),
-                     use_container_width=True, hide_index=True)
-
-
-def show_fy26_anual(res_base, real_resumo, dias, horas_turno):
-    """Exibe resumo FY26 anual: app calculado vs real do Excel, e totais acumulados."""
-    st.markdown('<div class="jd-section">📅 Resumo FY26 — Visão Anual</div>', unsafe_allow_html=True)
-
-    rows_ano = []
-    totais_app = {"tot_A": 0, "tot_B": 0, "tot_C": 0, "h_ciclo": 0, "h_labor": 0, "h_ativos": 0, "h_todos": 0}
-    totais_xl  = {"tot_A": 0, "tot_B": 0, "tot_C": 0}
-
-    for mes, abr in zip(MESES, MESES_ABREV):
-        r = res_base.get(mes)
-        d = dias.get(mes, 0)
-        real = real_resumo.get(mes, {}) if real_resumo else {}
-        if not r:
-            continue
-
-        # Acumular para totais anuais
-        totais_app["tot_A"]   += r["tot_A"]
-        totais_app["tot_B"]   += r["tot_B"]
-        totais_app["tot_C"]   += r["tot_C"]
-        totais_app["h_ciclo"] += r["h_ciclo"]
-        totais_app["h_labor"] += r["h_labor"]
-        totais_app["h_ativos"]+= r["h_ativos"]
-        totais_app["h_todos"] += r["h_todos"]
-        if real:
-            totais_xl["tot_A"] += real.get("tot_A", 0)
-            totais_xl["tot_B"] += real.get("tot_B", 0)
-            totais_xl["tot_C"] += real.get("tot_C", 0)
-
-        hA = horas_turno["A"]; hB = horas_turno["B"]; hC = horas_turno["C"]
-        min_A = d * hA * 60; min_B = d * hB * 60; min_C = d * hC * 60
-
-        xl_tot = real.get("total", None)
-        delta_tot = r["total"] - xl_tot if xl_tot else None
-        icon = "—" if xl_tot is None else ("✅" if delta_tot == 0 else ("🟡" if abs(delta_tot) <= 2 else "🔴"))
-
-        xl_labor = real.get("prod_esperada", None)
-        row = {
-            "Mês":          abr,
-            "Dias":         d,
-            "Min. Turno A": round(min_A, 0),
-            "Min. Turno B": round(min_B, 0),
-            "Min. Turno C": round(min_C, 0),
-            "H. Turno A":   round(d * hA, 1),
-            "H. Turno B":   round(d * hB, 1),
-            "H. Turno C":   round(d * hC, 1),
-            "App — A":      r["tot_A"],
-            "App — B":      r["tot_B"],
-            "App — C":      r["tot_C"],
-            "App — Total":  r["total"],
-            "Excel — Total": int(xl_tot) if xl_tot else None,
-            "Δ Total":      f"{delta_tot:+d}" if delta_tot is not None else "—",
-            "Labor App":    f"{r['prod_labor_tot']:.1%}",
-            "Labor Excel":  f"{xl_labor:.1%}" if xl_labor else "—",
-            "Status":       icon,
-        }
-        rows_ano.append(row)
-
-    df_ano = pd.DataFrame(rows_ano)
-
-    def style_ano(row):
-        st_val = str(row.get("Status", ""))
-        styles = []
-        for col in df_ano.columns:
-            if col == "Status":
-                if "✅" in st_val:   styles.append("background-color:#003D10;color:#B9F6CA;font-weight:700")
-                elif "🟡" in st_val: styles.append("background-color:#3D2D00;color:#FFE57F;font-weight:700")
-                elif "🔴" in st_val: styles.append("background-color:#3D0000;color:#FF8A80;font-weight:700")
-                else:                styles.append("")
-            elif col in ("Min. Turno A", "Min. Turno B", "Min. Turno C"):
-                styles.append("background-color:#1F4D19;color:#FFDE00;font-weight:600")
-            elif col in ("H. Turno A", "H. Turno B", "H. Turno C"):
-                styles.append("background-color:#2E7D32;color:#FFFFFF")
-            elif col in ("App — A", "App — B", "App — C", "App — Total"):
-                styles.append("background-color:#E3F2FD;color:#01579B")
-            elif col == "Δ Total":
-                v = str(row.get("Δ Total", "0"))
-                try:
-                    n = int(v.replace("+",""))
-                    if n == 0:   styles.append("background-color:#003D10;color:#B9F6CA;font-weight:700")
-                    elif abs(n) <= 2: styles.append("background-color:#3D2D00;color:#FFE57F;font-weight:700")
-                    else:        styles.append("background-color:#3D0000;color:#FF8A80;font-weight:700")
-                except:          styles.append("")
-            else:
-                styles.append("")
-        return styles
-
-    st.dataframe(df_ano.style.apply(style_ano, axis=1), use_container_width=True, hide_index=True)
-
-    # Métricas resumo anuais
-    st.markdown('<div class="jd-sub">Totais acumulados FY26</div>', unsafe_allow_html=True)
-    prod_labor_tot_ano = totais_app["h_labor"] / totais_app["h_todos"] if totais_app["h_todos"] > 0 else 0
-    prod_ciclo_tot_ano = totais_app["h_ciclo"] / totais_app["h_todos"] if totais_app["h_todos"] > 0 else 0
-    c1,c2,c3,c4,c5 = st.columns(5)
-    c1.metric("Total h. ciclo acum.", f"{totais_app['h_ciclo']:.0f}h")
-    c2.metric("Total h. labor acum.", f"{totais_app['h_labor']:.0f}h")
-    c3.metric("Total h. disponíveis", f"{totais_app['h_todos']:.0f}h")
-    c4.metric("⭐ Labor Total FY26",   f"{prod_labor_tot_ano:.1%}")
-    c5.metric("Ciclo Total FY26",     f"{prod_ciclo_tot_ano:.1%}")
-
-    # Comparação anual com Excel RESUMO_MO
-    if real_resumo and real_resumo.get("_ANO"):
-        ano_xl = real_resumo["_ANO"]
-        st.markdown('<div class="jd-sub">App vs Excel — Totais por turno FY26</div>', unsafe_allow_html=True)
-        rows_diff = []
-        for turno, app_v, xl_v in [
-            ("Turno A", totais_app["tot_A"], ano_xl["tot_A"]),
-            ("Turno B", totais_app["tot_B"], ano_xl["tot_B"]),
-            ("Turno C", totais_app["tot_C"], ano_xl["tot_C"]),
-        ]:
-            delta = app_v - xl_v
-            icon = "✅" if delta == 0 else ("🟡" if abs(delta) <= 5 else "🔴")
-            rows_diff.append({"Turno": turno, "App (acum.)": app_v,
-                               "Excel RESUMO_MO (acum.)": xl_v,
-                               "Δ": f"{delta:+d}", "Status": icon})
-        st.dataframe(pd.DataFrame(rows_diff), use_container_width=True, hide_index=True)
-
-
 def show_memoria(r, mes, df_intermediario, agg, horas_turno, thresholds):
     st.markdown(f'<div class="jd-section">Memória de cálculo — {mes}</div>', unsafe_allow_html=True)
     st.caption("Cada passo mostra a fórmula usada e os dados reais calculados para esse mês.")
@@ -2648,35 +2310,22 @@ if not uploaded:
 
 file_bytes = uploaded.read()
 
-# Detectar arquivo novo por hash (evita re-leitura desnecessária)
-_fhash = hashlib.md5(file_bytes).hexdigest()
-if st.session_state.get("_fhash") != _fhash:
-    st.session_state["_fhash"] = _fhash
-    st.session_state["log_leitura"] = []
-    for _k in ("real_resumo", "real_mensal", "turnos_arq"): st.session_state.pop(_k, None)
-
 if "log_leitura" not in st.session_state:
     st.session_state.log_leitura = []
-
-# Leitura cacheada: todas as abas em uma só chamada ──────────────────────────
-@st.cache_data(show_spinner=False, ttl=3600)
-def _ler_todas_abas(fb):
-    _log = []
-    _pmp, _dias = read_pmp(fb, _log)
-    _tempo      = read_tempo(fb, _log)
-    _dist       = read_dist(fb, _log)
-    _aplic      = read_aplic(fb, _log)
-    _turnos     = read_turnos(fb)
-    _log.append(f"✅ IMPUTTURNOS lido: A={_turnos['A']}h · B={_turnos['B']}h · C={_turnos['C']}h (acumulados)")
-    _log.append("✅ Leitura concluída")
-    return _pmp, _dias, _tempo, _dist, _aplic, _turnos, _log
+st.session_state.log_leitura = []
 
 with st.spinner("Lendo planilha..."):
     try:
-        pmp, dias, tempo, dist, aplic, turnos_arq, _log_c = _ler_todas_abas(file_bytes)
+        log = st.session_state.log_leitura
+        pmp, dias  = read_pmp(file_bytes, log)
+        tempo       = read_tempo(file_bytes, log)
+        dist        = read_dist(file_bytes, log)
+        aplic       = read_aplic(file_bytes, log)
+        turnos_arq  = read_turnos(file_bytes)
         st.session_state["turnos_arq"] = turnos_arq
-        if not st.session_state.log_leitura:
-            st.session_state.log_leitura = list(_log_c)
+        log.append(f"✅ IMPUTTURNOS lido: A={turnos_arq['A']}h · B={turnos_arq['B']}h · C={turnos_arq['C']}h (acumulados)")
+
+        log.append(f"✅ Leitura concluída em {datetime.now().strftime('%H:%M:%S')}")
     except Exception as e:
         st.error(f"Erro ao ler: {e}"); st.stop()
 
@@ -2748,24 +2397,18 @@ tab_vis, tab_inp, tab_mem, tab_res, tab_cmp, tab_diag, tab_exp = st.tabs([
     "📊 Resultado por Mês", "🔄 Comparar com Excel", "🩺 Diagnóstico", "📥 Exportar"
 ])
 
-# Hash rápido — pmp.to_json() é lento para DataFrames grandes
-pmp_hash  = hashlib.md5(pd.util.hash_pandas_object(pmp, index=True).values.tobytes()).hexdigest()
-dias_hash = hashlib.md5(str(dias).encode()).hexdigest()
-import json as _json
-_sup_str = _json.dumps(suporte_cfg, sort_keys=True)
-res_base, df_interm, agg_interm = _calcular_cached(
-    pmp_hash, pmp, tempo, dist, aplic, dias_hash, dias,
-    horas_turno["A"], horas_turno["B"], horas_turno["C"],
-    thresholds["A"], thresholds["B"], thresholds["C"],
-    _sup_str)
+# Cache do resultado base
+@st.cache_data(show_spinner=False)
+def calcular_cached(pmp_hash, _pmp, _tempo, _dist, _aplic, dias_hash, dias, hA, hB, hC, tA, tB, tC, _sup):
+    return calcular(_pmp, _tempo, _dist, _aplic, dias,
+                    {"A":hA,"B":hB,"C":hC}, {"A":tA,"B":tB,"C":tC}, _sup,
+                    retornar_intermediarios=True)
 
-# ── Dados reais carregados sob demanda (primeira vez que a aba precisar) ──────
-# (não bloqueia o startup)
-def _load_real_data_once():
-    if "real_resumo" not in st.session_state:
-        _real_resumo, _real_mensal = read_real_data(file_bytes)
-        st.session_state["real_resumo"] = _real_resumo
-        st.session_state["real_mensal"] = _real_mensal
+pmp_hash = hash(pmp.to_json())
+dias_hash = hash(str(dias))
+res_base, df_interm, agg_interm = calcular(
+    pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg,
+    retornar_intermediarios=True)
 
 # ══════════════════════════════════════════
 # TAB 1 — VISÃO GERAL
@@ -2871,7 +2514,6 @@ with tab_mem:
 # TAB 4 — RESULTADOS
 # ══════════════════════════════════════════
 with tab_res:
-    _load_real_data_once()  # carrega sob demanda, sem bloquear startup
     if "cenarios" not in st.session_state:
         st.session_state.cenarios = {}
 
@@ -2906,11 +2548,7 @@ Turno C: <b>{r['tot_C']} pessoas</b> &nbsp;|&nbsp;
 - A linha **TOTAL POR TURNO** já inclui operadores CEN + suporte
             """)
 
-        show_tabela(r, real_mensal=st.session_state.get("real_mensal"), mes=mes_r)
-
-    # ── FY26 ANUAL ──────────────────────────────────────────────────────
-    st.markdown("---")
-    show_fy26_anual(res_base, st.session_state.get("real_resumo", {}), dias, horas_turno)
+        show_tabela(r)
 
     st.markdown('<div class="jd-section">Simulador de cenários</div>', unsafe_allow_html=True)
     with st.expander("➕ Criar novo cenário", expanded=len(st.session_state.cenarios)==0):
@@ -2930,9 +2568,9 @@ Turno C: <b>{r['tot_C']} pessoas</b> &nbsp;|&nbsp;
                 eC="🔴" if rc.ocup_C>1 else ("🟡" if rc.ocup_C>=0.85 else "🟢")
                 c0,c1,c2,c3 = st.columns([3,1,1,1])
                 c0.markdown(f"`{cen}` {eA}{rc.ocup_A:.0%}/{eB}{rc.ocup_B:.0%}/{eC}{rc.ocup_C:.0%}")
-                vA=c1.number_input("Turno A",0,5,int(rc.ativo_A),key=f"n_{novo_nome}_{cen}_A",label_visibility="collapsed",help=f"Base:{rc.ativo_A}")
-                vB=c2.number_input("Turno B",0,5,int(rc.ativo_B),key=f"n_{novo_nome}_{cen}_B",label_visibility="collapsed",help=f"Base:{rc.ativo_B}")
-                vC=c3.number_input("Turno C",0,5,int(rc.ativo_C),key=f"n_{novo_nome}_{cen}_C",label_visibility="collapsed",help=f"Base:{rc.ativo_C}")
+                vA=c1.number_input("",0,5,int(rc.ativo_A),key=f"n_{novo_nome}_{cen}_A",label_visibility="collapsed",help=f"Base:{rc.ativo_A}")
+                vB=c2.number_input("",0,5,int(rc.ativo_B),key=f"n_{novo_nome}_{cen}_B",label_visibility="collapsed",help=f"Base:{rc.ativo_B}")
+                vC=c3.number_input("",0,5,int(rc.ativo_C),key=f"n_{novo_nome}_{cen}_C",label_visibility="collapsed",help=f"Base:{rc.ativo_C}")
                 novo_ov[cen]={"A":vA,"B":vB,"C":vC}
             if st.button("💾 Salvar cenário", type="primary"):
                 ov_c={mes_novo:novo_ov}
@@ -2972,26 +2610,22 @@ calculado pelos inputs com o que está nessas abas.
 está diferente do que foi usado para gerar aquele Excel. O diagnóstico abaixo te mostra exatamente onde.
     """)
 
-    # Comparação: roda só quando o usuário clicar
-    _cmp_key = f"cmp_{hash(str(dias))}_{hash(str(thresholds))}_{hash(str(horas_turno))}"
-    if st.button("🔄 Comparar App com Excel agora", key="btn_comparar", type="primary"):
+    # Cache do resultado da comparação para não recalcular ao trocar de aba
+    cache_key = f"cmp_{hash(str(dias))}_{hash(str(thresholds))}_{hash(str(horas_turno))}"
+    if st.session_state.get("cmp_cache_key") != cache_key:
         with st.spinner("Comparando com o Excel..."):
             _r, _d, _e = comparar_com_excel(res_base, file_bytes, tempo, dist, aplic, pmp, dias, horas_turno, thresholds, suporte_cfg)
-        st.session_state["cmp_cache_key"]     = _cmp_key
+        st.session_state["cmp_cache_key"]     = cache_key
         st.session_state["cmp_cache_resumo"]  = _r
         st.session_state["cmp_cache_detalhe"] = _d
         st.session_state["cmp_cache_err"]     = _e
-    elif st.session_state.get("cmp_cache_key") != _cmp_key:
-        # parâmetros mudaram — avisar sem rodar automaticamente
-        st.info("⚠️ Parâmetros mudaram. Clique em **Comparar** para atualizar.")
-
-    df_resumo  = st.session_state.get("cmp_cache_resumo")
-    df_detalhe = st.session_state.get("cmp_cache_detalhe")
-    err        = st.session_state.get("cmp_cache_err")
+    df_resumo  = st.session_state["cmp_cache_resumo"]
+    df_detalhe = st.session_state["cmp_cache_detalhe"]
+    err        = st.session_state["cmp_cache_err"]
 
     if err:
         st.error(err)
-    elif df_resumo is not None and not df_resumo.empty:
+    elif df_resumo is not None and len(df_resumo) > 0:
         n_ok   = (df_resumo["Status"].str.startswith("✅")).sum() if "Status" in df_resumo else 0
         n_warn = (df_resumo["Status"].str.startswith("🟡")).sum() if "Status" in df_resumo else 0
         n_err  = (df_resumo["Status"].str.startswith("🔴")).sum() if "Status" in df_resumo else 0
@@ -3060,10 +2694,6 @@ está diferente do que foi usado para gerar aquele Excel. O diagnóstico abaixo 
                     styles.append("")
             return styles
 
-        # Ensure all columns are string type to avoid Arrow type inference issues
-        for _col in ["Turno A","Turno B","Turno C","Total","Labor"]:
-            if _col in df_vis.columns:
-                df_vis[_col] = df_vis[_col].astype(str)
         st.dataframe(
             df_vis.style.apply(style_resumo, axis=1),
             use_container_width=True, hide_index=True
@@ -3184,71 +2814,419 @@ with tab_exp:
     sub_cmp, sub_res = st.tabs(["🔍 Comparação e Diagnóstico", "📊 Resultados"])
 
     # ══════════════════════════════════════════
-    # ══════════════════════════════════════════
     # SUB-ABA 1 — COMPARAÇÃO E DIAGNÓSTICO
     # ══════════════════════════════════════════
     with sub_cmp:
-        # ── Cache key: regenera só quando parâmetros mudam ──────────────────
-        _exp_key = f"exp_{hash(str(dias))}_{hash(str(thresholds))}_{hash(str(horas_turno))}"
-
         st.markdown('<div class="jd-sub">🔴 Diagnóstico de divergências</div>', unsafe_allow_html=True)
-        st.markdown("Gera um Excel com **uma aba por mês** mostrando, centro a centro, onde o App diverge do Excel de referência.")
+        st.markdown("""
+Gera um Excel com **uma aba por mês** mostrando, centro a centro, onde o App diverge do Excel de referência.
+Células em **vermelho** = divergência de ativação de turno. Inclui a ocupação calculada vs Excel e a causa provável.
+        """)
 
         col_d1, col_d2 = st.columns(2)
         with col_d1:
-            if st.button("🔴 Gerar diagnóstico por mês", key="btn_diag_mensal", type="primary"):
-                with st.spinner("Gerando (~6s)..."):
-                    st.session_state["_diag_mensal"] = gerar_diagnostico_mensal(
-                        file_bytes, res_base, tempo, dist, aplic, pmp, dias, horas_turno, thresholds)
-                    st.session_state["_diag_mensal_key"] = _exp_key
-            if st.session_state.get("_diag_mensal"):
-                st.download_button("📥 Baixar diagnóstico por mês",
-                    data=st.session_state["_diag_mensal"],
-                    file_name="diagnostico_por_mes.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="dl_diag_mensal")
+            with st.spinner("Gerando diagnóstico por mês... (~6s)"):
+                diag_mensal = gerar_diagnostico_mensal(
+                    file_bytes, res_base, tempo, dist, aplic, pmp, dias,
+                    horas_turno, thresholds)
+            st.download_button(
+                "🔴 Baixar diagnóstico por mês (recomendado)",
+                data=diag_mensal,
+                file_name="diagnostico_por_mes.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary",
+                key="dl_diag_mensal"
+            )
         with col_d2:
-            if st.button("🔍 Gerar diagnóstico de inputs", key="btn_diag_inp"):
-                with st.spinner("Gerando..."):
-                    st.session_state["_diag_inp"] = gerar_excel_diagnostico(file_bytes)
-            if st.session_state.get("_diag_inp"):
-                st.download_button("📥 Baixar diagnóstico de inputs",
-                    data=st.session_state["_diag_inp"],
-                    file_name="diagnostico_inputs.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="dl_diag_inp")
+            with st.spinner("Gerando diagnóstico de inputs..."):
+                diag_inp = gerar_excel_diagnostico(file_bytes)
+            st.download_button(
+                "🔍 Baixar diagnóstico de inputs (IMPUTDISTRIBUIÇÃO vs Excel)",
+                data=diag_inp,
+                file_name="diagnostico_inputs.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="dl_diag_inp"
+            )
 
         st.markdown("---")
         st.markdown('<div class="jd-sub">📊 Resultado no layout do Excel original</div>', unsafe_allow_html=True)
-        st.markdown("Gera um Excel **idêntico ao layout do seu Excel de referência** com células em **vermelho** onde diverge.")
-
-        if st.button("📊 Gerar resultado no layout do Excel", key="btn_layout", type="primary"):
-            with st.spinner("Gerando (~8s)..."):
-                st.session_state["_layout_data"] = gerar_output_layout(
-                    file_bytes, res_base, tempo, dist, aplic, pmp, dias, horas_turno, thresholds, suporte_cfg)
-                st.session_state["_layout_key"] = _exp_key
-        if st.session_state.get("_layout_data"):
-            st.download_button("📥 Baixar resultado no layout do Excel",
-                data=st.session_state["_layout_data"],
-                file_name="resultado_layout_excel.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="dl_layout")
+        st.markdown("""
+Gera um Excel **idêntico ao layout do seu Excel de referência** — mesmas colunas, mesmas cores (Verde=Turno A, Amarelo=Turno B, Azul=Turno C).
+**Células em vermelho** = divergência entre o que o App calculou e o que está no seu Excel.
+        """)
+        with st.spinner("Gerando resultado no layout do Excel... (~8s)"):
+            layout_data = gerar_output_layout(
+                file_bytes, res_base, tempo, dist, aplic, pmp, dias,
+                horas_turno, thresholds, suporte_cfg)
+        st.download_button(
+            "📊 Baixar resultado no layout do Excel (com divergências em vermelho)",
+            data=layout_data,
+            file_name="resultado_layout_excel.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary",
+            key="dl_layout"
+        )
 
         st.markdown("---")
-        st.markdown('<div class="jd-sub">📋 Tabelona completa — layout IMPUTDISTRIBUIÇÃO</div>', unsafe_allow_html=True)
-        st.markdown("Gera a **tabelona completa** com as colunas de % ocupação + bloco DADOS AUTOMÁTICOS. Células em **vermelho** = divergência.")
+        st.markdown('<div class="jd-sub">📋 Tabelona completa — layout idêntico ao IMPUTDISTRIBUIÇÃO</div>', unsafe_allow_html=True)
+        st.markdown("""
+Gera a **tabelona completa** no mesmo layout do seu Excel — colunas A até os modelos todos —
+com as colunas de % ocupação calculadas pelo App. Células em **vermelho** = divergência com o Excel de referência.
+        """)
+        with st.spinner("Gerando tabelona... (~10s)"):
+            import openpyxl as _opx
+            from openpyxl.styles import PatternFill as _PF, Font as _Ft, Alignment as _Al, Border as _Bd, Side as _Sd
 
-        if st.button("📋 Gerar tabelona completa", key="btn_tabelona", type="primary"):
-            with st.spinner("Gerando (~10s)..."):
-                st.session_state["_tabelona"] = _gerar_tabelona(
-                    file_bytes, res_base, tempo, dist, aplic, pmp, dias, horas_turno, thresholds, suporte_cfg)
-                st.session_state["_tabelona_key"] = _exp_key
-        if st.session_state.get("_tabelona"):
-            st.download_button("📥 Baixar tabelona",
-                data=st.session_state["_tabelona"],
-                file_name="tabelona_por_mes.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="dl_tabelona")
+            _F_VERDE=_PF("solid",fgColor="66FF66"); _F_AMAR=_PF("solid",fgColor="FFFF00")
+            _F_AZUL=_PF("solid",fgColor="00B0F0"); _F_PRETO=_PF("solid",fgColor="000000")
+            _F_CINZA=_PF("solid",fgColor="D9D9D9"); _F_CINZA2=_PF("solid",fgColor="BFBFBF")
+            _F_BRANCO=_PF("solid",fgColor="FFFFFF"); _F_VERM=_PF("solid",fgColor="FF0000")
+            _F_VERM_S=_PF("solid",fgColor="FFCCCC"); _F_VERDE_JD=_PF("solid",fgColor="1F4D19")
+            _BRD=_Bd(left=_Sd(style="thin",color="AAAAAA"),right=_Sd(style="thin",color="AAAAAA"),
+                    top=_Sd(style="thin",color="AAAAAA"),bottom=_Sd(style="thin",color="AAAAAA"))
+
+            def _ec(ws,r,c,val,fill=None,bold=False,color="000000",size=8,center=True,wrap=False):
+                cell=ws.cell(row=r,column=c,value=val)
+                cell.font=_Ft(name="Arial",bold=bold,color=color,size=size)
+                cell.fill=fill or _F_BRANCO
+                cell.alignment=_Al(horizontal="center" if center else "left",vertical="center",wrap_text=wrap)
+                cell.border=_BRD
+                return cell
+
+            def _cor_pct(v):
+                try:
+                    f=float(v)
+                    if f>=1.06: return _PF("solid",fgColor="FF0000")
+                    if f>=1.00: return _PF("solid",fgColor="FFFF00")
+                    if f>=0.40: return _PF("solid",fgColor="92D050")
+                    return _F_BRANCO
+                except: return _F_BRANCO
+
+            MAPA_T={"Novembro":"NovFY26","Dezembro":"DezFY26","Janeiro":"JanFY26",
+                    "Fevereiro":"FevFY26","Março":"MarFY26","Abril":"AbrFY26",
+                    "Maio":"MaiFY26","Junho":"JunFY26","Julho":"JulFY26",
+                    "Agosto":"AgoFY26","Setembro":"SetFY26","Outubro":"OutFY26"}
+
+            hA_t=horas_turno["A"]; hB_t=horas_turno["B"]; hC_t=horas_turno["C"]
+            thr_A_t=thresholds["A"]/100; thr_B_t=thresholds["B"]/100; thr_C_t=thresholds["C"]/100
+
+            df_all_t=(aplic.merge(pmp,on="modelo").merge(tempo,on=["centro","peca"]).merge(dist,on=["centro","peca"]))
+            if "vol_int" not in df_all_t.columns: df_all_t["vol_int"] = 1.0
+            df_all_t["vol_int"] = pd.to_numeric(df_all_t["vol_int"], errors="coerce").fillna(1.0)
+            df_all_t["indice_ciclo"]=(df_all_t.t_ciclo*df_all_t.div_carga*df_all_t.div_volume*df_all_t.vol_int)/df_all_t.disponib
+            df_all_t["min_ciclo"]=df_all_t.indice_ciclo*df_all_t.qtd
+            df_all_t["min_labor"]=df_all_t.t_labor*df_all_t.div_carga*df_all_t.qtd
+            agg_cp_t=df_all_t.groupby(["centro","peca","mes"])[["min_ciclo","min_labor"]].sum()
+
+            wb_r=_opx.load_workbook(BytesIO(file_bytes),read_only=True,data_only=True)
+            ws_nov_t=wb_r[next(a for a in ["NovFY26","DezFY26"] if a in wb_r.sheetnames)]
+            base_rows_t=list(ws_nov_t.iter_rows(min_row=7,max_row=63,min_col=1,max_col=87,values_only=True))
+            base_rows_t=[r for r in base_rows_t if r[0] and r[1]]
+            # modelos_xl_t: lista de nomes de modelo (col 19-87 com header MODELO X)
+            # modelo_col_idx: dict modelo -> índice dentro do iter_rows (col - 19)
+            modelos_xl_t=[str(ws_nov_t.cell(6,c).value) for c in range(19,88)
+                          if ws_nov_t.cell(6,c).value and str(ws_nov_t.cell(6,c).value).startswith("MODELO")]
+            modelo_col_idx={str(ws_nov_t.cell(6,c).value):(c-19) for c in range(19,88)
+                            if ws_nov_t.cell(6,c).value and str(ws_nov_t.cell(6,c).value).startswith("MODELO")}
+
+            dados_mes_t={}
+            for mes_t,aba_t in MAPA_T.items():
+                if aba_t not in wb_r.sheetnames: continue
+                ws_m_t=wb_r[aba_t]
+                dados_mes_t[mes_t]={
+                    "main":list(ws_m_t.iter_rows(min_row=7,max_row=63,min_col=1,max_col=18,values_only=True)),
+                    "vols":list(ws_m_t.iter_rows(min_row=7,max_row=63,min_col=19,max_col=87,values_only=True))}
+            wb_r.close()
+
+            aplic_orig=pd.read_excel(BytesIO(file_bytes),sheet_name="IMPUTAPLICAÇÃO",header=0)
+            aplic_orig=aplic_orig.rename(columns={aplic_orig.columns[0]:"centro",aplic_orig.columns[1]:"peca"})
+
+            wb_out=_opx.Workbook(); primeira_t=True
+            for mes_t in MESES:
+                d_t=dias.get(mes_t,0)
+                if d_t==0: continue
+                minA_t=d_t*hA_t*60; minB_t=d_t*hB_t*60; minC_t=d_t*hC_t*60
+                dm_t=dados_mes_t.get(mes_t,{}); pmp_mes_t=pmp[pmp.mes==mes_t]
+
+                if primeira_t: ws_out=wb_out.active; ws_out.title=mes_t[:10]; primeira_t=False
+                else: ws_out=wb_out.create_sheet(mes_t[:10])
+                ws_out.freeze_panes="F7"
+
+                # Cabeçalho
+                ws_out.merge_cells(f"A5:{get_column_letter(18+len(modelos_xl_t))}5")
+                _ec(ws_out,5,1,f"RESUMO DA CARGA — {mes_t.upper()} ({d_t} dias)",_F_VERDE_JD,True,"FFFFFF",10,True)
+                ws_out.row_dimensions[5].height=18
+
+                hdrs_f=[("Máquina",_F_CINZA2,"000000"),("PEÇA",_F_CINZA2,"000000"),("DESCRIÇÃO",_F_CINZA2,"000000"),
+                        ("PÇ/TRAT",_F_CINZA2,"000000"),("UM",_F_CINZA2,"000000"),
+                        ("Tempo Ciclo (min)",_F_PRETO,"FFFFFF"),("Tempo Labor (min)",_F_PRETO,"FFFFFF"),
+                        ("Div. Carga",_PF("solid",fgColor="FF0000"),"FFFF00"),("Vol. Interna",_F_CINZA2,"000000"),
+                        ("Div. Volume",_PF("solid",fgColor="FF0000"),"FFFF00"),("Disponib.",_F_CINZA2,"000000"),
+                        ("Indice Ciclo",_F_CINZA2,"000000"),
+                        ("JA.A",_F_VERDE,"000000"),("JA.B",_F_AMAR,"000000"),("JA.C",_F_AZUL,"000000"),
+                        ("TOTAL CICLOS (MIN)",_F_CINZA,"000000"),("TOTAL LABOR (MIN)",_F_CINZA,"000000"),
+                        ("TOTAL PECAS",_F_CINZA,"000000")]
+                largs_t=[9,8,16,6,5,9,9,8,8,8,8,9,8,8,8,12,12,8]
+                for ci_t,(h_t,f_t,cor_t) in enumerate(hdrs_f,1):
+                    _ec(ws_out,6,ci_t,h_t,f_t,True,cor_t,8,True,True)
+                    ws_out.column_dimensions[get_column_letter(ci_t)].width=largs_t[ci_t-1]
+                for mi_t,mod_t in enumerate(modelos_xl_t):
+                    ci_t=19+mi_t
+                    _ec(ws_out,6,ci_t,mod_t,_F_CINZA,True,"000000",7,True,True)
+                    ws_out.column_dimensions[get_column_letter(ci_t)].width=7
+                ws_out.row_dimensions[6].height=42
+
+                main_data_t=dm_t.get("main",[]); vols_data_t=dm_t.get("vols",[])
+                for ri_t_idx,base_row_t in enumerate(base_rows_t):
+                    cen_t=str(base_row_t[0]).strip(); peca_t=str(base_row_t[1]).strip()
+                    ri_t=7+ri_t_idx
+                    tc_xl_t=base_row_t[5]; tl_xl_t=base_row_t[6]
+                    dc_xl_t=base_row_t[7]; vi_xl_t=base_row_t[8]; dv_xl_t=base_row_t[9]
+                    di_xl_t=base_row_t[10]; idx_xl_t=base_row_t[11]
+
+                    mrow_t=main_data_t[ri_t_idx] if ri_t_idx<len(main_data_t) else [None]*18
+                    xl_pA_t=mrow_t[12] if len(mrow_t)>12 else None
+                    xl_pB_t=mrow_t[13] if len(mrow_t)>13 else None
+                    xl_ciclo_t=mrow_t[15] if len(mrow_t)>15 else None
+                    xl_pecas_t=mrow_t[17] if len(mrow_t)>17 else None
+                    vrow_t=dm_t.get("vols",[])[ri_t_idx] if dm_t.get("vols") and ri_t_idx<len(dm_t["vols"]) else []
+
+                    try: mc_t=float(agg_cp_t.loc[(cen_t,peca_t,mes_t),"min_ciclo"])
+                    except: mc_t=0.0
+                    try: ml_t=float(agg_cp_t.loc[(cen_t,peca_t,mes_t),"min_labor"])
+                    except: ml_t=0.0
+
+                    pA_t=mc_t/minA_t if minA_t>0 else 0
+                    pB_t=mc_t/minB_t if minB_t>0 else 0
+                    pC_t=mc_t/minC_t if minC_t>0 else 0
+
+                    app_mod_v={}
+                    for mod_t2 in modelos_xl_t:
+                        qtd_t=int(pmp_mes_t[pmp_mes_t.modelo==mod_t2]["qtd"].sum()) if mod_t2 in pmp_mes_t.modelo.values else 0
+                        fr_t=aplic_orig[(aplic_orig.centro==cen_t)&(aplic_orig.peca==peca_t)]
+                        flag_t=int(fr_t[mod_t2].values[0]) if len(fr_t)>0 and mod_t2 in fr_t.columns and not pd.isna(fr_t[mod_t2].values[0] if len(fr_t)>0 else 0) else 0
+                        app_mod_v[mod_t2]=qtd_t*flag_t
+                    app_tot_t=sum(app_mod_v.values())
+
+                    def _df(a,b,tol=0.02):
+                        # só compara se o valor de referência (b) existir
+                        if b is None: return False
+                        try: return abs(float(a or 0)-float(b))>tol
+                        except: return False
+
+                    div_A_t=_df(pA_t,xl_pA_t,0.02); div_B_t=_df(pB_t,xl_pB_t,0.02)
+                    div_c_t=_df(mc_t,xl_ciclo_t,1); div_p_t=_df(app_tot_t,xl_pecas_t,0.5)
+                    any_d_t=div_A_t or div_B_t or div_c_t or div_p_t
+
+                    dc_i=dist[(dist.centro==cen_t)&(dist.peca==peca_t)]["div_carga"].values
+                    vi_i=dist[(dist.centro==cen_t)&(dist.peca==peca_t)]["vol_int"].values
+                    dv_i=dist[(dist.centro==cen_t)&(dist.peca==peca_t)]["div_volume"].values
+                    di_i=dist[(dist.centro==cen_t)&(dist.peca==peca_t)]["disponib"].values
+                    vi_val=float(vi_i[0]) if len(vi_i) else 1.0
+                    idx_app_t=(float(tc_xl_t or 0)*dc_i[0]*dv_i[0]*vi_val)/di_i[0] if len(dc_i) and len(di_i) and di_i[0] else float(idx_xl_t or 0)
+                    div_idx_t=abs(float(idx_xl_t or 0)-float(idx_app_t or 0))>0.5
+
+                    _ec(ws_out,ri_t,1,cen_t,_F_BRANCO,False,"000000",8,False)
+                    _ec(ws_out,ri_t,2,peca_t,_F_BRANCO,False,"000000",8,False)
+                    _ec(ws_out,ri_t,3,base_row_t[2],_F_BRANCO,False,"000000",8,False)
+                    _ec(ws_out,ri_t,4,base_row_t[3],_F_BRANCO,False,"000000",8)
+                    _ec(ws_out,ri_t,5,base_row_t[4],_F_BRANCO,False,"000000",8)
+                    _ec(ws_out,ri_t,6,tc_xl_t,_F_PRETO,False,"FFFFFF",8)
+                    _ec(ws_out,ri_t,7,tl_xl_t,_F_PRETO,False,"FFFFFF",8)
+                    _ec(ws_out,ri_t,8,dc_xl_t,_PF("solid",fgColor="FF0000"),False,"FFFF00",8)
+                    _ec(ws_out,ri_t,9,vi_xl_t,_F_BRANCO,False,"000000",8)
+                    _ec(ws_out,ri_t,10,dv_xl_t,_PF("solid",fgColor="FF0000"),False,"FFFF00",8)
+                    _ec(ws_out,ri_t,11,di_xl_t,_F_CINZA2,False,"000000",8)
+                    _ec(ws_out,ri_t,12,round(float(idx_app_t),4),_F_VERM_S if div_idx_t else _F_BRANCO,False,"000000",8)
+                    _ec(ws_out,ri_t,13,f"{pA_t:.1%}",_F_VERM if div_A_t else _cor_pct(pA_t),False,"000000",8)
+                    _ec(ws_out,ri_t,14,f"{pB_t:.1%}",_F_VERM if div_B_t else _cor_pct(pB_t),False,"000000",8)
+                    _ec(ws_out,ri_t,15,f"{pC_t:.1%}",_cor_pct(pC_t),False,"000000",8)
+                    _ec(ws_out,ri_t,16,round(mc_t,1),_F_VERM_S if div_c_t else _F_BRANCO,False,"000000",8)
+                    _ec(ws_out,ri_t,17,round(ml_t,1),_F_BRANCO,False,"000000",8)
+                    _ec(ws_out,ri_t,18,app_tot_t,_F_VERM_S if div_p_t else _F_BRANCO,False,"000000",8)
+                    for mi_t2,mod_t2 in enumerate(modelos_xl_t):
+                        ci_t2=19+mi_t2
+                        v_app_t=app_mod_v.get(mod_t2,0)
+                        # Usar índice correto da coluna no iter_rows (pode haver cols sem header)
+                        col_idx=modelo_col_idx.get(mod_t2, mi_t2)
+                        v_xl_t=vrow_t[col_idx] if vrow_t and col_idx<len(vrow_t) else None
+                        if v_xl_t is not None:
+                            try: div_vm=abs(float(v_app_t)-float(v_xl_t or 0))>0.5
+                            except: div_vm=False
+                            fill_vm=_F_VERM if div_vm else (_F_CINZA if v_app_t else _F_BRANCO)
+                        else:
+                            fill_vm=_F_CINZA if v_app_t else _F_BRANCO
+                        _ec(ws_out,ri_t,ci_t2,v_app_t if v_app_t else None,fill_vm,False,"000000",7)
+                    ws_out.row_dimensions[ri_t].height=13
+
+                nota_rt=7+len(base_rows_t)+1
+                ws_out.merge_cells(f"A{nota_rt}:{get_column_letter(18+len(modelos_xl_t))}{nota_rt}")
+                nt=ws_out.cell(nota_rt,1,"🔴 JA.A/JA.B vermelho = % ocupação difere do Excel de referência  |  🔴 Rosa = total de ciclos ou total de peças difere  |  Cinza = valor presente no App")
+                nt.font=_Ft(name="Arial",bold=True,size=8,color="CC0000")
+                nt.fill=_PF("solid",fgColor="FFEEEE")
+                nt.alignment=_Al(horizontal="left",vertical="center")
+                ws_out.row_dimensions[nota_rt].height=14
+
+                # ── DADOS AUTOMÁTICOS ────────────────────────────────────────
+                # Resultado do App: % ocupação, turnos ativos, horas, totais e produtividades
+                res_t = res_base.get(mes_t)
+                if res_t:
+                    _F_DA_TITULO  = _PF("solid", fgColor="1F4D19")
+                    _F_DA_HEADER  = _PF("solid", fgColor="1F4D19")
+                    _F_DA_AMAR    = _PF("solid", fgColor="FFDE00")
+                    _F_DA_VERDE_L = _PF("solid", fgColor="92D050")
+                    _F_DA_AMAR_L  = _PF("solid", fgColor="FFFF00")
+                    _F_DA_VERM_L  = _PF("solid", fgColor="FFCDD2")
+                    _F_DA_AZUL_L  = _PF("solid", fgColor="B3E5FC")
+                    _F_DA_CINZA   = _PF("solid", fgColor="F4F4F4")
+
+                    def _da(ws, r, c, val, fill=None, bold=False, color="000000", size=9, center=True):
+                        cell = ws.cell(row=r, column=c, value=val)
+                        cell.font = _Ft(name="Arial", bold=bold, color=color, size=size)
+                        cell.fill = fill or _F_BRANCO
+                        cell.alignment = _Al(horizontal="center" if center else "left", vertical="center", wrap_text=True)
+                        cell.border = _BRD
+                        return cell
+
+                    da_start = nota_rt + 2  # 2 linhas de espaço após nota
+
+                    # Linha: DADOS AUTOMÁTICOS (título)
+                    ws_out.merge_cells(f"A{da_start}:J{da_start}")
+                    t_cell = ws_out.cell(da_start, 1, "DADOS AUTOMÁTICOS")
+                    t_cell.font = _Ft(name="Arial", bold=True, color="FFFFFF", size=10)
+                    t_cell.fill = _F_DA_TITULO
+                    t_cell.alignment = _Al(horizontal="center", vertical="center")
+                    t_cell.border = _BRD
+                    ws_out.row_dimensions[da_start].height = 18
+
+                    # Linha: PERÍODO / DATA DE REVISÃO / HORAS POR TURNO
+                    r_per = da_start + 1
+                    _da(ws_out, r_per, 1, "PERÍODO:", _F_DA_CINZA, bold=True, center=False)
+                    _da(ws_out, r_per, 2, mes_t, _PF("solid", fgColor="FF0000"), bold=True, color="FFFFFF")
+                    ws_out.merge_cells(f"C{r_per}:D{r_per}")
+                    _da(ws_out, r_per, 3, "DATA DE REVISÃO:", _F_DA_CINZA, bold=True, center=False)
+                    from datetime import date as _date
+                    _da(ws_out, r_per, 5, _date.today().strftime("%d/%m/%Y"), _PF("solid", fgColor="FF0000"), bold=True, color="FFFFFF")
+                    ws_out.merge_cells(f"H{r_per}:J{r_per}")
+                    _da(ws_out, r_per, 8, "HORAS POR TURNO DE TRABALHO", _F_DA_CINZA, bold=True)
+                    ws_out.row_dimensions[r_per].height = 15
+
+                    # Linha: horas por turno (A, B, C)
+                    r_h = r_per + 1
+                    _da(ws_out, r_h, 8, res_t["hA"], _F_DA_CINZA, bold=True)
+                    _da(ws_out, r_h, 9, res_t["hB"], _F_DA_CINZA, bold=True)
+                    _da(ws_out, r_h, 10, res_t["hC"], _F_DA_CINZA, bold=True)
+                    ws_out.row_dimensions[r_h].height = 14
+
+                    # Linha: cabeçalhos de turno
+                    r_hdr = r_h + 1
+                    for ci_da, txt_da in [(1,""), (2,"TURNO A"), (3,"TURNO B"), (4,"TURNO C"),
+                                           (5,"TURNO A"), (6,"TURNO B"), (7,"TURNO C"),
+                                           (8,"TURNO A"), (9,"TURNO B"), (10,"TURNO C")]:
+                        _da(ws_out, r_hdr, ci_da, txt_da, _F_DA_CINZA, bold=True)
+                    ws_out.row_dimensions[r_hdr].height = 14
+
+                    # Linhas de centros: % ocupação, turno ativo, horas disponíveis
+                    def _ocup_fill(v):
+                        try:
+                            f = float(v)
+                            if f > 1.0:  return _F_DA_VERM_L
+                            if f >= 0.85: return _F_DA_AMAR_L
+                            return _F_DA_VERDE_L
+                        except: return _F_DA_CINZA
+
+                    r_cen = r_hdr + 1
+                    for _, crow in res_t["centros"].iterrows():
+                        cen_nm = crow.centro
+                        oA = crow.ocup_A; oB = crow.ocup_B; oC = crow.ocup_C
+                        aA = int(crow.ativo_A); aB = int(crow.ativo_B); aC = int(crow.ativo_C)
+                        hA_d = crow.horas_disp_A; hB_d = crow.horas_disp_B; hC_d = crow.horas_disp_C
+                        _da(ws_out, r_cen, 1, cen_nm, _F_DA_CINZA, bold=False, center=False)
+                        _da(ws_out, r_cen, 2, f"{oA:.0%}", _ocup_fill(oA))
+                        _da(ws_out, r_cen, 3, f"{oB:.0%}", _ocup_fill(oB))
+                        _da(ws_out, r_cen, 4, f"{oC:.0%}", _ocup_fill(oC))
+                        _da(ws_out, r_cen, 5, aA, _F_DA_AZUL_L if aA else _F_DA_AMAR_L, bold=True)
+                        _da(ws_out, r_cen, 6, aB, _F_DA_AZUL_L if aB else _F_DA_AMAR_L, bold=True)
+                        _da(ws_out, r_cen, 7, aC, _F_DA_AZUL_L if aC else _F_DA_AMAR_L, bold=True)
+                        _da(ws_out, r_cen, 8, round(hA_d, 2) if hA_d else 0, _F_DA_AZUL_L if hA_d else _F_DA_CINZA)
+                        _da(ws_out, r_cen, 9, round(hB_d, 2) if hB_d else 0, _F_DA_AZUL_L if hB_d else _F_DA_CINZA)
+                        _da(ws_out, r_cen, 10, round(hC_d, 2) if hC_d else 0, _F_DA_AZUL_L if hC_d else _F_DA_CINZA)
+                        ws_out.row_dimensions[r_cen].height = 14
+                        r_cen += 1
+
+                    sup_t = res_t["suporte"]
+                    d_t2 = res_t["dias"]
+                    hA_v = res_t["hA"]; hB_v = res_t["hB"]; hC_v = res_t["hC"]
+
+                    def _da_suporte_row(ws, ri, nome, aA_v, aB_v, aC_v, hA_v2, hB_v2, hC_v2, d_v, is_total=False):
+                        fill_n = _F_DA_AMAR if is_total else _F_DA_CINZA
+                        fill_v = _F_DA_AMAR if is_total else _F_DA_AZUL_L
+                        fill_0 = _F_DA_AMAR if is_total else _F_DA_AMAR_L
+                        cor_t = "1F4D19" if is_total else "000000"
+                        _da(ws, ri, 1, nome, fill_n, bold=is_total, center=False)
+                        for ci_s, v_s in [(5, aA_v), (6, aB_v), (7, aC_v)]:
+                            _da(ws, ri, ci_s, v_s, fill_v if v_s else fill_0, bold=is_total, color=cor_t)
+                        for ci_s, v_s, h_s in [(8, aA_v, hA_v2), (9, aB_v, hB_v2), (10, aC_v, hC_v2)]:
+                            val_h = round(v_s * h_s * d_v, 2) if v_s else 0
+                            _da(ws, ri, ci_s, val_h if val_h else 0, fill_v if val_h else _F_DA_CINZA, bold=is_total, color=cor_t)
+                        ws.row_dimensions[ri].height = 14
+
+                    # TOTAL DE OPERADORES
+                    _da_suporte_row(ws_out, r_cen, "TOTAL DE OPERADORES",
+                                    res_t["op_A"], res_t["op_B"], res_t["op_C"],
+                                    hA_v, hB_v, hC_v, d_t2, is_total=True)
+                    r_cen += 1
+
+                    # Linhas de suporte
+                    for nome_s, key_s in [("LAVADORA E INSPEÇÃO","lavadora"),
+                                           ("GRAVAÇÃO E ESTANQUEIDADE","gravacao"),
+                                           ("PRESET","preset"),
+                                           ("CORINGA","coringa"),
+                                           ("FACILITADOR","facilitador")]:
+                        s = sup_t[key_s]
+                        _da_suporte_row(ws_out, r_cen, nome_s, s["A"], s["B"], s["C"],
+                                        hA_v, hB_v, hC_v, d_t2, is_total=False)
+                        r_cen += 1
+
+                    # TOTAL POR TURNO
+                    _da_suporte_row(ws_out, r_cen, "TOTAL POR TURNO",
+                                    res_t["tot_A"], res_t["tot_B"], res_t["tot_C"],
+                                    hA_v, hB_v, hC_v, d_t2, is_total=True)
+                    r_cen += 1
+
+                    # TOTAL FUNCIONÁRIOS
+                    _da(ws_out, r_cen, 1, "TOTAL FUNCIONÁRIOS", _F_DA_AMAR, bold=True, center=False)
+                    _da(ws_out, r_cen, 4, res_t["total"], _F_DA_AMAR, bold=True, color="1F4D19")
+                    tot_h_da = res_t["tot_A"]*hA_v*d_t2 + res_t["tot_B"]*hB_v*d_t2 + res_t["tot_C"]*hC_v*d_t2
+                    _da(ws_out, r_cen, 8, round(tot_h_da, 2), _F_DA_AMAR, bold=True, color="1F4D19")
+                    ws_out.row_dimensions[r_cen].height = 15
+                    r_cen += 2  # linha em branco
+
+                    # Produtividades
+                    for nm_p, vl_p, dest_p in [
+                        ("PRODUTIVIDADE POR TEMPO DE CICLO OPERACIONAL", res_t["prod_ciclo_op"], False),
+                        ("PRODUTIVIDADE POR TEMPO DE CICLO TOTAL",       res_t["prod_ciclo_tot"], False),
+                        ("PRODUTIVIDADE POR TEMPO DE LABOR OPERACIONAL",  res_t["prod_labor_op"], False),
+                        ("PRODUTIVIDADE POR TEMPO DE LABOR TOTAL",        res_t["prod_labor_tot"], True),
+                    ]:
+                        fill_p = _F_DA_AMAR if dest_p else _F_DA_CINZA
+                        cor_p = "1F4D19" if dest_p else "000000"
+                        ws_out.merge_cells(f"G{r_cen}:I{r_cen}")
+                        _da(ws_out, r_cen, 7, nm_p, fill_p, bold=dest_p, color=cor_p, center=False)
+                        _da(ws_out, r_cen, 10, f"{vl_p:.0%}" if isinstance(vl_p, float) else vl_p,
+                            fill_p, bold=dest_p, color=cor_p)
+                        ws_out.row_dimensions[r_cen].height = 14
+                        r_cen += 1
+
+            tabelona_buf=BytesIO(); wb_out.save(tabelona_buf); tabelona_buf.seek(0)
+
+        st.download_button(
+            "📋 Baixar tabelona completa (layout IMPUTDISTRIBUIÇÃO + divergências)",
+            data=tabelona_buf,
+            file_name="tabelona_por_mes.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="dl_tabelona"
+        )
 
     # ══════════════════════════════════════════
     # SUB-ABA 2 — RESULTADOS REAIS
@@ -3261,35 +3239,22 @@ with tab_exp:
         with c1:
             st.markdown("**Resultado completo (todas as abas)**")
             st.caption("RESUMO MO + uma aba por mês com tabela no formato original")
-            if st.button("📥 Gerar resultado base", key="btn_res_base"):
-                with st.spinner("Gerando..."):
-                    st.session_state["_res_base_xl"] = exportar(res_base)
-            if st.session_state.get("_res_base_xl"):
-                st.download_button("📥 Baixar resultado base",
-                    data=st.session_state["_res_base_xl"], file_name="resultado_usinagem.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="dl_res_base")
+            st.download_button("📥 Baixar resultado base",
+                data=exportar(res_base), file_name="resultado_usinagem.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="dl_res_base")
         with c2:
             st.markdown("**Base tratada (pós-JOIN completo)**")
             st.caption("Todos os meses, todas as linhas de centro+peça+modelo+minutos")
-            if st.button("📥 Gerar base tratada", key="btn_base_tratada"):
-                with st.spinner("Gerando..."):
-                    _buf = BytesIO(); df_interm.to_excel(_buf, index=False); _buf.seek(0)
-                    st.session_state["_base_tratada"] = _buf
-            if st.session_state.get("_base_tratada"):
-                st.download_button("📥 Baixar base tratada completa",
-                    data=st.session_state["_base_tratada"], file_name="base_tratada_completa.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="dl_base_tratada")
+            buf=BytesIO(); df_interm.to_excel(buf,index=False); buf.seek(0)
+            st.download_button("📥 Baixar base tratada completa",
+                data=buf, file_name="base_tratada_completa.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="dl_base_tratada")
         if st.session_state.get("cenarios"):
             st.markdown('<div class="jd-sub">Cenários salvos</div>', unsafe_allow_html=True)
-            for nm, v in st.session_state.cenarios.items():
-                if st.button(f"📥 Gerar cenário: {nm}", key=f"btn_exp_{nm}"):
-                    with st.spinner("Gerando..."):
-                        st.session_state[f"_cen_{nm}"] = exportar(v["resultados"])
-                if st.session_state.get(f"_cen_{nm}"):
-                    st.download_button(f"📥 Baixar cenário: {nm}",
-                        data=st.session_state[f"_cen_{nm}"],
-                        file_name=f"cenario_{nm.replace(' ','_')}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        key=f"exp_{nm}")
+            for nm,v in st.session_state.cenarios.items():
+                st.download_button(f"📥 Cenário: {nm}", data=exportar(v["resultados"]),
+                    file_name=f"cenario_{nm.replace(' ','_')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"exp_{nm}")
