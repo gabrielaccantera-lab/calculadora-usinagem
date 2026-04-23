@@ -3404,164 +3404,222 @@ com as colunas de % ocupação calculadas pelo App. Células em **vermelho** = d
                         _ec(ws_out,ri_t,ci_t2,v_app_t if v_app_t else None,fill_vm,False,"000000",7)
                     ws_out.row_dimensions[ri_t].height=13
 
-                nota_rt=7+len(base_rows_t)+1
+                # ── Linha de nota ─────────────────────────────────────────────────────
+                nota_rt = 7 + len(base_rows_t) + 1
                 ws_out.merge_cells(f"A{nota_rt}:{get_column_letter(18+len(modelos_xl_t))}{nota_rt}")
-                nt=ws_out.cell(nota_rt,1,"🔴 JA.A/JA.B vermelho = % ocupação difere do Excel de referência  |  🔴 Rosa = total de ciclos ou total de peças difere  |  Cinza = valor presente no App")
-                nt.font=_Ft(name="Arial",bold=True,size=8,color="CC0000")
-                nt.fill=_PF("solid",fgColor="FFEEEE")
-                nt.alignment=_Al(horizontal="left",vertical="center")
-                ws_out.row_dimensions[nota_rt].height=14
+                nt = ws_out.cell(nota_rt, 1, "🔴 JA.A/JA.B vermelho = % ocupação difere do Excel de referência  |  🔴 Rosa = total de ciclos ou total de peças difere  |  Cinza = valor presente no App")
+                nt.font   = _Ft(name="Arial", bold=True, size=8, color="CC0000")
+                nt.fill   = _PF("solid", fgColor="FFEEEE")
+                nt.alignment = _Al(horizontal="left", vertical="center")
+                ws_out.row_dimensions[nota_rt].height = 14
 
-                # ── DADOS AUTOMÁTICOS ────────────────────────────────────────
-                # Resultado do App: % ocupação, turnos ativos, horas, totais e produtividades
+                # ════════════════════════════════════════════════════════════════
+                # BLOCO DADOS AUTOMÁTICOS — igual ao Excel original
+                # Posicionado a partir da coluna L (12), linha nota_rt + 2
+                # Layout: col 12=Centro, 13=ocup_A, 14=ocup_B, 15=ocup_C,
+                #         16=ativo_A,  17=ativo_B,  18=ativo_C,
+                #         19=horas_A,  20=horas_B,  21=horas_C
+                # ════════════════════════════════════════════════════════════════
                 res_t = res_base.get(mes_t)
                 if res_t:
-                    _F_DA_TITULO  = _PF("solid", fgColor="1F4D19")
-                    _F_DA_HEADER  = _PF("solid", fgColor="1F4D19")
-                    _F_DA_AMAR    = _PF("solid", fgColor="FFDE00")
-                    _F_DA_VERDE_L = _PF("solid", fgColor="92D050")
-                    _F_DA_AMAR_L  = _PF("solid", fgColor="FFFF00")
-                    _F_DA_VERM_L  = _PF("solid", fgColor="FFCDD2")
-                    _F_DA_AZUL_L  = _PF("solid", fgColor="B3E5FC")
-                    _F_DA_CINZA   = _PF("solid", fgColor="F4F4F4")
+                    d_t2  = res_t["dias"]
+                    hA_v  = res_t["hA"]; hB_v = res_t["hB"]; hC_v = res_t["hC"]
+                    sup_t = res_t["suporte"]
 
-                    def _da(ws, r, c, val, fill=None, bold=False, color="000000", size=9, center=True):
-                        cell = ws.cell(row=r, column=c, value=val)
-                        cell.font = _Ft(name="Arial", bold=bold, color=color, size=size)
-                        cell.fill = fill or _F_BRANCO
+                    # Fills usados no bloco
+                    _F_HDR_VERD = _PF("solid", fgColor="1F4D19")
+                    _F_HDR_AMAR = _PF("solid", fgColor="FFDE00")
+                    _F_HDR_GRAY = _PF("solid", fgColor="D9D9D9")
+                    _F_VERM_L   = _PF("solid", fgColor="FFCDD2")
+                    _F_AMAR_L   = _PF("solid", fgColor="FFFF00")
+                    _F_VERDE_L  = _PF("solid", fgColor="92D050")
+                    _F_AZUL_L   = _PF("solid", fgColor="B3E5FC")
+                    _F_CINZA_L  = _PF("solid", fgColor="F4F4F4")
+                    _F_AMAR_TOT = _PF("solid", fgColor="FFDE00")
+
+                    # Offset: começa 2 linhas após nota_rt, coluna 12 (L)
+                    COL_OFF = 12   # coluna L = início do bloco
+                    da_row  = nota_rt + 2   # linha de início
+
+                    def _da(r, c, val, fill=None, bold=False, color="000000", size=9, center=True, merge_end=None):
+                        cell = ws_out.cell(row=r, column=c, value=val)
+                        cell.font      = _Ft(name="Arial", bold=bold, color=color, size=size)
+                        cell.fill      = fill or _F_BRANCO
                         cell.alignment = _Al(horizontal="center" if center else "left", vertical="center", wrap_text=True)
-                        cell.border = _BRD
+                        cell.border    = _BRD
+                        if merge_end:
+                            ws_out.merge_cells(start_row=r, start_column=c, end_row=r, end_column=merge_end)
                         return cell
 
-                    da_start = nota_rt + 2  # 2 linhas de espaço após nota
+                    # ── TABELA DE MINUTOS / HORAS / DIAS / HORAS POR TURNO ──────────────
+                    # Posicionada nas primeiras linhas do bloco (igual à linha 2-5 do Excel)
+                    # Linhas: da_row, da_row+1, da_row+2, da_row+3
+                    # Cols:   COL_OFF=label, COL_OFF+1=Turno A, COL_OFF+2=Turno B, COL_OFF+3=Turno C
+                    min_A = d_t2 * hA_v * 60
+                    min_B = d_t2 * hB_v * 60
+                    min_C = d_t2 * hC_v * 60
 
-                    # Linha: DADOS AUTOMÁTICOS (título)
-                    ws_out.merge_cells(f"A{da_start}:J{da_start}")
-                    t_cell = ws_out.cell(da_start, 1, "DADOS AUTOMÁTICOS")
-                    t_cell.font = _Ft(name="Arial", bold=True, color="FFFFFF", size=10)
-                    t_cell.fill = _F_DA_TITULO
-                    t_cell.alignment = _Al(horizontal="center", vertical="center")
-                    t_cell.border = _BRD
-                    ws_out.row_dimensions[da_start].height = 18
+                    for ri_hm, (label, vA, vB, vC, fill_l, fill_v) in enumerate([
+                        ("TOTAL DE MINUTOS", round(min_A,1),   round(min_B,1),   round(min_C,1),   _F_HDR_GRAY, _F_HDR_GRAY),
+                        ("TOTAL DE HORAS",   round(d_t2*hA_v,2), round(d_t2*hB_v,2), round(d_t2*hC_v,2), _F_HDR_GRAY, _F_HDR_GRAY),
+                        ("DIAS TRABALHADOS", d_t2,             d_t2,             d_t2,             _F_VERM_L,   _F_VERM_L),
+                        ("HORAS POR TURNO",  hA_v,             hB_v,             hC_v,             _F_HDR_GRAY, _F_HDR_GRAY),
+                    ]):
+                        r_hm = da_row + ri_hm
+                        _da(r_hm, COL_OFF,   label, fill_l, bold=True, center=False)
+                        _da(r_hm, COL_OFF+1, vA,    fill_v, bold=True)
+                        _da(r_hm, COL_OFF+2, vB,    fill_v, bold=True)
+                        _da(r_hm, COL_OFF+3, vC,    fill_v, bold=True)
+                        ws_out.row_dimensions[r_hm].height = 14
 
-                    # Linha: PERÍODO / DATA DE REVISÃO / HORAS POR TURNO
-                    r_per = da_start + 1
-                    _da(ws_out, r_per, 1, "PERÍODO:", _F_DA_CINZA, bold=True, center=False)
-                    _da(ws_out, r_per, 2, mes_t, _PF("solid", fgColor="FF0000"), bold=True, color="FFFFFF")
-                    ws_out.merge_cells(f"C{r_per}:D{r_per}")
-                    _da(ws_out, r_per, 3, "DATA DE REVISÃO:", _F_DA_CINZA, bold=True, center=False)
+                    # ── CABEÇALHO "DADOS AUTOMÁTICOS" ───────────────────────────────────
+                    r_titulo = da_row + 5
+                    _da(r_titulo, COL_OFF, "RESUMO DA CARGA MÁQUINA X QUADRO DE LOTAÇÃO",
+                        _F_HDR_GRAY, bold=True, center=True, merge_end=COL_OFF+9)
+                    ws_out.row_dimensions[r_titulo].height = 16
+
+                    # ── LINHA PERÍODO / DATA / HORAS ─────────────────────────────────────
+                    r_per = r_titulo + 1
+                    _da(r_per, COL_OFF,   "PERÍODO:",        _F_HDR_GRAY, bold=True, center=False)
+                    _da(r_per, COL_OFF+1, mes_t,             _PF("solid", fgColor="FF0000"), bold=True, color="FFFFFF")
+                    _da(r_per, COL_OFF+3, "DATA DE REVISÃO:", _F_HDR_GRAY, bold=True, center=False)
                     from datetime import date as _date
-                    _da(ws_out, r_per, 5, _date.today().strftime("%d/%m/%Y"), _PF("solid", fgColor="FF0000"), bold=True, color="FFFFFF")
-                    ws_out.merge_cells(f"H{r_per}:J{r_per}")
-                    _da(ws_out, r_per, 8, "HORAS POR TURNO DE TRABALHO", _F_DA_CINZA, bold=True)
-                    ws_out.row_dimensions[r_per].height = 15
+                    _da(r_per, COL_OFF+5, _date.today().strftime("%d/%m/%Y"), _PF("solid", fgColor="FF0000"), bold=True, color="FFFFFF")
+                    _da(r_per, COL_OFF+7, "HORAS POR TURNO DE TRABALHO", _F_HDR_GRAY, bold=True, merge_end=COL_OFF+9)
+                    ws_out.row_dimensions[r_per].height = 14
 
-                    # Linha: horas por turno (A, B, C)
+                    # ── LINHA HORAS POR TURNO ────────────────────────────────────────────
                     r_h = r_per + 1
-                    _da(ws_out, r_h, 8, res_t["hA"], _F_DA_CINZA, bold=True)
-                    _da(ws_out, r_h, 9, res_t["hB"], _F_DA_CINZA, bold=True)
-                    _da(ws_out, r_h, 10, res_t["hC"], _F_DA_CINZA, bold=True)
+                    _da(r_h, COL_OFF+7, hA_v, _F_HDR_GRAY, bold=True)
+                    _da(r_h, COL_OFF+8, hB_v, _F_HDR_GRAY, bold=True)
+                    _da(r_h, COL_OFF+9, hC_v, _F_HDR_GRAY, bold=True)
                     ws_out.row_dimensions[r_h].height = 14
 
-                    # Linha: cabeçalhos de turno
+                    # ── LINHA CABEÇALHO TURNOS ───────────────────────────────────────────
                     r_hdr = r_h + 1
-                    for ci_da, txt_da in [(1,""), (2,"TURNO A"), (3,"TURNO B"), (4,"TURNO C"),
-                                           (5,"TURNO A"), (6,"TURNO B"), (7,"TURNO C"),
-                                           (8,"TURNO A"), (9,"TURNO B"), (10,"TURNO C")]:
-                        _da(ws_out, r_hdr, ci_da, txt_da, _F_DA_CINZA, bold=True)
+                    _da(r_hdr, COL_OFF,   "",        _F_HDR_VERD, bold=True, color="FFFFFF")  # Centro
+                    _da(r_hdr, COL_OFF+1, "TURNO A", _F_VERDE,    bold=True, color="000000")
+                    _da(r_hdr, COL_OFF+2, "TURNO B", _F_AMAR,     bold=True, color="000000")
+                    _da(r_hdr, COL_OFF+3, "TURNO C", _F_AZUL,     bold=True, color="000000")
+                    _da(r_hdr, COL_OFF+4, "TURNO A", _F_VERDE,    bold=True, color="000000")
+                    _da(r_hdr, COL_OFF+5, "TURNO B", _F_AMAR,     bold=True, color="000000")
+                    _da(r_hdr, COL_OFF+6, "TURNO C", _F_AZUL,     bold=True, color="000000")
+                    _da(r_hdr, COL_OFF+7, "TURNO A", _F_VERDE,    bold=True, color="000000")
+                    _da(r_hdr, COL_OFF+8, "TURNO B", _F_AMAR,     bold=True, color="000000")
+                    _da(r_hdr, COL_OFF+9, "TURNO C", _F_AZUL,     bold=True, color="000000")
                     ws_out.row_dimensions[r_hdr].height = 14
 
-                    # Linhas de centros: % ocupação, turno ativo, horas disponíveis
+                    # ── SUB-CABEÇALHO % OCUP / ATIVO / HORAS ────────────────────────────
+                    r_sub = r_hdr + 1
+                    _da(r_sub, COL_OFF,   "CENTRO",    _F_HDR_VERD, bold=True, color="FFFFFF", center=False)
+                    _da(r_sub, COL_OFF+1, "% Ocup",    _F_VERDE,    bold=True)
+                    _da(r_sub, COL_OFF+2, "% Ocup",    _F_AMAR,     bold=True)
+                    _da(r_sub, COL_OFF+3, "% Ocup",    _F_AZUL,     bold=True)
+                    _da(r_sub, COL_OFF+4, "Ativo",     _F_VERDE,    bold=True)
+                    _da(r_sub, COL_OFF+5, "Ativo",     _F_AMAR,     bold=True)
+                    _da(r_sub, COL_OFF+6, "Ativo",     _F_AZUL,     bold=True)
+                    _da(r_sub, COL_OFF+7, "Horas",     _F_VERDE,    bold=True)
+                    _da(r_sub, COL_OFF+8, "Horas",     _F_AMAR,     bold=True)
+                    _da(r_sub, COL_OFF+9, "Horas",     _F_AZUL,     bold=True)
+                    ws_out.row_dimensions[r_sub].height = 14
+
+                    # ── LINHAS DE CENTROS ────────────────────────────────────────────────
                     def _ocup_fill(v):
                         try:
                             f = float(v)
-                            if f > 1.0:  return _F_DA_VERM_L
-                            if f >= 0.85: return _F_DA_AMAR_L
-                            return _F_DA_VERDE_L
-                        except: return _F_DA_CINZA
+                            if f > 1.06: return _PF("solid", fgColor="FF0000")
+                            if f >= 1.00: return _F_AMAR_L
+                            if f >= 0.40: return _F_VERDE_L
+                            return _F_BRANCO
+                        except: return _F_BRANCO
 
-                    r_cen = r_hdr + 1
+                    r_cen = r_sub + 1
                     for _, crow in res_t["centros"].iterrows():
-                        cen_nm = crow.centro
-                        oA = crow.ocup_A; oB = crow.ocup_B; oC = crow.ocup_C
-                        aA = int(crow.ativo_A); aB = int(crow.ativo_B); aC = int(crow.ativo_C)
+                        cen   = crow.centro
+                        oA,oB,oC = crow.ocup_A, crow.ocup_B, crow.ocup_C
+                        aA,aB,aC = int(crow.ativo_A), int(crow.ativo_B), int(crow.ativo_C)
                         hA_d = crow.horas_disp_A; hB_d = crow.horas_disp_B; hC_d = crow.horas_disp_C
-                        _da(ws_out, r_cen, 1, cen_nm, _F_DA_CINZA, bold=False, center=False)
-                        _da(ws_out, r_cen, 2, f"{oA:.0%}", _ocup_fill(oA))
-                        _da(ws_out, r_cen, 3, f"{oB:.0%}", _ocup_fill(oB))
-                        _da(ws_out, r_cen, 4, f"{oC:.0%}", _ocup_fill(oC))
-                        _da(ws_out, r_cen, 5, aA, _F_DA_AZUL_L if aA else _F_DA_AMAR_L, bold=True)
-                        _da(ws_out, r_cen, 6, aB, _F_DA_AZUL_L if aB else _F_DA_AMAR_L, bold=True)
-                        _da(ws_out, r_cen, 7, aC, _F_DA_AZUL_L if aC else _F_DA_AMAR_L, bold=True)
-                        _da(ws_out, r_cen, 8, round(hA_d, 2) if hA_d else 0, _F_DA_AZUL_L if hA_d else _F_DA_CINZA)
-                        _da(ws_out, r_cen, 9, round(hB_d, 2) if hB_d else 0, _F_DA_AZUL_L if hB_d else _F_DA_CINZA)
-                        _da(ws_out, r_cen, 10, round(hC_d, 2) if hC_d else 0, _F_DA_AZUL_L if hC_d else _F_DA_CINZA)
-                        ws_out.row_dimensions[r_cen].height = 14
+
+                        _da(r_cen, COL_OFF,   cen,          _F_BRANCO,  center=False)
+                        _da(r_cen, COL_OFF+1, f"{oA:.0%}",  _ocup_fill(oA))
+                        _da(r_cen, COL_OFF+2, f"{oB:.0%}",  _ocup_fill(oB))
+                        _da(r_cen, COL_OFF+3, f"{oC:.0%}",  _ocup_fill(oC))
+                        _da(r_cen, COL_OFF+4, aA,           _F_VERDE if aA else _F_BRANCO, bold=True)
+                        _da(r_cen, COL_OFF+5, aB,           _F_AMAR  if aB else _F_BRANCO, bold=True)
+                        _da(r_cen, COL_OFF+6, aC,           _F_AZUL  if aC else _F_BRANCO, bold=True)
+                        _da(r_cen, COL_OFF+7, round(hA_d,2) if hA_d else 0, _F_VERDE if hA_d else _F_BRANCO)
+                        _da(r_cen, COL_OFF+8, round(hB_d,2) if hB_d else 0, _F_AMAR  if hB_d else _F_BRANCO)
+                        _da(r_cen, COL_OFF+9, round(hC_d,2) if hC_d else 0, _F_AZUL  if hC_d else _F_BRANCO)
+                        ws_out.row_dimensions[r_cen].height = 13
                         r_cen += 1
 
-                    sup_t = res_t["suporte"]
-                    d_t2 = res_t["dias"]
-                    hA_v = res_t["hA"]; hB_v = res_t["hB"]; hC_v = res_t["hC"]
-
-                    def _da_suporte_row(ws, ri, nome, aA_v, aB_v, aC_v, hA_v2, hB_v2, hC_v2, d_v, is_total=False):
-                        fill_n = _F_DA_AMAR if is_total else _F_DA_CINZA
-                        fill_v = _F_DA_AMAR if is_total else _F_DA_AZUL_L
-                        fill_0 = _F_DA_AMAR if is_total else _F_DA_AMAR_L
+                    # ── FUNÇÃO AUXILIAR: linha de suporte / totais ───────────────────────
+                    def _da_row_sup(ri, nome, qA, qB, qC, fill_nome, fill_qtd, fill_h, is_total=False):
                         cor_t = "1F4D19" if is_total else "000000"
-                        _da(ws, ri, 1, nome, fill_n, bold=is_total, center=False)
-                        for ci_s, v_s in [(5, aA_v), (6, aB_v), (7, aC_v)]:
-                            _da(ws, ri, ci_s, v_s, fill_v if v_s else fill_0, bold=is_total, color=cor_t)
-                        for ci_s, v_s, h_s in [(8, aA_v, hA_v2), (9, aB_v, hB_v2), (10, aC_v, hC_v2)]:
-                            val_h = round(v_s * h_s * d_v, 2) if v_s else 0
-                            _da(ws, ri, ci_s, val_h if val_h else 0, fill_v if val_h else _F_DA_CINZA, bold=is_total, color=cor_t)
-                        ws.row_dimensions[ri].height = 14
+                        _da(ri, COL_OFF,   nome, fill_nome, bold=is_total, center=False, color=cor_t)
+                        _da(ri, COL_OFF+4, qA, fill_qtd if qA else _F_AMAR_L, bold=is_total, color=cor_t)
+                        _da(ri, COL_OFF+5, qB, fill_qtd if qB else _F_AMAR_L, bold=is_total, color=cor_t)
+                        _da(ri, COL_OFF+6, qC, fill_qtd if qC else _F_AMAR_L, bold=is_total, color=cor_t)
+                        _da(ri, COL_OFF+7, round(qA*hA_v*d_t2,2) if qA else 0, fill_h if qA else _F_BRANCO, bold=is_total, color=cor_t)
+                        _da(ri, COL_OFF+8, round(qB*hB_v*d_t2,2) if qB else 0, fill_h if qB else _F_BRANCO, bold=is_total, color=cor_t)
+                        _da(ri, COL_OFF+9, round(qC*hC_v*d_t2,2) if qC else 0, fill_h if qC else _F_BRANCO, bold=is_total, color=cor_t)
+                        ws_out.row_dimensions[ri].height = 14
 
-                    # TOTAL DE OPERADORES
-                    _da_suporte_row(ws_out, r_cen, "TOTAL DE OPERADORES",
-                                    res_t["op_A"], res_t["op_B"], res_t["op_C"],
-                                    hA_v, hB_v, hC_v, d_t2, is_total=True)
+                    # TOTAL DE OPERADORES (linha amarela)
+                    _da_row_sup(r_cen, "TOTAL DE OPERADORES",
+                                res_t["op_A"], res_t["op_B"], res_t["op_C"],
+                                _F_AMAR_TOT, _F_AMAR_TOT, _F_AMAR_TOT, is_total=True)
                     r_cen += 1
 
-                    # Linhas de suporte
-                    for nome_s, key_s in [("LAVADORA E INSPEÇÃO","lavadora"),
-                                           ("GRAVAÇÃO E ESTANQUEIDADE","gravacao"),
-                                           ("PRESET","preset"),
-                                           ("CORINGA","coringa"),
-                                           ("FACILITADOR","facilitador")]:
+                    # Suportes
+                    for nome_s, key_s, fq, fh in [
+                        ("LAVADORA E INSPEÇÃO",      "lavadora",   _F_VERDE_L, _F_VERDE),
+                        ("GRAVAÇÃO E ESTANQUEIDADE",  "gravacao",   _F_VERDE_L, _F_VERDE),
+                        ("PRESET",                    "preset",     _F_VERDE_L, _F_VERDE),
+                        ("CORINGA",                   "coringa",    _F_VERDE_L, _F_VERDE),
+                        ("FACILITADOR",               "facilitador",_F_VERDE_L, _F_VERDE),
+                    ]:
                         s = sup_t[key_s]
-                        _da_suporte_row(ws_out, r_cen, nome_s, s["A"], s["B"], s["C"],
-                                        hA_v, hB_v, hC_v, d_t2, is_total=False)
+                        _da_row_sup(r_cen, nome_s, s["A"], s["B"], s["C"],
+                                    _F_CINZA_L, fq, fh, is_total=False)
                         r_cen += 1
 
-                    # TOTAL POR TURNO
-                    _da_suporte_row(ws_out, r_cen, "TOTAL POR TURNO",
-                                    res_t["tot_A"], res_t["tot_B"], res_t["tot_C"],
-                                    hA_v, hB_v, hC_v, d_t2, is_total=True)
+                    # TOTAL POR TURNO (amarelo)
+                    _da_row_sup(r_cen, "TOTAL POR TURNO",
+                                res_t["tot_A"], res_t["tot_B"], res_t["tot_C"],
+                                _F_AMAR_TOT, _F_AMAR_TOT, _F_AMAR_TOT, is_total=True)
                     r_cen += 1
 
                     # TOTAL FUNCIONÁRIOS
-                    _da(ws_out, r_cen, 1, "TOTAL FUNCIONÁRIOS", _F_DA_AMAR, bold=True, center=False)
-                    _da(ws_out, r_cen, 4, res_t["total"], _F_DA_AMAR, bold=True, color="1F4D19")
+                    _da(r_cen, COL_OFF,   "TOTAL FUNCIONÁRIOS", _F_AMAR_TOT, bold=True, center=False, color="1F4D19")
+                    _da(r_cen, COL_OFF+4, res_t["total"], _F_AMAR_TOT, bold=True, color="1F4D19")
                     tot_h_da = res_t["tot_A"]*hA_v*d_t2 + res_t["tot_B"]*hB_v*d_t2 + res_t["tot_C"]*hC_v*d_t2
-                    _da(ws_out, r_cen, 8, round(tot_h_da, 2), _F_DA_AMAR, bold=True, color="1F4D19")
+                    _da(r_cen, COL_OFF+7, round(tot_h_da, 2), _F_AMAR_TOT, bold=True, color="1F4D19")
                     ws_out.row_dimensions[r_cen].height = 15
                     r_cen += 2  # linha em branco
 
-                    # Produtividades
+                    # ── PRODUTIVIDADES ───────────────────────────────────────────────────
                     for nm_p, vl_p, dest_p in [
-                        ("PRODUTIVIDADE POR TEMPO DE CICLO OPERACIONAL", res_t["prod_ciclo_op"], False),
-                        ("PRODUTIVIDADE POR TEMPO DE CICLO TOTAL",       res_t["prod_ciclo_tot"], False),
-                        ("PRODUTIVIDADE POR TEMPO DE LABOR OPERACIONAL",  res_t["prod_labor_op"], False),
-                        ("PRODUTIVIDADE POR TEMPO DE LABOR TOTAL",        res_t["prod_labor_tot"], True),
+                        ("PRODUTIVIDADE POR TEMPO DE CICLO OPERACIONAL", res_t["prod_ciclo_op"],  False),
+                        ("PRODUTIVIDADE POR TEMPO DE CICLO TOTAL",        res_t["prod_ciclo_tot"], False),
+                        ("PRODUTIVIDADE POR TEMPO DE LABOR OPERACIONAL",  res_t["prod_labor_op"],  False),
+                        ("PRODUTIVIDADE POR TEMPO DE LABOR TOTAL",         res_t["prod_labor_tot"], True),
                     ]:
-                        fill_p = _F_DA_AMAR if dest_p else _F_DA_CINZA
-                        cor_p = "1F4D19" if dest_p else "000000"
-                        ws_out.merge_cells(f"G{r_cen}:I{r_cen}")
-                        _da(ws_out, r_cen, 7, nm_p, fill_p, bold=dest_p, color=cor_p, center=False)
-                        _da(ws_out, r_cen, 10, f"{vl_p:.0%}" if isinstance(vl_p, float) else vl_p,
+                        fill_p = _F_AMAR_TOT if dest_p else _F_CINZA_L
+                        cor_p  = "1F4D19"    if dest_p else "000000"
+                        _da(r_cen, COL_OFF,   nm_p, fill_p, bold=dest_p, center=False, color=cor_p, merge_end=COL_OFF+8)
+                        _da(r_cen, COL_OFF+9, f"{vl_p:.0%}" if isinstance(vl_p, float) else vl_p,
                             fill_p, bold=dest_p, color=cor_p)
                         ws_out.row_dimensions[r_cen].height = 14
                         r_cen += 1
+
+                    # ── Ajustar larguras das colunas do bloco ────────────────────────────
+                    for ci_adj, w_adj in [
+                        (COL_OFF,    16), (COL_OFF+1, 8), (COL_OFF+2, 8), (COL_OFF+3, 8),
+                        (COL_OFF+4,  7), (COL_OFF+5, 7), (COL_OFF+6, 7),
+                        (COL_OFF+7, 10), (COL_OFF+8,10), (COL_OFF+9,10),
+                    ]:
+                        ws_out.column_dimensions[get_column_letter(ci_adj)].width = w_adj
 
             tabelona_buf=BytesIO(); wb_out.save(tabelona_buf); tabelona_buf.seek(0)
 
