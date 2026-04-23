@@ -20,11 +20,13 @@ def safe_float(v):
     try: return float(v) if v is not None else 0.0
     except: return 0.0
 
-# ─── Cache de objetos openpyxl (evita recriar Font/PatternFill em loops) ─────
-_FONT_CACHE      = {}
-_ALIGN_CACHE     = {}
-_FILL_CACHE      = {}
-_BORDER_INSTANCE = None
+
+
+# ─── Cache de objetos openpyxl (evita recriar Font/PatternFill em loops pesados) ──
+_FONT_CACHE  = {}
+_ALIGN_CACHE = {}
+_FILL_CACHE  = {}
+_BRD_CACHE   = [None]
 
 def _get_font(bold=False, color="000000", size=9, italic=False):
     k = (bold, color, size, italic)
@@ -38,18 +40,16 @@ def _get_align(center=True):
             horizontal="center" if center else "left", vertical="center", wrap_text=True)
     return _ALIGN_CACHE[center]
 
-def _get_fill(color_hex):
-    if color_hex not in _FILL_CACHE:
-        _FILL_CACHE[color_hex] = PatternFill("solid", fgColor=color_hex)
-    return _FILL_CACHE[color_hex]
+def _get_fill(hex_color):
+    if hex_color not in _FILL_CACHE:
+        _FILL_CACHE[hex_color] = PatternFill("solid", fgColor=hex_color)
+    return _FILL_CACHE[hex_color]
 
-def _get_border():
-    global _BORDER_INSTANCE
-    if _BORDER_INSTANCE is None:
+def _get_brd():
+    if _BRD_CACHE[0] is None:
         s = Side(style='thin', color='CCCCCC')
-        _BORDER_INSTANCE = Border(left=s, right=s, top=s, bottom=s)
-    return _BORDER_INSTANCE
-
+        _BRD_CACHE[0] = Border(left=s, right=s, top=s, bottom=s)
+    return _BRD_CACHE[0]
 
 st.set_page_config(page_title="Calculadora de Recursos — Usinagem", layout="wide", page_icon="🏭")
 
@@ -182,10 +182,8 @@ def grafico_cenarios(cenarios_dict):
 # ─────────────────────────────────────────
 # EXPORTAÇÃO
 # ─────────────────────────────────────────
-# Fills globais para diagnóstico
-def _make_brd():
-    return _get_border()
-
+# Fills globais para diagnóstico — usa cache para não recriar objetos
+def _make_brd(): return _get_brd()
 def _pf(color): return _get_fill(color)
 
 # Lazy globals — só instanciados na primeira chamada de função que precisar deles
@@ -269,10 +267,10 @@ def cor_ocup(pct):
 
 def ec(ws, r, c, val, fill=None, bold=False, color="000000", size=9, center=True, italic=False, comment_text=None):
     cell = ws.cell(row=r, column=c, value=val)
-    cell.font = _get_font(bold, color, size, italic)
-    cell.fill = fill or F_BRANCO
+    cell.font      = _get_font(bold, color, size, italic)
+    cell.fill      = fill or F_BRANCO
     cell.alignment = _get_align(center)
-    cell.border = _get_border()
+    cell.border    = _get_brd()
     return cell
 
 def cell_style(ws, r, c, val, fill=None, bold=False, color="000000", font_size=9, center=True, italic=False, comment_text=None):
@@ -1683,19 +1681,19 @@ def read_pmp(fb, log):
         dias[m] = int(v) if pd.notna(v) else 0
     log.append(f"   Dias trabalhados: { {m:d for m,d in dias.items() if d>0} }")
 
-    # Leitura vetorizada: melt em vez de duplo loop Python
-    df_data = df.iloc[2:].copy()
-    df_data = df_data.dropna(subset=[0])
-    df_data[0] = df_data[0].astype(str).str.strip()
-    modelos_lidos = len(df_data)
-    # Renomear colunas: 0=modelo, 1..12=meses
-    mes_cols = {i: m for i, m in enumerate(MESES, 1) if i < df.shape[1]}
-    df_data = df_data[[0] + list(mes_cols.keys())].rename(columns={0: "modelo", **mes_cols})
-    df_melt = df_data.melt(id_vars="modelo", var_name="mes", value_name="qtd")
-    df_melt["qtd"] = pd.to_numeric(df_melt["qtd"], errors="coerce").fillna(0).astype(int)
-    rows_df = df_melt[df_melt["qtd"] > 0].reset_index(drop=True)
-    log.append(f"   {modelos_lidos} modelos · {len(rows_df)} registros com qtd > 0")
-    return rows_df, dias
+    rows = []
+    modelos_lidos = 0
+    for r in range(2, len(df)):
+        modelo = df.iloc[r, 0]
+        if pd.isna(modelo): continue
+        modelos_lidos += 1
+        for i, m in enumerate(MESES, 1):
+            v = df.iloc[r, i] if i < df.shape[1] else None
+            qtd = int(v) if pd.notna(v) else 0
+            if qtd > 0:
+                rows.append({"modelo": str(modelo).strip(), "mes": m, "qtd": qtd})
+    log.append(f"   {modelos_lidos} modelos · {len(rows)} registros com qtd > 0")
+    return pd.DataFrame(rows), dias
 
 def read_indices(fb, log):
     """Lê os índices de ciclo e labor diretamente da primeira aba mensal disponível.
@@ -1814,11 +1812,11 @@ def validar(pmp, tempo, dist, aplic, dias):
     merged = tempo.merge(dist, on=["centro","peca"], how="inner")
     labor_maior = merged[merged.t_labor > merged.t_ciclo]
     if len(labor_maior):
-        exemplos = list(zip(labor_maior.centro[:3], labor_maior.peca[:3]))
+        exemplos = list(zip(labor_maior.centro.head(3), labor_maior.peca.head(3)))
         alertas.append(f"{len(labor_maior)} linha(s) com t_labor > t_ciclo (fisicamente improvável): {exemplos}")
-    _pmp_por_mes = pmp.groupby("mes")["qtd"].sum()
+    _qtd_mes = pmp.groupby("mes")["qtd"].sum()
     for m in MESES:
-        qtd_m = _pmp_por_mes.get(m, 0)
+        qtd_m = _qtd_mes.get(m, 0)
         if qtd_m > 0 and dias.get(m,0) == 0:
             alertas.append(f"Mês '{m}' tem {int(qtd_m)} peças de demanda mas dias trabalhados = 0.")
     nulos_t = tempo[["t_ciclo","t_labor"]].isna().sum()
@@ -1862,23 +1860,22 @@ def calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg
         if sub.empty: resultados[mes] = None; continue
 
         minA = d*hA*60; minB = d*hB*60; minC = d*hC*60
-        # ── Cálculo vetorizado — sem loop Python por centro ──────────────────
+        # Vetorização — elimina loop Python por centro
         df_c = sub[["centro","min_ciclo","min_labor"]].copy()
-        df_c["ocup_A"] = (df_c.min_ciclo / minA) if minA > 0 else 0.0
-        df_c["ocup_B"] = (df_c.min_ciclo / minB) if minB > 0 else 0.0
-        df_c["ocup_C"] = (df_c.min_ciclo / minC) if minC > 0 else 0.0
+        df_c["ocup_A"] = df_c.min_ciclo / minA if minA > 0 else 0.0
+        df_c["ocup_B"] = df_c.min_ciclo / minB if minB > 0 else 0.0
+        df_c["ocup_C"] = df_c.min_ciclo / minC if minC > 0 else 0.0
         df_c["ativo_A"] = (df_c.ocup_A > thr_A).astype(int)
         df_c["ativo_B"] = (df_c.ocup_A > thr_B).astype(int)
         df_c["ativo_C"] = (df_c.ocup_B > thr_C).astype(int)
-        # Aplicar overrides pontuais (raramente usado)
         if overrides and mes in overrides:
             for cen, ov in overrides[mes].items():
-                mask = df_c.centro == cen
-                if "A" in ov: df_c.loc[mask, "ativo_A"] = ov["A"]
-                if "B" in ov: df_c.loc[mask, "ativo_B"] = ov["B"]
-                if "C" in ov: df_c.loc[mask, "ativo_C"] = ov["C"]
+                msk = df_c.centro == cen
+                if "A" in ov: df_c.loc[msk, "ativo_A"] = ov["A"]
+                if "B" in ov: df_c.loc[msk, "ativo_B"] = ov["B"]
+                if "C" in ov: df_c.loc[msk, "ativo_C"] = ov["C"]
         df_c = df_c.rename(columns={"min_ciclo":"min_ciclo_total","min_labor":"min_labor_total"})
-        df_c["min_disp_A"] = minA; df_c["min_disp_B"] = minB; df_c["min_disp_C"] = minC
+        df_c["min_disp_A"]   = minA; df_c["min_disp_B"] = minB; df_c["min_disp_C"] = minC
         df_c["horas_ciclo"]  = df_c.min_ciclo_total / 60
         df_c["horas_labor"]  = df_c.min_labor_total / 60
         df_c["horas_disp_A"] = d * hA * df_c.ativo_A
@@ -2313,16 +2310,29 @@ def show_real_vs_app(r_app, real_mensal, mes):
                           "App": f"{app_v:.1%}", "Excel (Real)": f"{xl_v:.1%}" if xl_v else "—",
                           "Δ": f"{delta_p:+.1%}", "Status": icon_p})
 
-    df_cmp = pd.DataFrame(rows_cmp)
+    # Separar linhas de inteiros e percentuais para evitar coluna de tipo misto (ArrowInvalid)
+    rows_int = [r for r in rows_cmp if isinstance(r["App"], (int, float)) and not isinstance(r["App"], bool)]
+    rows_pct = [r for r in rows_cmp if isinstance(r["App"], str)]
 
-    def style_cmp(row):
+    def _style_cmp(row, cols):
         st_val = str(row.get("Status", ""))
         if "✅" in st_val:   base = "background-color:#003D10;color:#B9F6CA"
         elif "🟡" in st_val: base = "background-color:#3D2D00;color:#FFE57F"
         else:                base = "background-color:#3D0000;color:#FF8A80"
-        return ["", "", "", "", base]
+        return ["" if c != "Status" else base for c in cols]
 
-    st.dataframe(df_cmp.style.apply(style_cmp, axis=1), use_container_width=True, hide_index=True)
+    if rows_int:
+        df_int = pd.DataFrame(rows_int)
+        df_int["App"] = df_int["App"].astype(int)
+        df_int["Excel (Real)"] = pd.to_numeric(df_int["Excel (Real)"], errors="coerce").fillna(0).astype(int)
+        cols_int = list(df_int.columns)
+        st.dataframe(df_int.style.apply(lambda r: _style_cmp(r, cols_int), axis=1),
+                     use_container_width=True, hide_index=True)
+    if rows_pct:
+        df_pct = pd.DataFrame(rows_pct)
+        cols_pct = list(df_pct.columns)
+        st.dataframe(df_pct.style.apply(lambda r: _style_cmp(r, cols_pct), axis=1),
+                     use_container_width=True, hide_index=True)
 
 
 def show_fy26_anual(res_base, real_resumo, dias, horas_turno):
@@ -2374,7 +2384,7 @@ def show_fy26_anual(res_base, real_resumo, dias, horas_turno):
             "App — B":      r["tot_B"],
             "App — C":      r["tot_C"],
             "App — Total":  r["total"],
-            "Excel — Total": xl_tot if xl_tot else "—",
+            "Excel — Total": int(xl_tot) if xl_tot else None,
             "Δ Total":      f"{delta_tot:+d}" if delta_tot is not None else "—",
             "Labor App":    f"{r['prod_labor_tot']:.1%}",
             "Labor Excel":  f"{xl_labor:.1%}" if xl_labor else "—",
@@ -2638,37 +2648,35 @@ if not uploaded:
 
 file_bytes = uploaded.read()
 
-# ── Hash do arquivo para detectar troca de upload ────────────────────────────
-_file_hash = hashlib.md5(file_bytes).hexdigest()
-_is_new_file = st.session_state.get("_file_hash") != _file_hash
-if _is_new_file:
-    st.session_state["_file_hash"] = _file_hash
+# Detectar arquivo novo por hash (evita re-leitura desnecessária)
+_fhash = hashlib.md5(file_bytes).hexdigest()
+if st.session_state.get("_fhash") != _fhash:
+    st.session_state["_fhash"] = _fhash
     st.session_state["log_leitura"] = []
-    for _k in ("real_resumo", "real_mensal", "turnos_arq"):
-        st.session_state.pop(_k, None)
+    for _k in ("real_resumo", "real_mensal", "turnos_arq"): st.session_state.pop(_k, None)
 
 if "log_leitura" not in st.session_state:
     st.session_state.log_leitura = []
 
-# ── Leitura cacheada: todas as abas em uma só chamada ────────────────────────
+# Leitura cacheada: todas as abas em uma só chamada ──────────────────────────
 @st.cache_data(show_spinner=False, ttl=3600)
 def _ler_todas_abas(fb):
     _log = []
-    _pmp, _dias   = read_pmp(fb, _log)
-    _tempo        = read_tempo(fb, _log)
-    _dist         = read_dist(fb, _log)
-    _aplic        = read_aplic(fb, _log)
-    _turnos       = read_turnos(fb)
+    _pmp, _dias = read_pmp(fb, _log)
+    _tempo      = read_tempo(fb, _log)
+    _dist       = read_dist(fb, _log)
+    _aplic      = read_aplic(fb, _log)
+    _turnos     = read_turnos(fb)
     _log.append(f"✅ IMPUTTURNOS lido: A={_turnos['A']}h · B={_turnos['B']}h · C={_turnos['C']}h (acumulados)")
-    _log.append(f"✅ Leitura concluída")
+    _log.append("✅ Leitura concluída")
     return _pmp, _dias, _tempo, _dist, _aplic, _turnos, _log
 
 with st.spinner("Lendo planilha..."):
     try:
-        pmp, dias, tempo, dist, aplic, turnos_arq, _cached_log = _ler_todas_abas(file_bytes)
+        pmp, dias, tempo, dist, aplic, turnos_arq, _log_c = _ler_todas_abas(file_bytes)
         st.session_state["turnos_arq"] = turnos_arq
         if not st.session_state.log_leitura:
-            st.session_state.log_leitura = list(_cached_log)
+            st.session_state.log_leitura = list(_log_c)
     except Exception as e:
         st.error(f"Erro ao ler: {e}"); st.stop()
 
@@ -2740,7 +2748,7 @@ tab_vis, tab_inp, tab_mem, tab_res, tab_cmp, tab_diag, tab_exp = st.tabs([
     "📊 Resultado por Mês", "🔄 Comparar com Excel", "🩺 Diagnóstico", "📥 Exportar"
 ])
 
-# Hash rápido usando hashlib (pmp.to_json() é muito lento para DataFrames grandes)
+# Hash rápido — pmp.to_json() é lento para DataFrames grandes
 pmp_hash  = hashlib.md5(pd.util.hash_pandas_object(pmp, index=True).values.tobytes()).hexdigest()
 dias_hash = hashlib.md5(str(dias).encode()).hexdigest()
 import json as _json
@@ -2922,9 +2930,9 @@ Turno C: <b>{r['tot_C']} pessoas</b> &nbsp;|&nbsp;
                 eC="🔴" if rc.ocup_C>1 else ("🟡" if rc.ocup_C>=0.85 else "🟢")
                 c0,c1,c2,c3 = st.columns([3,1,1,1])
                 c0.markdown(f"`{cen}` {eA}{rc.ocup_A:.0%}/{eB}{rc.ocup_B:.0%}/{eC}{rc.ocup_C:.0%}")
-                vA=c1.number_input(" ",0,5,int(rc.ativo_A),key=f"n_{novo_nome}_{cen}_A",label_visibility="collapsed",help=f"Base:{rc.ativo_A}")
-                vB=c2.number_input(" ",0,5,int(rc.ativo_B),key=f"n_{novo_nome}_{cen}_B",label_visibility="collapsed",help=f"Base:{rc.ativo_B}")
-                vC=c3.number_input(" ",0,5,int(rc.ativo_C),key=f"n_{novo_nome}_{cen}_C",label_visibility="collapsed",help=f"Base:{rc.ativo_C}")
+                vA=c1.number_input("Turno A",0,5,int(rc.ativo_A),key=f"n_{novo_nome}_{cen}_A",label_visibility="collapsed",help=f"Base:{rc.ativo_A}")
+                vB=c2.number_input("Turno B",0,5,int(rc.ativo_B),key=f"n_{novo_nome}_{cen}_B",label_visibility="collapsed",help=f"Base:{rc.ativo_B}")
+                vC=c3.number_input("Turno C",0,5,int(rc.ativo_C),key=f"n_{novo_nome}_{cen}_C",label_visibility="collapsed",help=f"Base:{rc.ativo_C}")
                 novo_ov[cen]={"A":vA,"B":vB,"C":vC}
             if st.button("💾 Salvar cenário", type="primary"):
                 ov_c={mes_novo:novo_ov}
