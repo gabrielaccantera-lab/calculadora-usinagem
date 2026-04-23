@@ -2846,193 +2846,196 @@ Gera um Excel **idêntico ao layout do seu Excel de referência** — mesmas col
 
         st.markdown("---")
         st.markdown('<div class="jd-sub">📋 Tabelona completa — layout idêntico ao IMPUTDISTRIBUIÇÃO</div>', unsafe_allow_html=True)
-    st.markdown("""
+        st.markdown("""
 Gera a **tabelona completa** no mesmo layout do seu Excel — colunas A até os modelos todos —
 com as colunas de % ocupação calculadas pelo App. Células em **vermelho** = divergência com o Excel de referência.
-    """)
-    with st.spinner("Gerando tabelona... (~10s)"):
-        import openpyxl as _opx
-        from openpyxl.styles import PatternFill as _PF, Font as _Ft, Alignment as _Al, Border as _Bd, Side as _Sd
+        """)
+        with st.spinner("Gerando tabelona... (~10s)"):
+            import openpyxl as _opx
+            from openpyxl.styles import PatternFill as _PF, Font as _Ft, Alignment as _Al, Border as _Bd, Side as _Sd
 
-        _F_VERDE=_PF("solid",fgColor="66FF66"); _F_AMAR=_PF("solid",fgColor="FFFF00")
-        _F_AZUL=_PF("solid",fgColor="00B0F0"); _F_PRETO=_PF("solid",fgColor="000000")
-        _F_CINZA=_PF("solid",fgColor="D9D9D9"); _F_CINZA2=_PF("solid",fgColor="BFBFBF")
-        _F_BRANCO=_PF("solid",fgColor="FFFFFF"); _F_VERM=_PF("solid",fgColor="FF0000")
-        _F_VERM_S=_PF("solid",fgColor="FFCCCC"); _F_VERDE_JD=_PF("solid",fgColor="1F4D19")
-        _BRD=_Bd(left=_Sd(style="thin",color="AAAAAA"),right=_Sd(style="thin",color="AAAAAA"),
-                top=_Sd(style="thin",color="AAAAAA"),bottom=_Sd(style="thin",color="AAAAAA"))
+            _F_VERDE=_PF("solid",fgColor="66FF66"); _F_AMAR=_PF("solid",fgColor="FFFF00")
+            _F_AZUL=_PF("solid",fgColor="00B0F0"); _F_PRETO=_PF("solid",fgColor="000000")
+            _F_CINZA=_PF("solid",fgColor="D9D9D9"); _F_CINZA2=_PF("solid",fgColor="BFBFBF")
+            _F_BRANCO=_PF("solid",fgColor="FFFFFF"); _F_VERM=_PF("solid",fgColor="FF0000")
+            _F_VERM_S=_PF("solid",fgColor="FFCCCC"); _F_VERDE_JD=_PF("solid",fgColor="1F4D19")
+            _BRD=_Bd(left=_Sd(style="thin",color="AAAAAA"),right=_Sd(style="thin",color="AAAAAA"),
+                    top=_Sd(style="thin",color="AAAAAA"),bottom=_Sd(style="thin",color="AAAAAA"))
 
-        def _ec(ws,r,c,val,fill=None,bold=False,color="000000",size=8,center=True,wrap=False):
-            cell=ws.cell(row=r,column=c,value=val)
-            cell.font=_Ft(name="Arial",bold=bold,color=color,size=size)
-            cell.fill=fill or _F_BRANCO
-            cell.alignment=_Al(horizontal="center" if center else "left",vertical="center",wrap_text=wrap)
-            cell.border=_BRD
-            return cell
+            def _ec(ws,r,c,val,fill=None,bold=False,color="000000",size=8,center=True,wrap=False):
+                cell=ws.cell(row=r,column=c,value=val)
+                cell.font=_Ft(name="Arial",bold=bold,color=color,size=size)
+                cell.fill=fill or _F_BRANCO
+                cell.alignment=_Al(horizontal="center" if center else "left",vertical="center",wrap_text=wrap)
+                cell.border=_BRD
+                return cell
 
-        def _cor_pct(v):
-            try:
-                f=float(v)
-                if f>=1.06: return _PF("solid",fgColor="FF0000")
-                if f>=1.00: return _PF("solid",fgColor="FFFF00")
-                if f>=0.40: return _PF("solid",fgColor="92D050")
-                return _F_BRANCO
-            except: return _F_BRANCO
+            def _cor_pct(v):
+                try:
+                    f=float(v)
+                    if f>=1.06: return _PF("solid",fgColor="FF0000")
+                    if f>=1.00: return _PF("solid",fgColor="FFFF00")
+                    if f>=0.40: return _PF("solid",fgColor="92D050")
+                    return _F_BRANCO
+                except: return _F_BRANCO
 
-        MAPA_T={"Novembro":"NovFY26","Dezembro":"DezFY26","Janeiro":"JanFY26",
-                "Fevereiro":"FevFY26","Março":"MarFY26","Abril":"AbrFY26",
-                "Maio":"MaiFY26","Junho":"JunFY26","Julho":"JulFY26",
-                "Agosto":"AgoFY26","Setembro":"SetFY26","Outubro":"OutFY26"}
+            MAPA_T={"Novembro":"NovFY26","Dezembro":"DezFY26","Janeiro":"JanFY26",
+                    "Fevereiro":"FevFY26","Março":"MarFY26","Abril":"AbrFY26",
+                    "Maio":"MaiFY26","Junho":"JunFY26","Julho":"JulFY26",
+                    "Agosto":"AgoFY26","Setembro":"SetFY26","Outubro":"OutFY26"}
 
-        hA_t=horas_turno["A"]; hB_t=horas_turno["B"]; hC_t=horas_turno["C"]
-        thr_A_t=thresholds["A"]/100; thr_B_t=thresholds["B"]/100; thr_C_t=thresholds["C"]/100
+            hA_t=horas_turno["A"]; hB_t=horas_turno["B"]; hC_t=horas_turno["C"]
+            thr_A_t=thresholds["A"]/100; thr_B_t=thresholds["B"]/100; thr_C_t=thresholds["C"]/100
 
-        df_all_t=(aplic.merge(pmp,on="modelo").merge(tempo,on=["centro","peca"]).merge(dist,on=["centro","peca"]))
-        if "vol_int" not in df_all_t.columns: df_all_t["vol_int"] = 1.0
-        df_all_t["vol_int"] = pd.to_numeric(df_all_t["vol_int"], errors="coerce").fillna(1.0)
-        df_all_t["indice_ciclo"]=(df_all_t.t_ciclo*df_all_t.div_carga*df_all_t.div_volume*df_all_t.vol_int)/df_all_t.disponib
-        df_all_t["min_ciclo"]=df_all_t.indice_ciclo*df_all_t.qtd
-        df_all_t["min_labor"]=df_all_t.t_labor*df_all_t.div_carga*df_all_t.qtd
-        agg_cp_t=df_all_t.groupby(["centro","peca","mes"])[["min_ciclo","min_labor"]].sum()
+            df_all_t=(aplic.merge(pmp,on="modelo").merge(tempo,on=["centro","peca"]).merge(dist,on=["centro","peca"]))
+            if "vol_int" not in df_all_t.columns: df_all_t["vol_int"] = 1.0
+            df_all_t["vol_int"] = pd.to_numeric(df_all_t["vol_int"], errors="coerce").fillna(1.0)
+            df_all_t["indice_ciclo"]=(df_all_t.t_ciclo*df_all_t.div_carga*df_all_t.div_volume*df_all_t.vol_int)/df_all_t.disponib
+            df_all_t["min_ciclo"]=df_all_t.indice_ciclo*df_all_t.qtd
+            df_all_t["min_labor"]=df_all_t.t_labor*df_all_t.div_carga*df_all_t.qtd
+            agg_cp_t=df_all_t.groupby(["centro","peca","mes"])[["min_ciclo","min_labor"]].sum()
 
-        wb_r=_opx.load_workbook(BytesIO(file_bytes),read_only=True,data_only=True)
-        ws_nov_t=wb_r[next(a for a in ["NovFY26","DezFY26"] if a in wb_r.sheetnames)]
-        base_rows_t=list(ws_nov_t.iter_rows(min_row=7,max_row=63,min_col=1,max_col=87,values_only=True))
-        base_rows_t=[r for r in base_rows_t if r[0] and r[1]]
-        modelos_xl_t=[str(ws_nov_t.cell(6,c).value) for c in range(19,88)
-                      if ws_nov_t.cell(6,c).value and str(ws_nov_t.cell(6,c).value).startswith("MODELO")]
+            wb_r=_opx.load_workbook(BytesIO(file_bytes),read_only=True,data_only=True)
+            ws_nov_t=wb_r[next(a for a in ["NovFY26","DezFY26"] if a in wb_r.sheetnames)]
+            base_rows_t=list(ws_nov_t.iter_rows(min_row=7,max_row=63,min_col=1,max_col=87,values_only=True))
+            base_rows_t=[r for r in base_rows_t if r[0] and r[1]]
+            modelos_xl_t=[str(ws_nov_t.cell(6,c).value) for c in range(19,88)
+                          if ws_nov_t.cell(6,c).value and str(ws_nov_t.cell(6,c).value).startswith("MODELO")]
 
-        dados_mes_t={}
-        for mes_t,aba_t in MAPA_T.items():
-            if aba_t not in wb_r.sheetnames: continue
-            ws_m_t=wb_r[aba_t]
-            dados_mes_t[mes_t]={
-                "main":list(ws_m_t.iter_rows(min_row=7,max_row=63,min_col=1,max_col=18,values_only=True)),
-                "vols":list(ws_m_t.iter_rows(min_row=7,max_row=63,min_col=88,max_col=155,values_only=True))}
-        wb_r.close()
+            dados_mes_t={}
+            for mes_t,aba_t in MAPA_T.items():
+                if aba_t not in wb_r.sheetnames: continue
+                ws_m_t=wb_r[aba_t]
+                dados_mes_t[mes_t]={
+                    "main":list(ws_m_t.iter_rows(min_row=7,max_row=63,min_col=1,max_col=18,values_only=True)),
+                    "vols":list(ws_m_t.iter_rows(min_row=7,max_row=63,min_col=88,max_col=155,values_only=True))}
+            wb_r.close()
 
-        aplic_orig=pd.read_excel(BytesIO(file_bytes),sheet_name="IMPUTAPLICAÇÃO",header=0)
-        aplic_orig=aplic_orig.rename(columns={aplic_orig.columns[0]:"centro",aplic_orig.columns[1]:"peca"})
+            aplic_orig=pd.read_excel(BytesIO(file_bytes),sheet_name="IMPUTAPLICAÇÃO",header=0)
+            aplic_orig=aplic_orig.rename(columns={aplic_orig.columns[0]:"centro",aplic_orig.columns[1]:"peca"})
 
-        wb_out=_opx.Workbook(); primeira_t=True
-        for mes_t in MESES:
-            d_t=dias.get(mes_t,0)
-            if d_t==0: continue
-            minA_t=d_t*hA_t*60; minB_t=d_t*hB_t*60; minC_t=d_t*hC_t*60
-            dm_t=dados_mes_t.get(mes_t,{}); pmp_mes_t=pmp[pmp.mes==mes_t]
+            wb_out=_opx.Workbook(); primeira_t=True
+            for mes_t in MESES:
+                d_t=dias.get(mes_t,0)
+                if d_t==0: continue
+                minA_t=d_t*hA_t*60; minB_t=d_t*hB_t*60; minC_t=d_t*hC_t*60
+                dm_t=dados_mes_t.get(mes_t,{}); pmp_mes_t=pmp[pmp.mes==mes_t]
 
-            if primeira_t: ws_out=wb_out.active; ws_out.title=mes_t[:10]; primeira_t=False
-            else: ws_out=wb_out.create_sheet(mes_t[:10])
-            ws_out.freeze_panes="F7"
+                if primeira_t: ws_out=wb_out.active; ws_out.title=mes_t[:10]; primeira_t=False
+                else: ws_out=wb_out.create_sheet(mes_t[:10])
+                ws_out.freeze_panes="F7"
 
-            # Cabeçalho
-            ws_out.merge_cells(f"A5:{get_column_letter(18+len(modelos_xl_t))}5")
-            _ec(ws_out,5,1,f"RESUMO DA CARGA — {mes_t.upper()} ({d_t} dias)",_F_VERDE_JD,True,"FFFFFF",10,True)
-            ws_out.row_dimensions[5].height=18
+                # Cabeçalho
+                ws_out.merge_cells(f"A5:{get_column_letter(18+len(modelos_xl_t))}5")
+                _ec(ws_out,5,1,f"RESUMO DA CARGA — {mes_t.upper()} ({d_t} dias)",_F_VERDE_JD,True,"FFFFFF",10,True)
+                ws_out.row_dimensions[5].height=18
 
-            hdrs_f=[("Máquina",_F_CINZA2,"000000"),("PEÇA",_F_CINZA2,"000000"),("DESCRIÇÃO",_F_CINZA2,"000000"),
-                    ("PÇ/TRAT",_F_CINZA2,"000000"),("UM",_F_CINZA2,"000000"),
-                    ("Tempo Ciclo (min)",_F_PRETO,"FFFFFF"),("Tempo Labor (min)",_F_PRETO,"FFFFFF"),
-                    ("Div. Carga",_PF("solid",fgColor="FF0000"),"FFFF00"),("Vol. Interna",_F_CINZA2,"000000"),
-                    ("Div. Volume",_PF("solid",fgColor="FF0000"),"FFFF00"),("Disponib.",_F_CINZA2,"000000"),
-                    ("Indice Ciclo",_F_CINZA2,"000000"),
-                    ("JA.A",_F_VERDE,"000000"),("JA.B",_F_AMAR,"000000"),("JA.C",_F_AZUL,"000000"),
-                    ("TOTAL CICLOS (MIN)",_F_CINZA,"000000"),("TOTAL LABOR (MIN)",_F_CINZA,"000000"),
-                    ("TOTAL PECAS",_F_CINZA,"000000")]
-            largs_t=[9,8,16,6,5,9,9,8,8,8,8,9,8,8,8,12,12,8]
-            for ci_t,(h_t,f_t,cor_t) in enumerate(hdrs_f,1):
-                _ec(ws_out,6,ci_t,h_t,f_t,True,cor_t,8,True,True)
-                ws_out.column_dimensions[get_column_letter(ci_t)].width=largs_t[ci_t-1]
-            for mi_t,mod_t in enumerate(modelos_xl_t):
-                ci_t=19+mi_t
-                _ec(ws_out,6,ci_t,mod_t,_F_CINZA,True,"000000",7,True,True)
-                ws_out.column_dimensions[get_column_letter(ci_t)].width=7
-            ws_out.row_dimensions[6].height=42
+                hdrs_f=[("Máquina",_F_CINZA2,"000000"),("PEÇA",_F_CINZA2,"000000"),("DESCRIÇÃO",_F_CINZA2,"000000"),
+                        ("PÇ/TRAT",_F_CINZA2,"000000"),("UM",_F_CINZA2,"000000"),
+                        ("Tempo Ciclo (min)",_F_PRETO,"FFFFFF"),("Tempo Labor (min)",_F_PRETO,"FFFFFF"),
+                        ("Div. Carga",_PF("solid",fgColor="FF0000"),"FFFF00"),("Vol. Interna",_F_CINZA2,"000000"),
+                        ("Div. Volume",_PF("solid",fgColor="FF0000"),"FFFF00"),("Disponib.",_F_CINZA2,"000000"),
+                        ("Indice Ciclo",_F_CINZA2,"000000"),
+                        ("JA.A",_F_VERDE,"000000"),("JA.B",_F_AMAR,"000000"),("JA.C",_F_AZUL,"000000"),
+                        ("TOTAL CICLOS (MIN)",_F_CINZA,"000000"),("TOTAL LABOR (MIN)",_F_CINZA,"000000"),
+                        ("TOTAL PECAS",_F_CINZA,"000000")]
+                largs_t=[9,8,16,6,5,9,9,8,8,8,8,9,8,8,8,12,12,8]
+                for ci_t,(h_t,f_t,cor_t) in enumerate(hdrs_f,1):
+                    _ec(ws_out,6,ci_t,h_t,f_t,True,cor_t,8,True,True)
+                    ws_out.column_dimensions[get_column_letter(ci_t)].width=largs_t[ci_t-1]
+                for mi_t,mod_t in enumerate(modelos_xl_t):
+                    ci_t=19+mi_t
+                    _ec(ws_out,6,ci_t,mod_t,_F_CINZA,True,"000000",7,True,True)
+                    ws_out.column_dimensions[get_column_letter(ci_t)].width=7
+                ws_out.row_dimensions[6].height=42
 
-            main_data_t=dm_t.get("main",[]); vols_data_t=dm_t.get("vols",[])
-            for ri_t_idx,base_row_t in enumerate(base_rows_t):
-                cen_t=str(base_row_t[0]).strip(); peca_t=str(base_row_t[1]).strip()
-                ri_t=7+ri_t_idx
-                tc_xl_t=base_row_t[5]; tl_xl_t=base_row_t[6]
-                dc_xl_t=base_row_t[7]; vi_xl_t=base_row_t[8]; dv_xl_t=base_row_t[9]
-                di_xl_t=base_row_t[10]; idx_xl_t=base_row_t[11]
+                main_data_t=dm_t.get("main",[]); vols_data_t=dm_t.get("vols",[])
+                for ri_t_idx,base_row_t in enumerate(base_rows_t):
+                    cen_t=str(base_row_t[0]).strip(); peca_t=str(base_row_t[1]).strip()
+                    ri_t=7+ri_t_idx
+                    tc_xl_t=base_row_t[5]; tl_xl_t=base_row_t[6]
+                    dc_xl_t=base_row_t[7]; vi_xl_t=base_row_t[8]; dv_xl_t=base_row_t[9]
+                    di_xl_t=base_row_t[10]; idx_xl_t=base_row_t[11]
 
-                mrow_t=main_data_t[ri_t_idx] if ri_t_idx<len(main_data_t) else [None]*18
-                xl_pA_t=mrow_t[12] if len(mrow_t)>12 else None
-                xl_pB_t=mrow_t[13] if len(mrow_t)>13 else None
-                xl_ciclo_t=mrow_t[15] if len(mrow_t)>15 else None
-                xl_pecas_t=mrow_t[17] if len(mrow_t)>17 else None
-                vrow_t=vols_data_t[ri_t_idx] if ri_t_idx<len(vols_data_t) else []
+                    mrow_t=main_data_t[ri_t_idx] if ri_t_idx<len(main_data_t) else [None]*18
+                    xl_pA_t=mrow_t[12] if len(mrow_t)>12 else None
+                    xl_pB_t=mrow_t[13] if len(mrow_t)>13 else None
+                    xl_ciclo_t=mrow_t[15] if len(mrow_t)>15 else None
+                    xl_pecas_t=mrow_t[17] if len(mrow_t)>17 else None
+                    vrow_t=vols_data_t[ri_t_idx] if ri_t_idx<len(vols_data_t) else []
 
-                try: mc_t=float(agg_cp_t.loc[(cen_t,peca_t,mes_t),"min_ciclo"])
-                except: mc_t=0.0
-                try: ml_t=float(agg_cp_t.loc[(cen_t,peca_t,mes_t),"min_labor"])
-                except: ml_t=0.0
+                    try: mc_t=float(agg_cp_t.loc[(cen_t,peca_t,mes_t),"min_ciclo"])
+                    except: mc_t=0.0
+                    try: ml_t=float(agg_cp_t.loc[(cen_t,peca_t,mes_t),"min_labor"])
+                    except: ml_t=0.0
 
-                pA_t=mc_t/minA_t if minA_t>0 else 0
-                pB_t=mc_t/minB_t if minB_t>0 else 0
-                pC_t=mc_t/minC_t if minC_t>0 else 0
+                    pA_t=mc_t/minA_t if minA_t>0 else 0
+                    pB_t=mc_t/minB_t if minB_t>0 else 0
+                    pC_t=mc_t/minC_t if minC_t>0 else 0
 
-                app_mod_v={}
-                for mod_t2 in modelos_xl_t:
-                    qtd_t=int(pmp_mes_t[pmp_mes_t.modelo==mod_t2]["qtd"].sum()) if mod_t2 in pmp_mes_t.modelo.values else 0
-                    fr_t=aplic_orig[(aplic_orig.centro==cen_t)&(aplic_orig.peca==peca_t)]
-                    flag_t=int(fr_t[mod_t2].values[0]) if len(fr_t)>0 and mod_t2 in fr_t.columns and not pd.isna(fr_t[mod_t2].values[0] if len(fr_t)>0 else 0) else 0
-                    app_mod_v[mod_t2]=qtd_t*flag_t
-                app_tot_t=sum(app_mod_v.values())
+                    app_mod_v={}
+                    for mod_t2 in modelos_xl_t:
+                        qtd_t=int(pmp_mes_t[pmp_mes_t.modelo==mod_t2]["qtd"].sum()) if mod_t2 in pmp_mes_t.modelo.values else 0
+                        fr_t=aplic_orig[(aplic_orig.centro==cen_t)&(aplic_orig.peca==peca_t)]
+                        flag_t=int(fr_t[mod_t2].values[0]) if len(fr_t)>0 and mod_t2 in fr_t.columns and not pd.isna(fr_t[mod_t2].values[0] if len(fr_t)>0 else 0) else 0
+                        app_mod_v[mod_t2]=qtd_t*flag_t
+                    app_tot_t=sum(app_mod_v.values())
 
-                def _df(a,b,tol=0.02):
-                    try: return abs(float(a or 0)-float(b or 0))>tol
-                    except: return False
+                    def _df(a,b,tol=0.02):
+                        # só compara se o valor de referência (b) existir
+                        if b is None: return False
+                        try: return abs(float(a or 0)-float(b))>tol
+                        except: return False
 
-                div_A_t=_df(pA_t,xl_pA_t,0.02); div_B_t=_df(pB_t,xl_pB_t,0.02)
-                div_c_t=_df(mc_t,xl_ciclo_t,1); div_p_t=_df(app_tot_t,xl_pecas_t,0.5)
-                any_d_t=div_A_t or div_B_t or div_c_t or div_p_t
+                    div_A_t=_df(pA_t,xl_pA_t,0.02); div_B_t=_df(pB_t,xl_pB_t,0.02)
+                    div_c_t=_df(mc_t,xl_ciclo_t,1); div_p_t=_df(app_tot_t,xl_pecas_t,0.5)
+                    any_d_t=div_A_t or div_B_t or div_c_t or div_p_t
 
-                dc_i=dist[(dist.centro==cen_t)&(dist.peca==peca_t)]["div_carga"].values
-                vi_i=dist[(dist.centro==cen_t)&(dist.peca==peca_t)]["vol_int"].values
-                dv_i=dist[(dist.centro==cen_t)&(dist.peca==peca_t)]["div_volume"].values
-                di_i=dist[(dist.centro==cen_t)&(dist.peca==peca_t)]["disponib"].values
-                vi_val=float(vi_i[0]) if len(vi_i) else 1.0
-                idx_app_t=(float(tc_xl_t or 0)*dc_i[0]*dv_i[0]*vi_val)/di_i[0] if len(dc_i) and len(di_i) and di_i[0] else float(idx_xl_t or 0)
-                div_idx_t=abs(float(idx_xl_t or 0)-float(idx_app_t or 0))>0.5
+                    dc_i=dist[(dist.centro==cen_t)&(dist.peca==peca_t)]["div_carga"].values
+                    vi_i=dist[(dist.centro==cen_t)&(dist.peca==peca_t)]["vol_int"].values
+                    dv_i=dist[(dist.centro==cen_t)&(dist.peca==peca_t)]["div_volume"].values
+                    di_i=dist[(dist.centro==cen_t)&(dist.peca==peca_t)]["disponib"].values
+                    vi_val=float(vi_i[0]) if len(vi_i) else 1.0
+                    idx_app_t=(float(tc_xl_t or 0)*dc_i[0]*dv_i[0]*vi_val)/di_i[0] if len(dc_i) and len(di_i) and di_i[0] else float(idx_xl_t or 0)
+                    div_idx_t=abs(float(idx_xl_t or 0)-float(idx_app_t or 0))>0.5
 
-                _ec(ws_out,ri_t,1,cen_t,_F_BRANCO,False,"000000",8,False)
-                _ec(ws_out,ri_t,2,peca_t,_F_BRANCO,False,"000000",8,False)
-                _ec(ws_out,ri_t,3,base_row_t[2],_F_BRANCO,False,"000000",8,False)
-                _ec(ws_out,ri_t,4,base_row_t[3],_F_BRANCO,False,"000000",8)
-                _ec(ws_out,ri_t,5,base_row_t[4],_F_BRANCO,False,"000000",8)
-                _ec(ws_out,ri_t,6,tc_xl_t,_F_PRETO,False,"FFFFFF",8)
-                _ec(ws_out,ri_t,7,tl_xl_t,_F_PRETO,False,"FFFFFF",8)
-                _ec(ws_out,ri_t,8,dc_xl_t,_PF("solid",fgColor="FF0000"),False,"FFFF00",8)
-                _ec(ws_out,ri_t,9,vi_xl_t,_F_BRANCO,False,"000000",8)
-                _ec(ws_out,ri_t,10,dv_xl_t,_PF("solid",fgColor="FF0000"),False,"FFFF00",8)
-                _ec(ws_out,ri_t,11,di_xl_t,_F_CINZA2,False,"000000",8)
-                _ec(ws_out,ri_t,12,round(float(idx_app_t),4),_F_VERM_S if div_idx_t else _F_BRANCO,False,"000000",8)
-                _ec(ws_out,ri_t,13,f"{pA_t:.1%}",_F_VERM if div_A_t else _cor_pct(pA_t),False,"000000",8)
-                _ec(ws_out,ri_t,14,f"{pB_t:.1%}",_F_VERM if div_B_t else _cor_pct(pB_t),False,"000000",8)
-                _ec(ws_out,ri_t,15,f"{pC_t:.1%}",_cor_pct(pC_t),False,"000000",8)
-                _ec(ws_out,ri_t,16,round(mc_t,1),_F_VERM_S if div_c_t else _F_BRANCO,False,"000000",8)
-                _ec(ws_out,ri_t,17,round(ml_t,1),_F_BRANCO,False,"000000",8)
-                _ec(ws_out,ri_t,18,app_tot_t,_F_VERM_S if div_p_t else _F_BRANCO,False,"000000",8)
-                for mi_t2,mod_t2 in enumerate(modelos_xl_t):
-                    ci_t2=19+mi_t2
-                    v_app_t=app_mod_v.get(mod_t2,0)
-                    v_xl_t=vrow_t[mi_t2] if mi_t2<len(vrow_t) else 0
-                    div_vm=abs(float(v_app_t)-float(v_xl_t or 0))>0.5
-                    _ec(ws_out,ri_t,ci_t2,v_app_t if v_app_t else None,
-                        _F_VERM_S if div_vm else (_F_CINZA if v_app_t else _F_BRANCO),False,"000000",7)
-                ws_out.row_dimensions[ri_t].height=13
+                    _ec(ws_out,ri_t,1,cen_t,_F_BRANCO,False,"000000",8,False)
+                    _ec(ws_out,ri_t,2,peca_t,_F_BRANCO,False,"000000",8,False)
+                    _ec(ws_out,ri_t,3,base_row_t[2],_F_BRANCO,False,"000000",8,False)
+                    _ec(ws_out,ri_t,4,base_row_t[3],_F_BRANCO,False,"000000",8)
+                    _ec(ws_out,ri_t,5,base_row_t[4],_F_BRANCO,False,"000000",8)
+                    _ec(ws_out,ri_t,6,tc_xl_t,_F_PRETO,False,"FFFFFF",8)
+                    _ec(ws_out,ri_t,7,tl_xl_t,_F_PRETO,False,"FFFFFF",8)
+                    _ec(ws_out,ri_t,8,dc_xl_t,_PF("solid",fgColor="FF0000"),False,"FFFF00",8)
+                    _ec(ws_out,ri_t,9,vi_xl_t,_F_BRANCO,False,"000000",8)
+                    _ec(ws_out,ri_t,10,dv_xl_t,_PF("solid",fgColor="FF0000"),False,"FFFF00",8)
+                    _ec(ws_out,ri_t,11,di_xl_t,_F_CINZA2,False,"000000",8)
+                    _ec(ws_out,ri_t,12,round(float(idx_app_t),4),_F_VERM_S if div_idx_t else _F_BRANCO,False,"000000",8)
+                    _ec(ws_out,ri_t,13,f"{pA_t:.1%}",_F_VERM if div_A_t else _cor_pct(pA_t),False,"000000",8)
+                    _ec(ws_out,ri_t,14,f"{pB_t:.1%}",_F_VERM if div_B_t else _cor_pct(pB_t),False,"000000",8)
+                    _ec(ws_out,ri_t,15,f"{pC_t:.1%}",_cor_pct(pC_t),False,"000000",8)
+                    _ec(ws_out,ri_t,16,round(mc_t,1),_F_VERM_S if div_c_t else _F_BRANCO,False,"000000",8)
+                    _ec(ws_out,ri_t,17,round(ml_t,1),_F_BRANCO,False,"000000",8)
+                    _ec(ws_out,ri_t,18,app_tot_t,_F_VERM_S if div_p_t else _F_BRANCO,False,"000000",8)
+                    for mi_t2,mod_t2 in enumerate(modelos_xl_t):
+                        ci_t2=19+mi_t2
+                        v_app_t=app_mod_v.get(mod_t2,0)
+                        v_xl_t=vrow_t[mi_t2] if mi_t2<len(vrow_t) else None
+                        # só pinta vermelho se o valor do Excel existe E é diferente
+                        div_vm = (v_xl_t is not None) and (abs(float(v_app_t) - float(v_xl_t)) > 0.5)
+                        _ec(ws_out,ri_t,ci_t2,v_app_t if v_app_t else None,
+                            _F_VERM_S if div_vm else (_F_CINZA if v_app_t else _F_BRANCO),False,"000000",7)
+                    ws_out.row_dimensions[ri_t].height=13
 
-            nota_rt=7+len(base_rows_t)+1
-            ws_out.merge_cells(f"A{nota_rt}:{get_column_letter(18+len(modelos_xl_t))}{nota_rt}")
-            nt=ws_out.cell(nota_rt,1,"🔴 JA.A/B/C vermelho = % ocupação difere do Excel  |  🔴 Rosa claro = totais de ciclo ou peças divergem  |  🔴 Índice rosa = índice de ciclo diverge")
-            nt.font=_Ft(name="Arial",bold=True,size=8,color="CC0000")
-            nt.fill=_PF("solid",fgColor="FFEEEE")
-            nt.alignment=_Al(horizontal="left",vertical="center")
-            ws_out.row_dimensions[nota_rt].height=14
+                nota_rt=7+len(base_rows_t)+1
+                ws_out.merge_cells(f"A{nota_rt}:{get_column_letter(18+len(modelos_xl_t))}{nota_rt}")
+                nt=ws_out.cell(nota_rt,1,"🔴 JA.A/B/C vermelho = % ocupação difere do Excel  |  🔴 Rosa claro = totais de ciclo ou peças divergem  |  🔴 Índice rosa = índice de ciclo diverge")
+                nt.font=_Ft(name="Arial",bold=True,size=8,color="CC0000")
+                nt.fill=_PF("solid",fgColor="FFEEEE")
+                nt.alignment=_Al(horizontal="left",vertical="center")
+                ws_out.row_dimensions[nota_rt].height=14
 
-        tabelona_buf=BytesIO(); wb_out.save(tabelona_buf); tabelona_buf.seek(0)
+            tabelona_buf=BytesIO(); wb_out.save(tabelona_buf); tabelona_buf.seek(0)
 
         st.download_button(
             "📋 Baixar tabelona completa (layout IMPUTDISTRIBUIÇÃO + divergências)",
