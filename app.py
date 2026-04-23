@@ -2907,8 +2907,7 @@ com as colunas de % ocupação calculadas pelo App. Células em **vermelho** = d
                 if aba_t not in wb_r.sheetnames: continue
                 ws_m_t=wb_r[aba_t]
                 dados_mes_t[mes_t]={
-                    "main":list(ws_m_t.iter_rows(min_row=7,max_row=63,min_col=1,max_col=18,values_only=True)),
-                    "vols":list(ws_m_t.iter_rows(min_row=7,max_row=63,min_col=88,max_col=155,values_only=True))}
+                    "main":list(ws_m_t.iter_rows(min_row=7,max_row=63,min_col=1,max_col=18,values_only=True))}
             wb_r.close()
 
             aplic_orig=pd.read_excel(BytesIO(file_bytes),sheet_name="IMPUTAPLICAÇÃO",header=0)
@@ -2962,7 +2961,7 @@ com as colunas de % ocupação calculadas pelo App. Células em **vermelho** = d
                     xl_pB_t=mrow_t[13] if len(mrow_t)>13 else None
                     xl_ciclo_t=mrow_t[15] if len(mrow_t)>15 else None
                     xl_pecas_t=mrow_t[17] if len(mrow_t)>17 else None
-                    vrow_t=vols_data_t[ri_t_idx] if ri_t_idx<len(vols_data_t) else []
+                    vrow_t=[]  # volumes por modelo do Excel não estão disponíveis em data_only
 
                     try: mc_t=float(agg_cp_t.loc[(cen_t,peca_t,mes_t),"min_ciclo"])
                     except: mc_t=0.0
@@ -3020,16 +3019,15 @@ com as colunas de % ocupação calculadas pelo App. Células em **vermelho** = d
                     for mi_t2,mod_t2 in enumerate(modelos_xl_t):
                         ci_t2=19+mi_t2
                         v_app_t=app_mod_v.get(mod_t2,0)
-                        v_xl_t=vrow_t[mi_t2] if mi_t2<len(vrow_t) else None
-                        # só pinta vermelho se o valor do Excel existe E é diferente
-                        div_vm = (v_xl_t is not None) and (abs(float(v_app_t) - float(v_xl_t)) > 0.5)
+                        # Sem comparação com Excel (valores não disponíveis em data_only)
+                        # Apenas mostra valor do app: cinza se tem valor, branco se zero
                         _ec(ws_out,ri_t,ci_t2,v_app_t if v_app_t else None,
-                            _F_VERM_S if div_vm else (_F_CINZA if v_app_t else _F_BRANCO),False,"000000",7)
+                            _F_CINZA if v_app_t else _F_BRANCO,False,"000000",7)
                     ws_out.row_dimensions[ri_t].height=13
 
                 nota_rt=7+len(base_rows_t)+1
                 ws_out.merge_cells(f"A{nota_rt}:{get_column_letter(18+len(modelos_xl_t))}{nota_rt}")
-                nt=ws_out.cell(nota_rt,1,"🔴 JA.A/B/C vermelho = % ocupação difere do Excel  |  🔴 Rosa claro = totais de ciclo ou peças divergem  |  🔴 Índice rosa = índice de ciclo diverge")
+                nt=ws_out.cell(nota_rt,1,"🔴 JA.A/JA.B vermelho = % ocupação difere do Excel de referência  |  🔴 Rosa = total de ciclos ou total de peças difere  |  Cinza = valor presente no App")
                 nt.font=_Ft(name="Arial",bold=True,size=8,color="CC0000")
                 nt.fill=_PF("solid",fgColor="FFEEEE")
                 nt.alignment=_Al(horizontal="left",vertical="center")
