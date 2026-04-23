@@ -238,6 +238,8 @@ def calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg
     df = (aplic.merge(pmp, on="modelo")
                .merge(tempo, on=["centro","peca"])
                .merge(dist,  on=["centro","peca"]))
+    if "vol_int" not in df.columns: df["vol_int"] = 1.0
+    df["vol_int"] = pd.to_numeric(df["vol_int"], errors="coerce").fillna(1.0)
     df["indice_ciclo"] = (df.t_ciclo * df.div_carga * df.div_volume * df.vol_int) / df.disponib
     df["min_ciclo"]    = df.indice_ciclo * df.qtd
     df["min_labor"]    = df.t_labor * df.div_carga * df.qtd
@@ -837,6 +839,8 @@ def gerar_diagnostico_mensal(file_bytes, res_app, tempo, dist, aplic, pmp, dias,
     df_all = (aplic.merge(pmp, on="modelo")
                    .merge(tempo, on=["centro","peca"])
                    .merge(dist,  on=["centro","peca"]))
+    if "vol_int" not in df_all.columns: df_all["vol_int"] = 1.0
+    df_all["vol_int"] = pd.to_numeric(df_all["vol_int"], errors="coerce").fillna(1.0)
     df_all["indice_ciclo"] = (df_all.t_ciclo * df_all.div_carga * df_all.div_volume * df_all.vol_int) / df_all.disponib
     df_all["min_ciclo"]    = df_all.indice_ciclo * df_all.qtd
     agg_all = df_all.groupby(["centro","mes"])["min_ciclo"].sum().reset_index()
@@ -1097,6 +1101,8 @@ def gerar_output_layout(file_bytes, res_app, tempo, dist, aplic, pmp, dias, hora
     df_all = (aplic.merge(pmp, on="modelo")
                    .merge(tempo, on=["centro","peca"])
                    .merge(dist,  on=["centro","peca"]))
+    if "vol_int" not in df_all.columns: df_all["vol_int"] = 1.0
+    df_all["vol_int"] = pd.to_numeric(df_all["vol_int"], errors="coerce").fillna(1.0)
     df_all["indice_ciclo"] = (df_all.t_ciclo * df_all.div_carga * df_all.div_volume * df_all.vol_int) / df_all.disponib
     df_all["min_ciclo"]    = df_all.indice_ciclo * df_all.qtd
     df_all["min_labor"]    = df_all.t_labor * df_all.div_carga * df_all.qtd
@@ -1393,6 +1399,8 @@ def comparar_com_excel(res_app, file_bytes, tempo, dist, aplic, pmp, dias, horas
         df_all = (aplic.merge(pmp, on="modelo")
                        .merge(tempo, on=["centro","peca"])
                        .merge(dist,  on=["centro","peca"]))
+        if "vol_int" not in df_all.columns: df_all["vol_int"] = 1.0
+        df_all["vol_int"] = pd.to_numeric(df_all["vol_int"], errors="coerce").fillna(1.0)
         df_all["indice_ciclo"] = (df_all.t_ciclo * df_all.div_carga * df_all.div_volume * df_all.vol_int) / df_all.disponib
         df_all["min_ciclo"]    = df_all.indice_ciclo * df_all.qtd
         # Agrupar por centro+mes de uma vez
@@ -1732,6 +1740,8 @@ def calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg
     df = (aplic.merge(pmp, on="modelo")
                .merge(tempo, on=["centro","peca"])
                .merge(dist,  on=["centro","peca"]))
+    if "vol_int" not in df.columns: df["vol_int"] = 1.0
+    df["vol_int"] = pd.to_numeric(df["vol_int"], errors="coerce").fillna(1.0)
     df["indice_ciclo"] = (df.t_ciclo * df.div_carga * df.div_volume * df.vol_int) / df.disponib
     df["min_ciclo"]    = df.indice_ciclo * df.qtd
     df["min_labor"]    = df.t_labor * df.div_carga * df.qtd
@@ -2796,6 +2806,8 @@ com as colunas de % ocupação calculadas pelo App. Células em **vermelho** = d
         thr_A_t=thresholds["A"]/100; thr_B_t=thresholds["B"]/100; thr_C_t=thresholds["C"]/100
 
         df_all_t=(aplic.merge(pmp,on="modelo").merge(tempo,on=["centro","peca"]).merge(dist,on=["centro","peca"]))
+        if "vol_int" not in df_all_t.columns: df_all_t["vol_int"] = 1.0
+        df_all_t["vol_int"] = pd.to_numeric(df_all_t["vol_int"], errors="coerce").fillna(1.0)
         df_all_t["indice_ciclo"]=(df_all_t.t_ciclo*df_all_t.div_carga*df_all_t.div_volume*df_all_t.vol_int)/df_all_t.disponib
         df_all_t["min_ciclo"]=df_all_t.indice_ciclo*df_all_t.qtd
         df_all_t["min_labor"]=df_all_t.t_labor*df_all_t.div_carga*df_all_t.qtd
