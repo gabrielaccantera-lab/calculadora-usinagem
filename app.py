@@ -2164,14 +2164,14 @@ def show_memoria(r, mes, df_intermediario, agg, horas_turno, thresholds):
     st.markdown('<div class="mem-step"><span class="step-num">4</span> <b>Agrupamento por centro</b></div>', unsafe_allow_html=True)
     st.markdown('<div class="formula-box">SOMA de min_ciclo e min_labor de todas as combinações do mesmo centro<br>ocup_A = Σmin_ciclo ÷ min_disp_A &nbsp;|&nbsp; ocup_B = Σmin_ciclo ÷ min_disp_B &nbsp;|&nbsp; ocup_C = Σmin_ciclo ÷ min_disp_C</div>', unsafe_allow_html=True)
     df_p4 = r["centros"][["centro","min_ciclo_total","min_labor_total","min_disp_A","ocup_A","ocup_B","ocup_C"]].copy()
-    df_p4["ocup_A"] = df_p4.ocup_A.map(lambda x: f"{x:.1%}")
-    df_p4["ocup_B"] = df_p4.ocup_B.map(lambda x: f"{x:.1%}")
-    df_p4["ocup_C"] = df_p4.ocup_C.map(lambda x: f"{x:.1%}")
     df_p4 = df_p4.rename(columns={"centro":"Centro","min_ciclo_total":"Σ Min.Ciclo",
         "min_labor_total":"Σ Min.Labor","min_disp_A":"Min.Disp.A",
         "ocup_A":"Ocup. A ✓","ocup_B":"Ocup. B ✓","ocup_C":"Ocup. C ✓"})
     st.caption("Output do passo 4 — ocupação calculada por centro:")
-    st.dataframe(df_p4.reset_index(drop=True), use_container_width=True, hide_index=True)
+    st.dataframe(df_p4.reset_index(drop=True).style.format({
+        "Ocup. A ✓":"{:.1%}","Ocup. B ✓":"{:.1%}","Ocup. C ✓":"{:.1%}",
+        "Σ Min.Ciclo":"{:.1f}","Σ Min.Labor":"{:.1f}","Min.Disp.A":"{:.0f}"
+    }), use_container_width=True, hide_index=True)
 
     # ── PASSO 5: Ativação de turno ───────────────────────────────────────────
     st.markdown('<div class="mem-step"><span class="step-num">5</span> <b>Regras de ativação de turno</b></div>', unsafe_allow_html=True)
@@ -2180,13 +2180,12 @@ def show_memoria(r, mes, df_intermediario, agg, horas_turno, thresholds):
         f"- **Turno B** abre se ocup_A > **{thresholds['B']}%** (A não aguenta sozinho)\n"
         f"- **Turno C** abre se ocup_B > **{thresholds['C']}%** (A+B não suficientes)")
     df_p5 = r["centros"][["centro","ocup_A","ocup_B","ocup_C","ativo_A","ativo_B","ativo_C"]].copy()
-    df_p5["ocup_A"] = df_p5.ocup_A.map(lambda x: f"{x:.1%}")
-    df_p5["ocup_B"] = df_p5.ocup_B.map(lambda x: f"{x:.1%}")
-    df_p5["ocup_C"] = df_p5.ocup_C.map(lambda x: f"{x:.1%}")
     df_p5 = df_p5.rename(columns={"centro":"Centro","ocup_A":"Ocup. A","ocup_B":"Ocup. B","ocup_C":"Ocup. C",
         "ativo_A":"Ativo A ✓","ativo_B":"Ativo B ✓","ativo_C":"Ativo C ✓"})
     st.caption(f"Output do passo 5 — ativação por centro ({r['op_A']} centros no A, {r['op_B']} no B, {r['op_C']} no C):")
-    st.dataframe(df_p5.reset_index(drop=True), use_container_width=True, hide_index=True)
+    st.dataframe(df_p5.reset_index(drop=True).style.format({
+        "Ocup. A":"{:.1%}","Ocup. B":"{:.1%}","Ocup. C":"{:.1%}"
+    }), use_container_width=True, hide_index=True)
 
     # ── PASSO 6: Suporte ─────────────────────────────────────────────────────
     st.markdown('<div class="mem-step"><span class="step-num">6</span> <b>Funções de suporte</b></div>', unsafe_allow_html=True)
@@ -2310,6 +2309,13 @@ if not uploaded:
 
 file_bytes = uploaded.read()
 
+# Limpa buffers de exportação gerados com arquivo anterior
+_file_id = hash(file_bytes)
+if st.session_state.get("_file_id") != _file_id:
+    for _k in ["diag_mensal_buf","diag_inp_buf","layout_buf","tabelona_buf"]:
+        st.session_state.pop(_k, None)
+    st.session_state["_file_id"] = _file_id
+
 if "log_leitura" not in st.session_state:
     st.session_state.log_leitura = []
 st.session_state.log_leitura = []
@@ -2404,11 +2410,14 @@ def calcular_cached(pmp_hash, _pmp, _tempo, _dist, _aplic, dias_hash, dias, hA, 
                     {"A":hA,"B":hB,"C":hC}, {"A":tA,"B":tB,"C":tC}, _sup,
                     retornar_intermediarios=True)
 
+
 pmp_hash = hash(pmp.to_json())
 dias_hash = hash(str(dias))
-res_base, df_interm, agg_interm = calcular(
-    pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg,
-    retornar_intermediarios=True)
+sup_hash  = hash(str(suporte_cfg))
+res_base, df_interm, agg_interm = calcular_cached(
+    pmp_hash, pmp, tempo, dist, aplic, dias_hash, dias,
+    horas_turno["A"], horas_turno["B"], horas_turno["C"],
+    thresholds["A"], thresholds["B"], thresholds["C"], suporte_cfg)
 
 # ══════════════════════════════════════════
 # TAB 1 — VISÃO GERAL
@@ -2796,11 +2805,14 @@ with tab_diag:
 
             st.markdown('<div class="jd-sub">Rastreabilidade — onde olhar primeiro</div>', unsafe_allow_html=True)
             df_rastr = r["centros"][["centro","ocup_A","ocup_B","ocup_C","ativo_A","ativo_B","ativo_C","min_ciclo_total"]].copy()
-            df_rastr["ocup_A"]=df_rastr.ocup_A.map(lambda x:f"{x:.1%}")
-            df_rastr["ocup_B"]=df_rastr.ocup_B.map(lambda x:f"{x:.1%}")
-            df_rastr["ocup_C"]=df_rastr.ocup_C.map(lambda x:f"{x:.1%}")
-            df_rastr["min_ciclo_total"]=df_rastr.min_ciclo_total.round(0)
-            st.dataframe(df_rastr, use_container_width=True, hide_index=True)
+            df_rastr["min_ciclo_total"] = df_rastr.min_ciclo_total.round(0)
+            st.dataframe(
+                df_rastr.style.format({
+                    "ocup_A": "{:.1%}", "ocup_B": "{:.1%}", "ocup_C": "{:.1%}",
+                    "min_ciclo_total": "{:.0f}"
+                }),
+                use_container_width=True, hide_index=True
+            )
             st.caption("Verifique centros onde a ocupação está próxima dos thresholds — são os mais sensíveis a pequenas variações.")
     else:
         st.info("Selecione o mês e informe o total esperado do Excel para iniciar o diagnóstico.")
@@ -2825,28 +2837,33 @@ Células em **vermelho** = divergência de ativação de turno. Inclui a ocupaç
 
         col_d1, col_d2 = st.columns(2)
         with col_d1:
-            with st.spinner("Gerando diagnóstico por mês... (~6s)"):
-                diag_mensal = gerar_diagnostico_mensal(
-                    file_bytes, res_base, tempo, dist, aplic, pmp, dias,
-                    horas_turno, thresholds)
-            st.download_button(
-                "🔴 Baixar diagnóstico por mês (recomendado)",
-                data=diag_mensal,
-                file_name="diagnostico_por_mes.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                type="primary",
-                key="dl_diag_mensal"
-            )
+            if st.button("🔴 Gerar diagnóstico por mês", type="primary", key="btn_diag_mensal"):
+                with st.spinner("Gerando diagnóstico por mês... (~6s)"):
+                    diag_mensal = gerar_diagnostico_mensal(
+                        file_bytes, res_base, tempo, dist, aplic, pmp, dias,
+                        horas_turno, thresholds)
+                    st.session_state["diag_mensal_buf"] = diag_mensal
+            if st.session_state.get("diag_mensal_buf"):
+                st.download_button(
+                    "📥 Baixar diagnóstico por mês (recomendado)",
+                    data=st.session_state["diag_mensal_buf"],
+                    file_name="diagnostico_por_mes.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="dl_diag_mensal"
+                )
         with col_d2:
-            with st.spinner("Gerando diagnóstico de inputs..."):
-                diag_inp = gerar_excel_diagnostico(file_bytes)
-            st.download_button(
-                "🔍 Baixar diagnóstico de inputs (IMPUTDISTRIBUIÇÃO vs Excel)",
-                data=diag_inp,
-                file_name="diagnostico_inputs.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="dl_diag_inp"
-            )
+            if st.button("🔍 Gerar diagnóstico de inputs", key="btn_diag_inp"):
+                with st.spinner("Gerando diagnóstico de inputs..."):
+                    diag_inp = gerar_excel_diagnostico(file_bytes)
+                    st.session_state["diag_inp_buf"] = diag_inp
+            if st.session_state.get("diag_inp_buf"):
+                st.download_button(
+                    "📥 Baixar diagnóstico de inputs (IMPUTDISTRIBUIÇÃO vs Excel)",
+                    data=st.session_state["diag_inp_buf"],
+                    file_name="diagnostico_inputs.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="dl_diag_inp"
+                )
 
         st.markdown("---")
         st.markdown('<div class="jd-sub">📊 Resultado no layout do Excel original</div>', unsafe_allow_html=True)
@@ -2854,18 +2871,20 @@ Células em **vermelho** = divergência de ativação de turno. Inclui a ocupaç
 Gera um Excel **idêntico ao layout do seu Excel de referência** — mesmas colunas, mesmas cores (Verde=Turno A, Amarelo=Turno B, Azul=Turno C).
 **Células em vermelho** = divergência entre o que o App calculou e o que está no seu Excel.
         """)
-        with st.spinner("Gerando resultado no layout do Excel... (~8s)"):
-            layout_data = gerar_output_layout(
-                file_bytes, res_base, tempo, dist, aplic, pmp, dias,
-                horas_turno, thresholds, suporte_cfg)
-        st.download_button(
-            "📊 Baixar resultado no layout do Excel (com divergências em vermelho)",
-            data=layout_data,
-            file_name="resultado_layout_excel.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            type="primary",
-            key="dl_layout"
-        )
+        if st.button("📊 Gerar resultado no layout do Excel", type="primary", key="btn_layout"):
+            with st.spinner("Gerando resultado no layout do Excel... (~8s)"):
+                layout_data = gerar_output_layout(
+                    file_bytes, res_base, tempo, dist, aplic, pmp, dias,
+                    horas_turno, thresholds, suporte_cfg)
+                st.session_state["layout_buf"] = layout_data
+        if st.session_state.get("layout_buf"):
+            st.download_button(
+                "📥 Baixar resultado no layout do Excel (com divergências em vermelho)",
+                data=st.session_state["layout_buf"],
+                file_name="resultado_layout_excel.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="dl_layout"
+            )
 
         st.markdown("---")
         st.markdown('<div class="jd-sub">📋 Tabelona completa — layout idêntico ao IMPUTDISTRIBUIÇÃO</div>', unsafe_allow_html=True)
@@ -2873,7 +2892,8 @@ Gera um Excel **idêntico ao layout do seu Excel de referência** — mesmas col
 Gera a **tabelona completa** no mesmo layout do seu Excel — colunas A até os modelos todos —
 com as colunas de % ocupação calculadas pelo App. Células em **vermelho** = divergência com o Excel de referência.
         """)
-        with st.spinner("Gerando tabelona... (~10s)"):
+        if st.button("📋 Gerar tabelona completa", key="btn_tabelona"):
+            with st.spinner("Gerando tabelona... (~10s)"):
             import openpyxl as _opx
             from openpyxl.styles import PatternFill as _PF, Font as _Ft, Alignment as _Al, Border as _Bd, Side as _Sd
 
@@ -3068,14 +3088,16 @@ com as colunas de % ocupação calculadas pelo App. Células em **vermelho** = d
                 ws_out.row_dimensions[nota_rt].height=14
 
             tabelona_buf=BytesIO(); wb_out.save(tabelona_buf); tabelona_buf.seek(0)
+            st.session_state["tabelona_buf"] = tabelona_buf
 
-        st.download_button(
-            "📋 Baixar tabelona completa (layout IMPUTDISTRIBUIÇÃO + divergências)",
-            data=tabelona_buf,
-            file_name="tabelona_por_mes.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="dl_tabelona"
-        )
+        if st.session_state.get("tabelona_buf"):
+            st.download_button(
+                "📋 Baixar tabelona completa (layout IMPUTDISTRIBUIÇÃO + divergências)",
+                data=st.session_state["tabelona_buf"],
+                file_name="tabelona_por_mes.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="dl_tabelona"
+            )
 
     # ══════════════════════════════════════════
     # SUB-ABA 2 — RESULTADOS REAIS
