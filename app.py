@@ -88,6 +88,7 @@ COL_MAP = {
         "centro":     ["Máquina","MÁQUINA","maquina","Centro","CENTRO"],
         "peca":       ["PEÇA","Peça","peca","PECA"],
         "div_carga":  ["Divisão\nCarga\nENTRE\nMÁQUINAS","Div Carga","DIV_CARGA","div_carga"],
+        "vol_int":    ["Vol.\nInterna","Vol. Interna","VOL_INT","vol_int","VOL. INTERNA","Volume Interna"],
         "div_volume": ["Divisão \nde\nVolume\nENTRE\nPEÇAS","Div Volume","DIV_VOLUME","div_volume"],
         "disponib":   ["Disponi-\nbilidade","Disponibilidade","DISPONIB","disponib"],
     },
@@ -100,7 +101,7 @@ def find_col(df, candidates, aba, campo):
             return c
     # fallback posicional com aviso
     idx_fallback = {"centro":0,"peca":1,"t_ciclo":5,"t_labor":6,
-                    "div_carga":7,"div_volume":9,"disponib":10}
+                    "div_carga":7,"vol_int":8,"div_volume":9,"disponib":10}
     if campo in idx_fallback:
         idx = idx_fallback[campo]
         if idx < len(df.columns):
@@ -166,8 +167,9 @@ def read_dist(fb, log):
     log.append(f"✅ IMPUTDISTRIBUIÇÃO lido: {df.shape[0]} linhas")
     mp = COL_MAP["IMPUTDISTRIBUIÇÃO"]
     c = {k: find_col(df, v, "IMPUTDISTRIBUIÇÃO", k) for k,v in mp.items()}
-    out = df[[c["centro"],c["peca"],c["div_carga"],c["div_volume"],c["disponib"]]].copy()
-    out.columns = ["centro","peca","div_carga","div_volume","disponib"]
+    out = df[[c["centro"],c["peca"],c["div_carga"],c["vol_int"],c["div_volume"],c["disponib"]]].copy()
+    out.columns = ["centro","peca","div_carga","vol_int","div_volume","disponib"]
+    out["vol_int"] = pd.to_numeric(out["vol_int"], errors="coerce").fillna(1.0)
     out = out.dropna(subset=["centro"])
     zero_d = (out["disponib"] == 0).sum()
     if zero_d: log.append(f"⚠️ IMPUTDISTRIBUIÇÃO: {zero_d} linhas com disponib=0")
@@ -236,7 +238,7 @@ def calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg
     df = (aplic.merge(pmp, on="modelo")
                .merge(tempo, on=["centro","peca"])
                .merge(dist,  on=["centro","peca"]))
-    df["indice_ciclo"] = (df.t_ciclo * df.div_carga * df.div_volume) / df.disponib
+    df["indice_ciclo"] = (df.t_ciclo * df.div_carga * df.div_volume * df.vol_int) / df.disponib
     df["min_ciclo"]    = df.indice_ciclo * df.qtd
     df["min_labor"]    = df.t_labor * df.div_carga * df.qtd
     agg = df.groupby(["centro","mes"])[["min_ciclo","min_labor"]].sum().reset_index()
@@ -488,7 +490,7 @@ def exportar(resultados):
         for _,row in r["centros"].iterrows():
             for ci,(val,bg,ctr) in enumerate([
                 (row.centro,"FFFFFF",False),
-                (f"{row.ocup_A:.0%}",cbg(row.ocup_A),True),(f"{row.ocup_B:.0%}",cbg(row.ocup_B),True),(f"{row.ocup_C:.0%}",cbg(row.ocup_C),True),
+                (f"{row.ocup_A:.1%}",cbg(row.ocup_A),True),(f"{row.ocup_B:.1%}",cbg(row.ocup_B),True),(f"{row.ocup_C:.1%}",cbg(row.ocup_C),True),
                 (row.ativo_A,"B3E5FC" if row.ativo_A else "FFFDE7",True),(row.ativo_B,"B3E5FC" if row.ativo_B else "FFFDE7",True),(row.ativo_C,"B3E5FC" if row.ativo_C else "FFFDE7",True),
                 (f"{row.horas_disp_A:.2f}" if row.ativo_A else "0","B3E5FC" if row.ativo_A else "F5F5F5",True),
                 (f"{row.horas_disp_B:.2f}" if row.ativo_B else "0","B3E5FC" if row.ativo_B else "F5F5F5",True),
@@ -822,6 +824,12 @@ def gerar_excel_diagnostico(file_bytes):
 
 def gerar_diagnostico_mensal(file_bytes, res_app, tempo, dist, aplic, pmp, dias, horas_turno, thresholds):
     """Gera Excel com uma aba por mês mostrando App vs Excel célula a célula."""
+    MAPA = {
+        "Novembro":"NovFY26","Dezembro":"DezFY26","Janeiro":"JanFY26",
+        "Fevereiro":"FevFY26","Março":"MarFY26","Abril":"AbrFY26",
+        "Maio":"MaiFY26","Junho":"JunFY26","Julho":"JulFY26",
+        "Agosto":"AgoFY26","Setembro":"SetFY26","Outubro":"OutFY26",
+    }
     hA = horas_turno["A"]; hB = horas_turno["B"]
     thr_A = thresholds["A"]/100; thr_B = thresholds["B"]/100; thr_C = thresholds["C"]/100
 
@@ -829,7 +837,7 @@ def gerar_diagnostico_mensal(file_bytes, res_app, tempo, dist, aplic, pmp, dias,
     df_all = (aplic.merge(pmp, on="modelo")
                    .merge(tempo, on=["centro","peca"])
                    .merge(dist,  on=["centro","peca"]))
-    df_all["indice_ciclo"] = (df_all.t_ciclo * df_all.div_carga * df_all.div_volume) / df_all.disponib
+    df_all["indice_ciclo"] = (df_all.t_ciclo * df_all.div_carga * df_all.div_volume * df_all.vol_int) / df_all.disponib
     df_all["min_ciclo"]    = df_all.indice_ciclo * df_all.qtd
     agg_all = df_all.groupby(["centro","mes"])["min_ciclo"].sum().reset_index()
 
@@ -1076,7 +1084,12 @@ def gerar_diagnostico_mensal(file_bytes, res_app, tempo, dist, aplic, pmp, dias,
 
 def gerar_output_layout(file_bytes, res_app, tempo, dist, aplic, pmp, dias, horas_turno, thresholds, suporte_cfg):
     """Gera Excel no mesmo layout do original, com células em vermelho onde diverge."""
-
+    MAPA = {
+        "Novembro":"NovFY26","Dezembro":"DezFY26","Janeiro":"JanFY26",
+        "Fevereiro":"FevFY26","Março":"MarFY26","Abril":"AbrFY26",
+        "Maio":"MaiFY26","Junho":"JunFY26","Julho":"JulFY26",
+        "Agosto":"AgoFY26","Setembro":"SetFY26","Outubro":"OutFY26",
+    }
     hA=horas_turno["A"]; hB=horas_turno["B"]; hC=horas_turno["C"]
     thr_A=thresholds["A"]/100; thr_B=thresholds["B"]/100; thr_C=thresholds["C"]/100
 
@@ -1084,7 +1097,7 @@ def gerar_output_layout(file_bytes, res_app, tempo, dist, aplic, pmp, dias, hora
     df_all = (aplic.merge(pmp, on="modelo")
                    .merge(tempo, on=["centro","peca"])
                    .merge(dist,  on=["centro","peca"]))
-    df_all["indice_ciclo"] = (df_all.t_ciclo * df_all.div_carga * df_all.div_volume) / df_all.disponib
+    df_all["indice_ciclo"] = (df_all.t_ciclo * df_all.div_carga * df_all.div_volume * df_all.vol_int) / df_all.disponib
     df_all["min_ciclo"]    = df_all.indice_ciclo * df_all.qtd
     df_all["min_labor"]    = df_all.t_labor * df_all.div_carga * df_all.qtd
     agg_all = df_all.groupby(["centro","mes"])[["min_ciclo","min_labor"]].sum().reset_index()
@@ -1380,7 +1393,7 @@ def comparar_com_excel(res_app, file_bytes, tempo, dist, aplic, pmp, dias, horas
         df_all = (aplic.merge(pmp, on="modelo")
                        .merge(tempo, on=["centro","peca"])
                        .merge(dist,  on=["centro","peca"]))
-        df_all["indice_ciclo"] = (df_all.t_ciclo * df_all.div_carga * df_all.div_volume) / df_all.disponib
+        df_all["indice_ciclo"] = (df_all.t_ciclo * df_all.div_carga * df_all.div_volume * df_all.vol_int) / df_all.disponib
         df_all["min_ciclo"]    = df_all.indice_ciclo * df_all.qtd
         # Agrupar por centro+mes de uma vez
         agg_all = df_all.groupby(["centro","mes"]).agg(
@@ -1541,7 +1554,7 @@ def find_col(df, candidates, aba, campo):
             return c
     # fallback posicional com aviso
     idx_fallback = {"centro":0,"peca":1,"t_ciclo":5,"t_labor":6,
-                    "div_carga":7,"div_volume":9,"disponib":10}
+                    "div_carga":7,"vol_int":8,"div_volume":9,"disponib":10}
     if campo in idx_fallback:
         idx = idx_fallback[campo]
         if idx < len(df.columns):
@@ -1648,8 +1661,9 @@ def read_dist(fb, log):
     log.append(f"✅ IMPUTDISTRIBUIÇÃO lido: {df.shape[0]} linhas")
     mp = COL_MAP["IMPUTDISTRIBUIÇÃO"]
     c = {k: find_col(df, v, "IMPUTDISTRIBUIÇÃO", k) for k,v in mp.items()}
-    out = df[[c["centro"],c["peca"],c["div_carga"],c["div_volume"],c["disponib"]]].copy()
-    out.columns = ["centro","peca","div_carga","div_volume","disponib"]
+    out = df[[c["centro"],c["peca"],c["div_carga"],c["vol_int"],c["div_volume"],c["disponib"]]].copy()
+    out.columns = ["centro","peca","div_carga","vol_int","div_volume","disponib"]
+    out["vol_int"] = pd.to_numeric(out["vol_int"], errors="coerce").fillna(1.0)
     out = out.dropna(subset=["centro"])
     zero_d = (out["disponib"] == 0).sum()
     if zero_d: log.append(f"⚠️ IMPUTDISTRIBUIÇÃO: {zero_d} linhas com disponib=0")
@@ -1718,7 +1732,7 @@ def calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg
     df = (aplic.merge(pmp, on="modelo")
                .merge(tempo, on=["centro","peca"])
                .merge(dist,  on=["centro","peca"]))
-    df["indice_ciclo"] = (df.t_ciclo * df.div_carga * df.div_volume) / df.disponib
+    df["indice_ciclo"] = (df.t_ciclo * df.div_carga * df.div_volume * df.vol_int) / df.disponib
     df["min_ciclo"]    = df.indice_ciclo * df.qtd
     df["min_labor"]    = df.t_labor * df.div_carga * df.qtd
     agg = df.groupby(["centro","mes"])[["min_ciclo","min_labor"]].sum().reset_index()
@@ -1964,7 +1978,7 @@ def exportar(resultados):
         for _,row in r["centros"].iterrows():
             for ci,(val,bg,ctr) in enumerate([
                 (row.centro,"FFFFFF",False),
-                (f"{row.ocup_A:.0%}",cbg(row.ocup_A),True),(f"{row.ocup_B:.0%}",cbg(row.ocup_B),True),(f"{row.ocup_C:.0%}",cbg(row.ocup_C),True),
+                (f"{row.ocup_A:.1%}",cbg(row.ocup_A),True),(f"{row.ocup_B:.1%}",cbg(row.ocup_B),True),(f"{row.ocup_C:.1%}",cbg(row.ocup_C),True),
                 (row.ativo_A,"B3E5FC" if row.ativo_A else "FFFDE7",True),(row.ativo_B,"B3E5FC" if row.ativo_B else "FFFDE7",True),(row.ativo_C,"B3E5FC" if row.ativo_C else "FFFDE7",True),
                 (f"{row.horas_disp_A:.2f}" if row.ativo_A else "0","B3E5FC" if row.ativo_A else "F5F5F5",True),
                 (f"{row.horas_disp_B:.2f}" if row.ativo_B else "0","B3E5FC" if row.ativo_B else "F5F5F5",True),
@@ -2035,7 +2049,7 @@ def show_memoria(r, mes, df_intermediario, agg, horas_turno, thresholds):
 
     # Passo 2
     st.markdown('<div class="mem-step"><span class="step-num">2</span> <b>Cálculo do índice de ciclo por linha</b></div>', unsafe_allow_html=True)
-    st.markdown('<div class="formula-box">indice_ciclo = (t_ciclo × div_carga × div_volume) ÷ disponibilidade<br><br>Representa: quantos minutos de máquina são necessários para produzir 1 peça neste centro.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="formula-box">indice_ciclo = (t_ciclo × div_carga × div_volume × vol_interna) ÷ disponibilidade<br><br>Representa: quantos minutos de máquina são necessários para produzir 1 peça neste centro.</div>', unsafe_allow_html=True)
 
     # Passo 3
     st.markdown('<div class="mem-step"><span class="step-num">3</span> <b>Minutos necessários por linha (modelo × centro × peça)</b></div>', unsafe_allow_html=True)
@@ -2782,7 +2796,7 @@ com as colunas de % ocupação calculadas pelo App. Células em **vermelho** = d
         thr_A_t=thresholds["A"]/100; thr_B_t=thresholds["B"]/100; thr_C_t=thresholds["C"]/100
 
         df_all_t=(aplic.merge(pmp,on="modelo").merge(tempo,on=["centro","peca"]).merge(dist,on=["centro","peca"]))
-        df_all_t["indice_ciclo"]=(df_all_t.t_ciclo*df_all_t.div_carga*df_all_t.div_volume)/df_all_t.disponib
+        df_all_t["indice_ciclo"]=(df_all_t.t_ciclo*df_all_t.div_carga*df_all_t.div_volume*df_all_t.vol_int)/df_all_t.disponib
         df_all_t["min_ciclo"]=df_all_t.indice_ciclo*df_all_t.qtd
         df_all_t["min_labor"]=df_all_t.t_labor*df_all_t.div_carga*df_all_t.qtd
         agg_cp_t=df_all_t.groupby(["centro","peca","mes"])[["min_ciclo","min_labor"]].sum()
@@ -2882,9 +2896,11 @@ com as colunas de % ocupação calculadas pelo App. Células em **vermelho** = d
                 any_d_t=div_A_t or div_B_t or div_c_t or div_p_t
 
                 dc_i=dist[(dist.centro==cen_t)&(dist.peca==peca_t)]["div_carga"].values
+                vi_i=dist[(dist.centro==cen_t)&(dist.peca==peca_t)]["vol_int"].values
                 dv_i=dist[(dist.centro==cen_t)&(dist.peca==peca_t)]["div_volume"].values
                 di_i=dist[(dist.centro==cen_t)&(dist.peca==peca_t)]["disponib"].values
-                idx_app_t=(float(tc_xl_t or 0)*dc_i[0]*dv_i[0])/di_i[0] if len(dc_i) and di_i[0] else float(idx_xl_t or 0)
+                vi_val=float(vi_i[0]) if len(vi_i) else 1.0
+                idx_app_t=(float(tc_xl_t or 0)*dc_i[0]*dv_i[0]*vi_val)/di_i[0] if len(dc_i) and di_i[0] else float(idx_xl_t or 0)
                 div_idx_t=abs(float(idx_xl_t or 0)-float(idx_app_t or 0))>0.5
 
                 _ec(ws_out,ri_t,1,cen_t,_F_VERM if any_d_t else _F_BRANCO,True,"FFFFFF" if any_d_t else "000000",8,False)
@@ -2899,9 +2915,9 @@ com as colunas de % ocupação calculadas pelo App. Células em **vermelho** = d
                 _ec(ws_out,ri_t,10,dv_xl_t,_PF("solid",fgColor="FF0000"),False,"FFFF00",8)
                 _ec(ws_out,ri_t,11,di_xl_t,_F_CINZA2,False,"000000",8)
                 _ec(ws_out,ri_t,12,round(float(idx_app_t),4),_F_VERM_S if div_idx_t else _F_BRANCO,False,"000000",8)
-                _ec(ws_out,ri_t,13,f"{pA_t:.0%}",_F_VERM if div_A_t else _cor_pct(pA_t),False,"000000",8)
-                _ec(ws_out,ri_t,14,f"{pB_t:.0%}",_F_VERM if div_B_t else _cor_pct(pB_t),False,"000000",8)
-                _ec(ws_out,ri_t,15,f"{pC_t:.0%}",_cor_pct(pC_t),False,"000000",8)
+                _ec(ws_out,ri_t,13,f"{pA_t:.1%}",_F_VERM if div_A_t else _cor_pct(pA_t),False,"000000",8)
+                _ec(ws_out,ri_t,14,f"{pB_t:.1%}",_F_VERM if div_B_t else _cor_pct(pB_t),False,"000000",8)
+                _ec(ws_out,ri_t,15,f"{pC_t:.1%}",_cor_pct(pC_t),False,"000000",8)
                 _ec(ws_out,ri_t,16,round(mc_t,1),_F_VERM_S if div_c_t else _F_BRANCO,False,"000000",8)
                 _ec(ws_out,ri_t,17,round(ml_t,1),_F_BRANCO,False,"000000",8)
                 _ec(ws_out,ri_t,18,app_tot_t,_F_VERM_S if div_p_t else _F_BRANCO,False,"000000",8)
