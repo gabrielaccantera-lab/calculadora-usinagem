@@ -745,190 +745,366 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
 # RESUMO ANUAL — agrega todos os meses
 # ─────────────────────────────────────────
 def gerar_aba_anual(wb, resultados, label="ANO"):
-    """Adiciona aba ANO ao workbook com totais anuais agregados de todos os meses."""
-    brd = Border(left=Side(style='thin',color='CCCCCC'),right=Side(style='thin',color='CCCCCC'),
-                 top=Side(style='thin',color='CCCCCC'), bottom=Side(style='thin',color='CCCCCC'))
-    JD_V = JD_VERDE_ESC.replace("#",""); JD_Y = JD_AMARELO.replace("#","")
-    def ec(c, bg="FFFFFF", fg="000000", bold=False, center=True, size=9):
-        c.font  = Font(name="Arial", bold=bold, color=fg, size=size)
-        c.fill  = PatternFill("solid", fgColor=bg)
-        c.alignment = Alignment(horizontal="center" if center else "left", vertical="center")
-        c.border = brd
-
+    """
+    Adiciona aba ANO ao workbook com layout IDÊNTICO ao mensal (NovFY26, etc.).
+    Estrutura:
+      Linhas 1-5  : cabeçalho com TOTAL DE MINUTOS / HORAS / DIAS acumulados do ano
+      Linha 6     : cabeçalhos das colunas (igual ao mensal)
+      Linhas 7+   : dados por centro×peça com JA.A/JA.B/JA.C calculados sobre o ano
+      Linha 65+   : bloco DADOS AUTOMÁTICOS (igual ao mensal mas com valores anuais)
+    Lógica de % ocupação anual: min_ciclo_total_ano / (dias_ano × h_turno × 60)
+    Horas disponíveis anuais: dias_ano × he_turno × ativo_ano
+    """
     meses_com_dados = [(m, resultados[m]) for m in MESES if resultados.get(m)]
     if not meses_com_dados:
         return
 
-    ws = wb.create_sheet(label)
+    # ── Picks de estilo (usa os fills globais já definidos) ───────────────────
+    brd = Border(left=Side(style='thin',color='CCCCCC'),right=Side(style='thin',color='CCCCCC'),
+                 top=Side(style='thin',color='CCCCCC'), bottom=Side(style='thin',color='CCCCCC'))
+    JD_V = JD_VERDE_ESC.replace("#",""); JD_Y = JD_AMARELO.replace("#","")
 
-    # Coletar todos os centros únicos
-    todos_centros = []
-    for _, r in meses_com_dados:
-        for c in r["centros"]["centro"]:
-            if c not in todos_centros:
-                todos_centros.append(c)
+    F_VERDE   = PatternFill("solid",fgColor="92D050")
+    F_AMAR    = PatternFill("solid",fgColor="FFDE00")
+    F_AZUL    = PatternFill("solid",fgColor="00B0F0")
+    F_PRETO   = PatternFill("solid",fgColor="000000")
+    F_CINZA   = PatternFill("solid",fgColor="D9D9D9")
+    F_CINZA2  = PatternFill("solid",fgColor="BFBFBF")
+    F_BRANCO  = PatternFill("solid",fgColor="FFFFFF")
+    F_VD_JD   = PatternFill("solid",fgColor="1F4D19")
+    F_AM_JD   = PatternFill("solid",fgColor="FFDE00")
+    F_VERM    = PatternFill("solid",fgColor="FF0000")
+    F_CINZA_H = PatternFill("solid",fgColor="D9D9D9")
 
-    # ── Cabeçalho principal ──────────────────────────────────────────────────
-    ws.merge_cells("A1:J1")
-    c = ws.cell(1, 1, "RESUMO ANUAL — TODOS OS MESES")
-    c.font = Font(name="Arial", bold=True, color="FFFFFF", size=11)
-    c.fill = PatternFill("solid", fgColor=JD_V)
-    c.alignment = Alignment(horizontal="center", vertical="center")
-    c.border = brd
-    ws.row_dimensions[1].height = 22
+    def _e(ws,r,c,val,fill=None,bold=False,color="000000",size=9,center=True,wrap=False):
+        cell = ws.cell(row=r,column=c,value=val)
+        cell.font = Font(name="Arial",bold=bold,color=color,size=size)
+        cell.fill = fill or F_BRANCO
+        cell.alignment = Alignment(horizontal="center" if center else "left",
+                                   vertical="center",wrap_text=wrap)
+        cell.border = brd
+        return cell
 
-    # ── Sub-cabeçalho ────────────────────────────────────────────────────────
-    hdrs = ["Mês","Dias","Tot.A","Tot.B","Tot.C","Total Func.",
-            "Ciclo Op.","Ciclo Tot.","Labor Op.","Labor Tot. ★"]
-    for ci, h in enumerate(hdrs, 1):
-        ec(ws.cell(2, ci, h), JD_V, "FFFFFF", True)
-    ws.row_dimensions[2].height = 16
+    def _cor_pct(v):
+        try:
+            f = float(str(v).strip('%'))/100 if '%' in str(v) else float(v)
+            if f>=1.06: return F_VERM
+            if f>=1.00: return PatternFill("solid",fgColor="FFFF00")
+            if f>=0.40: return F_VERDE
+            return F_BRANCO
+        except: return F_BRANCO
 
-    # Totais acumulados para linha TOTAL ANO
-    tot_dias=0; tot_A_ano=0; tot_B_ano=0; tot_C_ano=0; tot_func_ano=0
+    # ── Acumuladores anuais ───────────────────────────────────────────────────
+    n_meses   = len(meses_com_dados)
+    dias_ano  = sum(r["dias"] for _,r in meses_com_dados)
+
+    # hA/hB/hC para cálculo de % (horas acumuladas do IMPUTTURNOS)
+    hA = meses_com_dados[0][1]["hA"]
+    hB = meses_com_dados[0][1]["hB"]
+    hC = meses_com_dados[0][1]["hC"]
+    # heA/heB/heC para horas disponíveis (horas efetivas do quadro de lotação)
+    heA = meses_com_dados[0][1].get("heA", hA)
+    heB = meses_com_dados[0][1].get("heB", hB)
+    heC = meses_com_dados[0][1].get("heC", hC)
+
+    minA_ano = dias_ano * hA * 60
+    minB_ano = dias_ano * hB * 60
+    minC_ano = dias_ano * hC * 60
+
+    # Agregar min_ciclo/labor por centro×peça no ano inteiro
+    from collections import defaultdict
+    cp_mc  = defaultdict(float)   # (centro,peca) → soma min_ciclo ano
+    cp_ml  = defaultdict(float)   # (centro,peca) → soma min_labor ano
+    cp_ord = []  # manter ordem dos pares
+
+    # Agregar por centro (para bloco automático)
+    cen_mc   = defaultdict(float)
+    cen_ml   = defaultdict(float)
+    cen_atA  = defaultdict(int)   # nº meses ativo A
+    cen_atB  = defaultdict(int)
+    cen_atC  = defaultdict(int)
+
+    # Acumuladores de produtividade
     sum_hciclo=0; sum_hlabor=0; sum_hativos=0; sum_htodos=0
+    tot_opA=0;    tot_opB=0;    tot_opC=0
+    sup_somas = {k:{"A":0,"B":0,"C":0}
+                 for k in ["lavadora","gravacao","preset","coringa","facilitador"]}
+    tot_A_ano=0; tot_B_ano=0; tot_C_ano=0; tot_func_ano=0
 
-    ri = 3
     for mes, r in meses_com_dados:
-        abr = MESES_ABREV[MESES.index(mes)]
-        bg = "EAF3FB" if ri % 2 == 0 else "FFFFFF"
-        vals = [abr, r["dias"], r["tot_A"], r["tot_B"], r["tot_C"], r["total"],
-                f'{r["prod_ciclo_op"]:.1%}', f'{r["prod_ciclo_tot"]:.1%}',
-                f'{r["prod_labor_op"]:.1%}', f'{r["prod_labor_tot"]:.1%}']
-        for ci, v in enumerate(vals, 1):
-            c = ws.cell(ri, ci, v)
-            is_dest = ci == 10
-            ec(c, JD_Y if is_dest else bg, JD_V if is_dest else "000000", is_dest)
-        ws.row_dimensions[ri].height = 14
-        ri += 1
-
-        tot_dias    += r["dias"]
-        tot_A_ano   += r["tot_A"]
-        tot_B_ano   += r["tot_B"]
-        tot_C_ano   += r["tot_C"]
-        tot_func_ano+= r["total"]
+        for _, row in r["centros"].iterrows():
+            cen = row.centro
+            # min_ciclo_total é a soma de TODAS as peças desse centro no mês
+            cen_mc[cen]  += row.min_ciclo_total
+            cen_ml[cen]  += row.min_labor_total
+            cen_atA[cen] += int(row.ativo_A)
+            cen_atB[cen] += int(row.ativo_B)
+            cen_atC[cen] += int(row.ativo_C)
         sum_hciclo  += r["h_ciclo"]
         sum_hlabor  += r["h_labor"]
         sum_hativos += r["h_ativos"]
         sum_htodos  += r["h_todos"]
+        tot_opA     += r["op_A"]
+        tot_opB     += r["op_B"]
+        tot_opC     += r["op_C"]
+        tot_A_ano   += r["tot_A"]
+        tot_B_ano   += r["tot_B"]
+        tot_C_ano   += r["tot_C"]
+        tot_func_ano+= r["total"]
+        for k in sup_somas:
+            sup_somas[k]["A"] += r["suporte"][k]["A"]
+            sup_somas[k]["B"] += r["suporte"][k]["B"]
+            sup_somas[k]["C"] += r["suporte"][k]["C"]
 
-    # Linha TOTAL ANO
     prod_co = sum_hciclo/sum_hativos if sum_hativos>0 else 0
     prod_ct = sum_hciclo/sum_htodos  if sum_htodos>0  else 0
     prod_lo = sum_hlabor/sum_hativos if sum_hativos>0 else 0
     prod_lt = sum_hlabor/sum_htodos  if sum_htodos>0  else 0
-    n_meses = len(meses_com_dados)
-    media_A = round(tot_A_ano/n_meses) if n_meses else 0
-    media_B = round(tot_B_ano/n_meses) if n_meses else 0
-    media_C = round(tot_C_ano/n_meses) if n_meses else 0
-    media_func = round(tot_func_ano/n_meses) if n_meses else 0
 
-    ws.merge_cells(f"A{ri}:A{ri}")
-    vals_tot = ["MÉDIA ANO", f'{tot_dias} dias', media_A, media_B, media_C, media_func,
-                f'{prod_co:.1%}', f'{prod_ct:.1%}', f'{prod_lo:.1%}', f'{prod_lt:.1%}']
-    for ci, v in enumerate(vals_tot, 1):
-        ec(ws.cell(ri, ci, v), JD_Y, JD_V, True)
-    ws.row_dimensions[ri].height = 16
-    ri += 2
+    # Ocupação anual por centro
+    def ocup_ano(cen, turno):
+        mc = cen_mc[cen]
+        if turno=="A": return mc/minA_ano if minA_ano>0 else 0
+        if turno=="B": return mc/minB_ano if minB_ano>0 else 0
+        return mc/minC_ano if minC_ano>0 else 0
 
-    # ── Bloco 2: Detalhamento por centro (soma dos meses) ────────────────────
-    ws.merge_cells(f"A{ri}:J{ri}")
-    c = ws.cell(ri, 1, "DETALHE POR CENTRO — SOMA DO ANO (min. ciclo e labor acumulados)")
-    c.font = Font(name="Arial", bold=True, color="FFFFFF", size=10)
-    c.fill = PatternFill("solid", fgColor=JD_V)
-    c.alignment = Alignment(horizontal="left", vertical="center")
-    c.border = brd
-    ws.row_dimensions[ri].height = 18
-    ri += 1
+    # Ativo anual: se ocupou em pelo menos 1 mês o threshold de ativação
+    # Usamos: se média anual de ocupação A > thr_A → ativo
+    thr_A = meses_com_dados[0][1]["thr_A"]
+    thr_B = meses_com_dados[0][1]["thr_B"]
+    thr_C = meses_com_dados[0][1]["thr_C"]
+    centros_ordenados = list(cen_mc.keys())
 
-    hdrs2 = ["Centro","Σ Min. Ciclo","Σ Min. Labor","Σ Horas Ciclo","Σ Horas Labor",
-             "Meses Ativo A","Meses Ativo B","Meses Ativo C","Σ Horas Disp. A","Σ Horas Disp. B","Σ Horas Disp. C"]
-    for ci, h in enumerate(hdrs2, 1):
-        ec(ws.cell(ri, ci, h), JD_V, "FFFFFF", True)
-    ws.row_dimensions[ri].height = 14
-    ri += 1
+    def ativo_ano_A(cen): return 1 if ocup_ano(cen,"A")>thr_A else 0
+    def ativo_ano_B(cen): return 1 if ocup_ano(cen,"A")>thr_B else 0
+    def ativo_ano_C(cen): return 1 if ocup_ano(cen,"B")>thr_C else 0
 
-    # Agregar por centro
-    centro_agg = {}
-    for mes, r in meses_com_dados:
-        for _, row in r["centros"].iterrows():
-            cen = row.centro
-            if cen not in centro_agg:
-                centro_agg[cen] = {'mc':0,'ml':0,'hc':0,'hl':0,
-                                   'atA':0,'atB':0,'atC':0,'hdA':0,'hdB':0,'hdC':0}
-            centro_agg[cen]['mc'] += row.min_ciclo_total
-            centro_agg[cen]['ml'] += row.min_labor_total
-            centro_agg[cen]['hc'] += row.horas_ciclo
-            centro_agg[cen]['hl'] += row.horas_labor
-            centro_agg[cen]['atA'] += int(row.ativo_A)
-            centro_agg[cen]['atB'] += int(row.ativo_B)
-            centro_agg[cen]['atC'] += int(row.ativo_C)
-            centro_agg[cen]['hdA'] += row.horas_disp_A
-            centro_agg[cen]['hdB'] += row.horas_disp_B
-            centro_agg[cen]['hdC'] += row.horas_disp_C
+    # Horas disponíveis anuais por centro
+    def hdA(cen): return dias_ano * heA * ativo_ano_A(cen)
+    def hdB(cen): return dias_ano * heB * ativo_ano_B(cen)
+    def hdC(cen): return dias_ano * heC * ativo_ano_C(cen)
 
-    for idx, (cen, ag) in enumerate(centro_agg.items()):
-        bg = "EAF3FB" if idx % 2 == 0 else "FFFFFF"
-        vals2 = [cen, round(ag['mc'],1), round(ag['ml'],1), round(ag['hc'],1), round(ag['hl'],1),
-                 ag['atA'], ag['atB'], ag['atC'],
-                 round(ag['hdA'],1), round(ag['hdB'],1), round(ag['hdC'],1)]
-        for ci, v in enumerate(vals2, 1):
-            ec(ws.cell(ri, ci, v), bg, "000000", False, ci>1)
+    # ── Totais de operadores ativos no ano ────────────────────────────────────
+    op_A_ano = sum(ativo_ano_A(c) for c in centros_ordenados)
+    op_B_ano = sum(ativo_ano_B(c) for c in centros_ordenados)
+    op_C_ano = sum(ativo_ano_C(c) for c in centros_ordenados)
+
+    # Suporte: média dos meses (arredonda para inteiro)
+    def sup_ano(key, t): return round(sup_somas[key][t] / n_meses) if n_meses else 0
+
+    tot_suporte_A = sum(sup_ano(k,"A") for k in sup_somas)
+    tot_suporte_B = sum(sup_ano(k,"B") for k in sup_somas)
+    tot_suporte_C = sum(sup_ano(k,"C") for k in sup_somas)
+    tot_A_calc = op_A_ano + tot_suporte_A
+    tot_B_calc = op_B_ano + tot_suporte_B
+    tot_C_calc = op_C_ano + tot_suporte_C
+    tot_func_calc = tot_A_calc + tot_B_calc + tot_C_calc
+
+    # Horas totais anuais
+    h_ativos_ano = sum(hdA(c)+hdB(c)+hdC(c) for c in centros_ordenados)
+    h_todos_ano  = tot_A_calc*dias_ano*heA + tot_B_calc*dias_ano*heB + tot_C_calc*dias_ano*heC
+
+    # ── Criar aba ─────────────────────────────────────────────────────────────
+    ws = wb.create_sheet(label)
+    ws.freeze_panes = "F7"
+
+    # Número de modelos (pega do primeiro mês disponível, não precisamos dos nomes)
+    # A aba ANO não detalha por modelo, então colunas 19+ ficam em branco (como no Excel real)
+
+    # ── Linhas 1-5: Cabeçalho com totais anuais ───────────────────────────────
+    ws.merge_cells("A1:O1")
+    _e(ws,1,1,f"TOTAIS — ANO",F_VD_JD,True,"FFFFFF",9,True)
+    for ci_h,txt_h,f_h in [(16,"TURNO A",F_VERDE),(17,"TURNO B",F_AMAR),(18,"TURNO C",F_AZUL)]:
+        _e(ws,1,ci_h,txt_h,f_h,True,"000000",8,True)
+    ws.row_dimensions[1].height = 14
+
+    ws.merge_cells("A2:O2")
+    _e(ws,2,1,"TOTAL DE MINUTOS",F_CINZA_H,True,"000000",8,False)
+    _e(ws,2,16,round(minA_ano,1),F_VERDE,True,"000000",8)
+    _e(ws,2,17,round(minB_ano,1),F_AMAR, True,"000000",8)
+    _e(ws,2,18,round(minC_ano,1),F_AZUL, True,"000000",8)
+    ws.row_dimensions[2].height = 13
+
+    ws.merge_cells("A3:O3")
+    _e(ws,3,1,"TOTAL DE HORAS",F_CINZA_H,True,"000000",8,False)
+    _e(ws,3,16,round(minA_ano/60,2),F_VERDE,True,"000000",8)
+    _e(ws,3,17,round(minB_ano/60,2),F_AMAR, True,"000000",8)
+    _e(ws,3,18,round(minC_ano/60,2),F_AZUL, True,"000000",8)
+    ws.row_dimensions[3].height = 13
+
+    ws.merge_cells("A4:O4")
+    _e(ws,4,1,"Nº DIAS TRABALHADOS",F_CINZA_H,True,"000000",8,False)
+    _e(ws,4,16,dias_ano,F_VERDE,True,"FF0000",9)
+    _e(ws,4,17,dias_ano,F_AMAR, True,"FF0000",9)
+    _e(ws,4,18,dias_ano,F_AZUL, True,"FF0000",9)
+    ws.row_dimensions[4].height = 13
+
+    ws.merge_cells("A5:O5")
+    _e(ws,5,1,f"RESUMO DA CARGA — ANO ({dias_ano} dias / {n_meses} meses)",F_VD_JD,True,"FFFFFF",10,True)
+    ws.row_dimensions[5].height = 18
+
+    # ── Linha 6: cabeçalhos das colunas (igual ao mensal) ────────────────────
+    hdrs_f=[("Máquina",F_CINZA2,"000000"),("PEÇA",F_CINZA2,"000000"),
+            ("DESCRIÇÃO",F_CINZA2,"000000"),("PÇ/TRAT",F_CINZA2,"000000"),("UM",F_CINZA2,"000000"),
+            ("Tempo Ciclo (min)",F_PRETO,"FFFFFF"),("Tempo Labor (min)",F_PRETO,"FFFFFF"),
+            ("Div. Carga",PatternFill("solid",fgColor="FF0000"),"FFFF00"),
+            ("Vol. Interna",F_CINZA2,"000000"),
+            ("Div. Volume",PatternFill("solid",fgColor="FF0000"),"FFFF00"),
+            ("Disponib.",F_CINZA2,"000000"),("Indice Ciclo",F_CINZA2,"000000"),
+            ("JA.A",F_VERDE,"000000"),("JA.B",F_AMAR,"000000"),("JA.C",F_AZUL,"000000"),
+            ("TOTAL CICLOS (MIN)",F_CINZA,"000000"),("TOTAL LABOR (MIN)",F_CINZA,"000000"),
+            ("TOTAL PECAS",F_CINZA,"000000")]
+    largs=[9,8,16,6,5,9,9,8,8,8,8,9,8,8,8,12,12,8]
+    for ci,(h,f,cor) in enumerate(hdrs_f,1):
+        _e(ws,6,ci,h,f,True,cor,8,True,True)
+        ws.column_dimensions[get_column_letter(ci)].width = largs[ci-1]
+    ws.row_dimensions[6].height = 42
+
+    # ── Linhas 7+: dados por centro (uma linha por centro) ────────────────────
+    # No ANO, cada centro tem 1 linha (não há o detalhe por peça como no mensal da tabelona)
+    # mas o bloco automático mostra os pares como no real.
+    # Aqui preenchemos a tabelona de dados com linha por centro (soma do ano)
+    ri = 7
+    for cen in centros_ordenados:
+        mc = cen_mc[cen]; ml = cen_ml[cen]
+        pA = mc/minA_ano if minA_ano>0 else 0
+        pB = mc/minB_ano if minB_ano>0 else 0
+        pC = mc/minC_ano if minC_ano>0 else 0
+        _e(ws,ri,1,cen,   F_BRANCO,False,"000000",8,False)
+        _e(ws,ri,2,"—",   F_BRANCO,False,"000000",8)   # sem peça individual no resumo anual
+        _e(ws,ri,3,"ANO", F_BRANCO,False,"000000",8,False)
+        for ci_z in range(4,13): _e(ws,ri,ci_z,"",F_BRANCO,False,"000000",8)
+        _e(ws,ri,13,f"{pA:.1%}",_cor_pct(pA),False,"000000",8)
+        _e(ws,ri,14,f"{pB:.1%}",_cor_pct(pB),False,"000000",8)
+        _e(ws,ri,15,f"{pC:.1%}",_cor_pct(pC),False,"000000",8)
+        _e(ws,ri,16,round(mc,1),F_BRANCO,False,"000000",8)
+        _e(ws,ri,17,round(ml,1),F_BRANCO,False,"000000",8)
+        _e(ws,ri,18,"",F_BRANCO,False,"000000",8)
         ws.row_dimensions[ri].height = 13
         ri += 1
 
-    # ── Bloco 3: Totais de suporte por função (média ano) ────────────────────
-    ri += 1
-    ws.merge_cells(f"A{ri}:J{ri}")
-    c = ws.cell(ri, 1, "FUNÇÕES DE SUPORTE — MÉDIA POR MÊS")
-    c.font = Font(name="Arial", bold=True, color="FFFFFF", size=10)
-    c.fill = PatternFill("solid", fgColor=JD_V)
-    c.alignment = Alignment(horizontal="left", vertical="center")
-    c.border = brd
-    ws.row_dimensions[ri].height = 16; ri += 1
+    # ── Bloco DADOS AUTOMÁTICOS — linha 66, col F (col 6) ────────────────────
+    # Layout IDÊNTICO ao mensal (NovFY26 cols 12-21 → aqui cols F+0 a F+9 = 6 a 15)
+    _CF = 6    # coluna F
+    _RS = 66   # row start
 
-    hdrs3 = ["Função","Média Turno A","Média Turno B","Média Turno C"]
-    for ci, h in enumerate(hdrs3, 1):
-        ec(ws.cell(ri, ci, h), JD_V, "FFFFFF", True)
-    ws.row_dimensions[ri].height = 14; ri += 1
+    # Linha 65: "RESUMO DA CARGA MÁQUINA X QUADRO DE LOTAÇÃO"
+    ws.merge_cells(start_row=_RS-1,start_column=_CF,end_row=_RS-1,end_column=_CF+9)
+    _e(ws,_RS-1,_CF,"RESUMO DA CARGA MÁQUINA X QUADRO DE LOTAÇÃO",F_CINZA_H,True,"000000",9,True)
+    ws.row_dimensions[_RS-1].height=14
 
-    funcoes = [("Lavadora e Inspeção","lavadora"),("Gravação e Estanqueidade","gravacao"),
-               ("Preset","preset"),("Coringa","coringa"),("Facilitador","facilitador"),
-               ("TOTAL POR TURNO",None),("TOTAL FUNCIONÁRIOS",None)]
-    for idx,(nome,key) in enumerate(funcoes):
-        bold = "TOTAL" in nome
-        bg_r = JD_Y if bold else ("EAF3FB" if idx%2==0 else "FFFFFF")
-        fg_r = JD_V if bold else "000000"
-        ec(ws.cell(ri,1,nome), bg_r, fg_r, bold, False)
-        if key:
-            soma_A = sum(r["suporte"][key]["A"] for _,r in meses_com_dados)
-            soma_B = sum(r["suporte"][key]["B"] for _,r in meses_com_dados)
-            soma_C = sum(r["suporte"][key]["C"] for _,r in meses_com_dados)
-            for ci,v in [(2,round(soma_A/n_meses,1)),(3,round(soma_B/n_meses,1)),(4,round(soma_C/n_meses,1))]:
-                ec(ws.cell(ri,ci,v), bg_r, fg_r, bold)
-        elif "TOTAL POR TURNO" in nome:
-            for ci,v in [(2,round(tot_A_ano/n_meses,1)),(3,round(tot_B_ano/n_meses,1)),(4,round(tot_C_ano/n_meses,1))]:
-                ec(ws.cell(ri,ci,v), JD_Y, JD_V, True)
-        elif "FUNCIONÁRIOS" in nome:
-            ec(ws.cell(ri,2,round(tot_func_ano/n_meses,1)), JD_Y, JD_V, True)
-        ws.row_dimensions[ri].height = 14; ri += 1
+    # Linha 66: PERÍODO / DATA / HORAS POR TURNO
+    _e(ws,_RS,_CF,"PERÍODO: ", F_CINZA_H,True,"000000",8,False)
+    _e(ws,_RS,_CF+1,"ANO",     F_BRANCO, True,"FF0000",9,False)
+    _e(ws,_RS,_CF+3,"DATA DE REVISÃO:", F_CINZA_H,True,"000000",8,False)
+    _e(ws,_RS,_CF+4,datetime.now().strftime("%d/%m/%Y"),F_BRANCO,True,"FF0000",9)
+    _e(ws,_RS,_CF+6,"HORAS POR TURNO DE TRABALHO",F_CINZA_H,True,"000000",8,True)
+    ws.row_dimensions[_RS].height=14
 
-    # ── Produtividades anuais ─────────────────────────────────────────────────
-    ri += 1
-    for nm,v,dest in [
-        ("PROD. CICLO OPERACIONAL (ano)",  prod_co, False),
-        ("PROD. CICLO TOTAL (ano)",        prod_ct, False),
-        ("PROD. LABOR OPERACIONAL (ano)",  prod_lo, False),
-        ("PROD. LABOR TOTAL ★ (ano)",      prod_lt, True),
+    # Linha 67: valores das horas efetivas
+    _e(ws,_RS+1,_CF+6,heA,F_CINZA_H,True,"000000",8)
+    _e(ws,_RS+1,_CF+7,heB,F_CINZA_H,True,"000000",8)
+    _e(ws,_RS+1,_CF+8,heC,F_CINZA_H,True,"000000",8)
+    ws.row_dimensions[_RS+1].height=14
+
+    # Linha 68: sub-cabeçalho de grupos TURNO A/B/C
+    for _ci,_txt,_f in [
+        (_CF+1,"TURNO A",F_VERDE),(_CF+2,"TURNO B",F_AMAR),(_CF+3,"TURNO C",F_AZUL),
+        (_CF+4,"TURNO A",F_VERDE),(_CF+5,"TURNO B",F_AMAR),(_CF+6,"TURNO C",F_AZUL),
+        (_CF+7,"TURNO A",F_VERDE),(_CF+8,"TURNO B",F_AMAR),(_CF+9,"TURNO C",F_AZUL),
     ]:
-        ws.merge_cells(f"A{ri}:H{ri}")
-        ec(ws.cell(ri,1,nm), JD_Y if dest else "FFFFFF", JD_V if dest else "000000", dest, False)
-        ec(ws.cell(ri,9,f'{v:.1%}'), JD_Y if dest else "FFFFFF", JD_V if dest else "000000", dest)
-        ws.row_dimensions[ri].height = 14; ri += 1
+        _e(ws,_RS+2,_ci,_txt,_f,True,"000000",8)
+    ws.row_dimensions[_RS+2].height=14
 
-    # Larguras
-    for ci,w in enumerate([16,12,12,12,12,10,10,10,12,12,12],1):
+    # Linha 69: sub-cabeçalho % Ocup / Ativo / Horas
+    _e(ws,_RS+3,_CF,"Centro",F_PRETO,True,"FFFFFF",8)
+    for _ci,_txt in [
+        (_CF+1,"% Ocup"),(_CF+2,"% Ocup"),(_CF+3,"% Ocup"),
+        (_CF+4,"Ativo"), (_CF+5,"Ativo"), (_CF+6,"Ativo"),
+        (_CF+7,"Horas"), (_CF+8,"Horas"), (_CF+9,"Horas"),
+    ]:
+        _e(ws,_RS+3,_ci,_txt,F_PRETO,True,"FFFFFF",8)
+    ws.row_dimensions[_RS+3].height=14
+
+    # Linhas de centros — layout de pares igual ao mensal real
+    _ri = _RS + 4
+    for cen in centros_ordenados:
+        oA = ocup_ano(cen,"A"); oB = ocup_ano(cen,"B"); oC = ocup_ano(cen,"C")
+        aA = ativo_ano_A(cen); aB = ativo_ano_B(cen); aC = ativo_ano_C(cen)
+        hA_c = hdA(cen); hB_c = hdB(cen); hC_c = hdC(cen)
+
+        def _cbg(v):
+            if v>=1.06: return F_VERM
+            if v>=1.00: return PatternFill("solid",fgColor="FFFF00")
+            if v>=0.40: return F_VERDE
+            return F_BRANCO
+
+        _e(ws,_ri,_CF,cen,F_BRANCO,False,"000000",8,False)
+        _e(ws,_ri,_CF+1,f"{oA:.1%}",_cbg(oA),False,"000000",8)
+        _e(ws,_ri,_CF+2,f"{oB:.1%}",_cbg(oB),False,"000000",8)
+        _e(ws,_ri,_CF+3,f"{oC:.1%}",_cbg(oC),False,"000000",8)
+        _e(ws,_ri,_CF+4,aA,F_VERDE if aA else F_AMAR,True,"000000",8)
+        _e(ws,_ri,_CF+5,aB,F_VERDE if aB else F_AMAR,True,"000000",8)
+        _e(ws,_ri,_CF+6,aC,F_AZUL  if aC else F_CINZA,True,"000000",8)
+        _e(ws,_ri,_CF+7,round(hA_c,2) if aA else 0,F_VERDE if aA else F_BRANCO,True,"000000",8)
+        _e(ws,_ri,_CF+8,round(hB_c,2) if aB else 0,F_AMAR  if aB else F_BRANCO,True,"000000",8)
+        _e(ws,_ri,_CF+9,round(hC_c,2) if aC else 0,F_AZUL  if aC else F_BRANCO,True,"000000",8)
+        ws.row_dimensions[_ri].height=13
+        _ri += 1
+
+    # Suporte + totais (igual ao mensal)
+    for _snm,_sk in [("TOTAL DE OPERADORES",None),("LAVADORA E INSPEÇÃO","lavadora"),
+                     ("GRAVAÇÃO E ESTANQUEIDADE","gravacao"),("PRESET","preset"),
+                     ("CORINGA","coringa"),("FACILITADOR","facilitador"),
+                     ("TOTAL POR TURNO",None),("TOTAL FUNCIONÁRIOS",None)]:
+        _bold = "TOTAL" in _snm
+        _bg   = F_AM_JD if _bold else F_BRANCO
+        _fg   = "1F4D19" if _bold else "000000"
+        _e(ws,_ri,_CF,_snm,_bg,_bold,_fg,8,False)
+        if _sk:
+            sA=sup_ano(_sk,"A"); sB=sup_ano(_sk,"B"); sC=sup_ano(_sk,"C")
+            for _ci,_v in [(_CF+4,sA),(_CF+5,sB),(_CF+6,sC)]:
+                _e(ws,_ri,_ci,_v,F_VERDE if _ci==_CF+4 else (F_AMAR if _ci==_CF+5 else F_AZUL),True,"000000",8)
+            for _ci,_v,_he in [(_CF+7,sA,heA),(_CF+8,sB,heB),(_CF+9,sC,heC)]:
+                _hv = _v*_he*dias_ano
+                _e(ws,_ri,_ci,round(_hv,2) if _hv else 0,
+                   F_VERDE if _ci==_CF+7 else (F_AMAR if _ci==_CF+8 else F_AZUL),True,"000000",8)
+        elif "TOTAL DE OPERADORES" in _snm:
+            for _ci,_v,_ff in [(_CF+4,op_A_ano,F_VERDE),(_CF+5,op_B_ano,F_AMAR),(_CF+6,op_C_ano,F_AZUL)]:
+                _e(ws,_ri,_ci,_v,F_AM_JD,True,"1F4D19",8)
+            for _ci,_v,_he in [(_CF+7,op_A_ano,heA),(_CF+8,op_B_ano,heB),(_CF+9,op_C_ano,heC)]:
+                _e(ws,_ri,_ci,round(_v*_he*dias_ano,2),F_AM_JD,True,"1F4D19",8)
+        elif "TOTAL POR TURNO" in _snm:
+            for _ci,_v in [(_CF+4,tot_A_calc),(_CF+5,tot_B_calc),(_CF+6,tot_C_calc)]:
+                _e(ws,_ri,_ci,_v,F_AM_JD,True,"1F4D19",8)
+            for _ci,_v,_he in [(_CF+7,tot_A_calc,heA),(_CF+8,tot_B_calc,heB),(_CF+9,tot_C_calc,heC)]:
+                _e(ws,_ri,_ci,round(_v*_he*dias_ano,2),F_AM_JD,True,"1F4D19",8)
+        elif "FUNCIONÁRIOS" in _snm:
+            _e(ws,_ri,_CF+4,tot_func_calc,F_AM_JD,True,"1F4D19",9)
+            _th = tot_A_calc*heA*dias_ano+tot_B_calc*heB*dias_ano+tot_C_calc*heC*dias_ano
+            _e(ws,_ri,_CF+7,round(_th,2),F_AM_JD,True,"1F4D19",9)
+        ws.row_dimensions[_ri].height=13; _ri+=1
+
+    # Produtividades (igual ao mensal)
+    _ri += 1
+    for _pnm,_pv,_dest in [
+        ("PRODUTIVIDADE POR TEMPO DE CICLO OPERACIONAL",  prod_co, False),
+        ("PRODUTIVIDADE POR TEMPO DE CICLO TOTAL",        prod_ct, False),
+        ("PRODUTIVIDADE POR TEMPO DE LABOR OPERACIONAL",  prod_lo, False),
+        ("PRODUTIVIDADE POR TEMPO DE LABOR TOTAL ★",      prod_lt, True),
+    ]:
+        ws.merge_cells(start_row=_ri,start_column=_CF,end_row=_ri,end_column=_CF+8)
+        _e(ws,_ri,_CF,_pnm,F_AM_JD if _dest else F_BRANCO,_dest,"1F4D19" if _dest else "000000",8,False)
+        _e(ws,_ri,_CF+9,f"{_pv:.1%}",F_AM_JD if _dest else F_BRANCO,_dest,"1F4D19" if _dest else "000000",8)
+        ws.row_dimensions[_ri].height=14; _ri+=1
+
+    # ── Larguras das colunas ──────────────────────────────────────────────────
+    for ci,w in enumerate([9,8,16,6,5,9,9,8,8,8,8,9,8,8,8,12,12,8],1):
         ws.column_dimensions[get_column_letter(ci)].width = w
+    for _ci,_ww in [(_CF,14),(_CF+1,8),(_CF+2,8),(_CF+3,8),
+                    (_CF+4,8),(_CF+5,8),(_CF+6,8),
+                    (_CF+7,10),(_CF+8,10),(_CF+9,10)]:
+        ws.column_dimensions[get_column_letter(_ci)].width = _ww
 
 
 def exportar(resultados):
