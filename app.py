@@ -1292,6 +1292,236 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None):
         ws.column_dimensions[get_column_letter(_ci)].width = _ww
 
 
+
+def exportar_cenario_vs_base(res_base, res_cenario, mes, nome_cenario):
+    """
+    Gera Excel com 3 abas:
+      1. '{mes} — Base'   : resultado original do mês
+      2. '{mes} — {nome}' : resultado do cenário no mês
+      3. 'Comparação'     : tabela de variações Δ entre base e cenário
+    """
+    out = BytesIO()
+    wb  = openpyxl.Workbook()
+    brd = Border(left=Side(style='thin',color='CCCCCC'),right=Side(style='thin',color='CCCCCC'),
+                 top=Side(style='thin',color='CCCCCC'),bottom=Side(style='thin',color='CCCCCC'))
+    JD_V = JD_VERDE_ESC.replace("#",""); JD_Y = JD_AMARELO.replace("#","")
+
+    def ec(c, bg="FFFFFF", fg="000000", bold=False, center=True):
+        c.font  = Font(name="Arial", bold=bold, color=fg, size=9)
+        c.fill  = PatternFill("solid", fgColor=bg)
+        c.alignment = Alignment(horizontal="center" if center else "left", vertical="center")
+        c.border = brd
+
+    def escrever_mes(ws, r, titulo):
+        hA, hB, hC, dias = r["hA"], r["hB"], r["hC"], r["dias"]
+        heA, heB, heC = r.get("heA",hA), r.get("heB",hB), r.get("heC",hC)
+        for ci, txt in [(1,titulo),(2,"TURNO A"),(3,"TURNO B"),(4,"TURNO C"),
+                        (5,"TURNO A"),(6,"TURNO B"),(7,"TURNO C"),
+                        (8,"TURNO A"),(9,"TURNO B"),(10,"TURNO C")]:
+            ec(ws.cell(1,ci,txt), JD_V, "FFFFFF", True)
+        ws.row_dimensions[1].height = 16
+        JD_V2 = JD_VERDE_ESC.replace("#",""); JD_Y2 = JD_AMARELO.replace("#","")
+        ws.merge_cells("B2:D2")
+        c2=ws.cell(2,1,"CENTRO"); c2.font=Font(name="Arial",bold=True,color="FFFFFF",size=9); c2.fill=PatternFill("solid",fgColor=JD_V2); c2.alignment=Alignment(horizontal="center",vertical="center"); c2.border=brd
+        c2=ws.cell(2,2,"% OCUPAÇÃO"); c2.font=Font(name="Arial",bold=True,color="FFFFFF",size=9); c2.fill=PatternFill("solid",fgColor=JD_V2); c2.alignment=Alignment(horizontal="center",vertical="center"); c2.border=brd
+        ws.merge_cells("E2:G2")
+        c2=ws.cell(2,5,"TURNO ATIVO (0=inativo 1=ativo)"); c2.font=Font(name="Arial",bold=True,color=JD_V2,size=9); c2.fill=PatternFill("solid",fgColor=JD_Y2); c2.alignment=Alignment(horizontal="center",vertical="center"); c2.border=brd
+        ws.merge_cells("H2:J2")
+        c2=ws.cell(2,8,"HORAS DISPONÍVEIS NO MÊS"); c2.font=Font(name="Arial",bold=True,color="FFFFFF",size=9); c2.fill=PatternFill("solid",fgColor="1565C0"); c2.alignment=Alignment(horizontal="center",vertical="center"); c2.border=brd
+        ws.row_dimensions[2].height = 16
+        def cbg(v):
+            if v>1.0: return "FFCDD2"
+            if v>=0.85: return "FFFDE7"
+            return "E8F5E9"
+        ri = 3
+        for _, row in r["centros"].iterrows():
+            for ci,(val,bg,ctr) in enumerate([
+                (row.centro,"FFFFFF",False),
+                (f"{row.ocup_A:.1%}",cbg(row.ocup_A),True),(f"{row.ocup_B:.1%}",cbg(row.ocup_B),True),(f"{row.ocup_C:.1%}",cbg(row.ocup_C),True),
+                (row.ativo_A,"B3E5FC" if row.ativo_A else "FFFDE7",True),(row.ativo_B,"B3E5FC" if row.ativo_B else "FFFDE7",True),(row.ativo_C,"B3E5FC" if row.ativo_C else "FFFDE7",True),
+                (f"{row.horas_disp_A:.2f}" if row.ativo_A else "0","B3E5FC" if row.ativo_A else "F5F5F5",True),
+                (f"{row.horas_disp_B:.2f}" if row.ativo_B else "0","B3E5FC" if row.ativo_B else "F5F5F5",True),
+                (f"{row.horas_disp_C:.2f}" if row.ativo_C else "0","B3E5FC" if row.ativo_C else "F5F5F5",True)],1):
+                ec(ws.cell(ri,ci,val), bg, center=ctr)
+            ri += 1
+        sup = r["suporte"]
+        for nome,key in [("TOTAL DE OPERADORES",None),("LAVADORA E INSPEÇÃO","lavadora"),
+                         ("GRAVAÇÃO E ESTANQUEIDADE","gravacao"),("PRESET","preset"),
+                         ("CORINGA","coringa"),("FACILITADOR","facilitador"),
+                         ("TOTAL POR TURNO",None),("TOTAL FUNCIONÁRIOS",None)]:
+            bold = "TOTAL" in nome; bg_r = JD_Y if bold else "FFFFFF"; fg_r = JD_V if bold else "000000"
+            ec(ws.cell(ri,1,nome), bg_r, fg_r, bold, False)
+            if key:
+                s = sup[key]
+                for ci,t in [(5,"A"),(6,"B"),(7,"C")]:
+                    ec(ws.cell(ri,ci,s[t]), "B3E5FC" if s[t] else "FFFDE7", bold=bold)
+                for ci,t,h in [(8,"A",heA),(9,"B",heB),(10,"C",heC)]:
+                    v2 = s[t]*h*dias; ec(ws.cell(ri,ci,f"{v2:.2f}" if v2 else "0"),"B3E5FC" if v2 else "F5F5F5",bold=bold)
+            elif "TOTAL DE OPERADORES" in nome:
+                for ci,v2 in [(5,r["op_A"]),(6,r["op_B"]),(7,r["op_C"])]:
+                    ec(ws.cell(ri,ci,v2), JD_Y, JD_V, True)
+                for ci,v2,h in [(8,r["op_A"],heA),(9,r["op_B"],heB),(10,r["op_C"],heC)]:
+                    ec(ws.cell(ri,ci,f"{v2*h*dias:.2f}"), JD_Y, JD_V, True)
+            elif "TOTAL POR TURNO" in nome:
+                for ci,v2 in [(5,r["tot_A"]),(6,r["tot_B"]),(7,r["tot_C"])]:
+                    ec(ws.cell(ri,ci,v2), JD_Y, JD_V, True)
+                for ci,v2,h in [(8,r["tot_A"],heA),(9,r["tot_B"],heB),(10,r["tot_C"],heC)]:
+                    ec(ws.cell(ri,ci,f"{v2*h*dias:.2f}"), JD_Y, JD_V, True)
+            elif "FUNCIONÁRIOS" in nome:
+                ec(ws.cell(ri,4,r["total"]), JD_Y, JD_V, True)
+                tot_h = r["tot_A"]*heA*dias + r["tot_B"]*heB*dias + r["tot_C"]*heC*dias
+                ec(ws.cell(ri,8,f"{tot_h:.2f}"), JD_Y, JD_V, True)
+            ri += 1
+        ri += 1
+        for nm2, v2, dest in [("PROD. CICLO OPERACIONAL",r["prod_ciclo_op"],False),
+                               ("PROD. CICLO TOTAL",r["prod_ciclo_tot"],False),
+                               ("PROD. LABOR OPERACIONAL",r["prod_labor_op"],False),
+                               ("PROD. LABOR TOTAL ★",r["prod_labor_tot"],True)]:
+            ws.merge_cells(f"H{ri}:I{ri}")
+            ec(ws.cell(ri,8,nm2), JD_Y if dest else "FFFFFF", JD_V if dest else "000000", dest, False)
+            ec(ws.cell(ri,10,f"{v2:.1%}"), JD_Y if dest else "FFFFFF", JD_V if dest else "000000", dest)
+            ri += 1
+        for ci,w in enumerate([14,8,8,8,8,8,8,24,10,10],1):
+            ws.column_dimensions[get_column_letter(ci)].width = w
+
+    r_b = res_base.get(mes)
+    r_c = res_cenario.get(mes)
+
+    # ── Aba 1: Base ──────────────────────────────────────────────────────────
+    ws1 = wb.active; ws1.title = f"{mes[:8]} Base"[:31]
+    if r_b: escrever_mes(ws1, r_b, f"{mes.upper()} — BASE")
+    else:   ws1.cell(1,1,"Sem dados para este mês no cenário base")
+
+    # ── Aba 2: Cenário ────────────────────────────────────────────────────────
+    ws2 = wb.create_sheet(f"{mes[:6]} {nome_cenario[:8]}"[:31])
+    if r_c: escrever_mes(ws2, r_c, f"{mes.upper()} — {nome_cenario.upper()}")
+    else:   ws2.cell(1,1,"Sem dados para este mês no cenário")
+
+    # ── Aba 3: Comparação Δ ───────────────────────────────────────────────────
+    ws3 = wb.create_sheet("Comparação")
+
+    ws3.merge_cells("A1:N1")
+    ct = ws3.cell(1,1,f"COMPARAÇÃO — {mes.upper()}  |  Base  vs  {nome_cenario}")
+    ct.font=Font(name="Arial",bold=True,color="FFFFFF",size=11)
+    ct.fill=PatternFill("solid",fgColor=JD_V)
+    ct.alignment=Alignment(horizontal="center",vertical="center"); ct.border=brd
+    ws3.row_dimensions[1].height=24
+
+    def _delta_fmt(val, fmt="d"):
+        if val==0: return "+0"
+        if fmt=="pct": return f"{val:+.1%}"
+        return f"{val:+d}"
+
+    # Resumo geral
+    for i,h in enumerate(["","Base","Cenário","Δ (Cen − Base)"],1):
+        ec(ws3.cell(2,i,h),JD_V,"FFFFFF",True)
+    ws3.row_dimensions[2].height=15
+
+    metricas=[]
+    if r_b and r_c:
+        metricas=[
+            ("Turno A (total com suporte)",r_b["tot_A"],r_c["tot_A"]),
+            ("Turno B (total com suporte)",r_b["tot_B"],r_c["tot_B"]),
+            ("Turno C (total com suporte)",r_b["tot_C"],r_c["tot_C"]),
+            ("TOTAL FUNCIONÁRIOS",          r_b["total"],r_c["total"]),
+            ("Operadores CEN — A",          r_b["op_A"], r_c["op_A"]),
+            ("Operadores CEN — B",          r_b["op_B"], r_c["op_B"]),
+            ("Operadores CEN — C",          r_b["op_C"], r_c["op_C"]),
+        ]
+    for ri3,(nome3,vb3,vc3) in enumerate(metricas,3):
+        is_total="TOTAL" in nome3
+        delta3=vc3-vb3
+        ec(ws3.cell(ri3,1,nome3),JD_Y if is_total else "F5F5F5",JD_V if is_total else "000000",is_total,False)
+        ec(ws3.cell(ri3,2,vb3),"EAF3FB","000000",is_total)
+        ec(ws3.cell(ri3,3,vc3),"EAF3FB","000000",is_total)
+        cor_d="003D10" if delta3<0 else ("3D0000" if delta3>0 else "555555")
+        bg_d= "B9F6CA" if delta3<0 else ("FFCDD2" if delta3>0 else "F5F5F5")
+        ec(ws3.cell(ri3,4,_delta_fmt(delta3)),bg_d,cor_d,is_total)
+        ws3.row_dimensions[ri3].height=14
+    ri3=len(metricas)+3
+
+    # Produtividades
+    ri3+=1
+    ws3.merge_cells(f"A{ri3}:D{ri3}")
+    hp=ws3.cell(ri3,1,"PRODUTIVIDADES")
+    hp.font=Font(name="Arial",bold=True,color="FFFFFF",size=9)
+    hp.fill=PatternFill("solid",fgColor=JD_V)
+    hp.alignment=Alignment(horizontal="left",vertical="center"); hp.border=brd
+    ws3.row_dimensions[ri3].height=15; ri3+=1
+    for i2,h2 in enumerate(["Indicador","Base","Cenário","Δ"],1):
+        ec(ws3.cell(ri3,i2,h2),JD_V,"FFFFFF",True)
+    ws3.row_dimensions[ri3].height=14; ri3+=1
+    prods=[]
+    if r_b and r_c:
+        prods=[
+            ("Ciclo Operacional", r_b["prod_ciclo_op"],  r_c["prod_ciclo_op"],  False),
+            ("Ciclo Total",       r_b["prod_ciclo_tot"], r_c["prod_ciclo_tot"], False),
+            ("Labor Operacional", r_b["prod_labor_op"],  r_c["prod_labor_op"],  False),
+            ("Labor Total ★",     r_b["prod_labor_tot"], r_c["prod_labor_tot"], True),
+        ]
+    for nome3,vb3,vc3,dest in prods:
+        delta3=vc3-vb3
+        # Para produtividade: verde = melhorou (subiu), vermelho = caiu
+        bg_d="B9F6CA" if delta3>0 else ("FFCDD2" if delta3<0 else "F5F5F5")
+        cor_d="003D10" if delta3>0 else ("3D0000" if delta3<0 else "555555")
+        ec(ws3.cell(ri3,1,nome3),       JD_Y if dest else "F5F5F5",JD_V if dest else "000000",dest,False)
+        ec(ws3.cell(ri3,2,f"{vb3:.1%}"),JD_Y if dest else "EAF3FB",JD_V if dest else "000000",dest)
+        ec(ws3.cell(ri3,3,f"{vc3:.1%}"),JD_Y if dest else "EAF3FB",JD_V if dest else "000000",dest)
+        ec(ws3.cell(ri3,4,_delta_fmt(delta3,"pct")),bg_d,cor_d,dest)
+        ws3.row_dimensions[ri3].height=14; ri3+=1
+
+    # Detalhamento por centro
+    ri3+=1
+    ws3.merge_cells(f"A{ri3}:N{ri3}")
+    hc3=ws3.cell(ri3,1,"DETALHAMENTO POR CENTRO")
+    hc3.font=Font(name="Arial",bold=True,color="FFFFFF",size=9)
+    hc3.fill=PatternFill("solid",fgColor=JD_V)
+    hc3.alignment=Alignment(horizontal="left",vertical="center"); hc3.border=brd
+    ws3.row_dimensions[ri3].height=15; ri3+=1
+    hdrs_det=["Centro",
+              "Base %A","Base %B","Base %C","Base AtivoA","Base AtivoB","Base AtivoC",
+              "Cen %A","Cen %B","Cen %C","Cen AtivoA","Cen AtivoB","Cen AtivoC","Mudou"]
+    for ci3,h3 in enumerate(hdrs_det,1):
+        ec(ws3.cell(ri3,ci3,h3),JD_V,"FFFFFF",True)
+    ws3.row_dimensions[ri3].height=14; ri3+=1
+    if r_b and r_c:
+        centros_u=sorted(set(r_b["centros"].centro.tolist()+r_c["centros"].centro.tolist()))
+        for cen in centros_u:
+            rb_c=r_b["centros"][r_b["centros"].centro==cen]
+            rc_c=r_c["centros"][r_c["centros"].centro==cen]
+            if rb_c.empty or rc_c.empty: continue
+            rb=rb_c.iloc[0]; rc=rc_c.iloc[0]
+            mudouA=int(rb.ativo_A)!=int(rc.ativo_A)
+            mudouB=int(rb.ativo_B)!=int(rc.ativo_B)
+            mudouC=int(rb.ativo_C)!=int(rc.ativo_C)
+            qualquer=mudouA or mudouB or mudouC
+            bg_row="FFF9C4" if qualquer else "FFFFFF"
+            ec(ws3.cell(ri3,1,cen),bg_row,"000000",qualquer,False)
+            ec(ws3.cell(ri3,2,f"{rb.ocup_A:.1%}"),bg_row,"000000")
+            ec(ws3.cell(ri3,3,f"{rb.ocup_B:.1%}"),bg_row,"000000")
+            ec(ws3.cell(ri3,4,f"{rb.ocup_C:.1%}"),bg_row,"000000")
+            def _at(at): return "B3E5FC" if at else "FFFDE7"
+            ec(ws3.cell(ri3,5,int(rb.ativo_A)),_at(rb.ativo_A),"000000")
+            ec(ws3.cell(ri3,6,int(rb.ativo_B)),_at(rb.ativo_B),"000000")
+            ec(ws3.cell(ri3,7,int(rb.ativo_C)),_at(rb.ativo_C),"000000")
+            ec(ws3.cell(ri3,8, f"{rc.ocup_A:.1%}"),bg_row,"000000")
+            ec(ws3.cell(ri3,9, f"{rc.ocup_B:.1%}"),bg_row,"000000")
+            ec(ws3.cell(ri3,10,f"{rc.ocup_C:.1%}"),bg_row,"000000")
+            def _at_cen(at_c,mudou): return "FFCDD2" if mudou else ("B3E5FC" if at_c else "FFFDE7")
+            ec(ws3.cell(ri3,11,int(rc.ativo_A)),_at_cen(rc.ativo_A,mudouA),"000000",mudouA)
+            ec(ws3.cell(ri3,12,int(rc.ativo_B)),_at_cen(rc.ativo_B,mudouB),"000000",mudouB)
+            ec(ws3.cell(ri3,13,int(rc.ativo_C)),_at_cen(rc.ativo_C,mudouC),"000000",mudouC)
+            mudou_txt="✅ Igual" if not qualquer else                       " + ".join([t for t,m in [("A",mudouA),("B",mudouB),("C",mudouC)] if m])+" alterado(s)"
+            ec(ws3.cell(ri3,14,mudou_txt),"FFCDD2" if qualquer else "E8F5E9","000000",qualquer)
+            ws3.row_dimensions[ri3].height=13; ri3+=1
+
+    for ci3,w3 in enumerate([16,9,9,9,9,9,9,9,9,9,9,9,9,14],1):
+        ws3.column_dimensions[get_column_letter(ci3)].width=w3
+
+    wb.save(out); out.seek(0)
+    return out
+
+
 def exportar(resultados):
     out=BytesIO(); wb=openpyxl.Workbook()
     brd=Border(left=Side(style='thin',color='CCCCCC'),right=Side(style='thin',color='CCCCCC'),
@@ -3722,10 +3952,12 @@ with tab_cen:
         col_exp, col_del = st.columns([3,1])
         with col_exp:
             for nm, v in st.session_state.cenarios.items():
+                mes_cen = v.get("mes", mes_cmp)
                 st.download_button(
-                    f"📥 Exportar — {nm}",
-                    data=exportar(v["resultados"]),
-                    file_name=f"cenario_{nm.replace(' ','_')}.xlsx",
+                    f"📥 Exportar — {nm}  ({mes_cen})",
+                    data=exportar_cenario_vs_base(
+                        res_base, v["resultados"], mes_cen, nm),
+                    file_name=f"cenario_{nm.replace(' ','_')}_{mes_cen}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     key=f"dl_cen_{nm}")
 
