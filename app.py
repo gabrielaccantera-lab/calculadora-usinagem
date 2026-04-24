@@ -919,8 +919,8 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None):
         ws.column_dimensions[get_column_letter(_ci)].width=_ww
 
 @st.cache_data(show_spinner=False)
-def exportar_cenario_vs_base_cached(hash_key, _res_base, _res_cenario, mes, nome_cenario):
-    return exportar_cenario_vs_base(_res_base, _res_cenario, mes, nome_cenario)
+def exportar_cenario_vs_base_cached(hash_key, _res_base, _res_cenario, meses_lista, nome_cenario):
+    return exportar_cenario_vs_base(_res_base, _res_cenario, meses_lista, nome_cenario)
 
 @st.cache_data(show_spinner=False)
 def exportar_cached(res_hash, _resultados, _tempo=None, _dist=None, _aplic=None, _pmp=None):
@@ -1006,7 +1006,14 @@ def exportar(resultados, _tempo=None, _dist=None, _aplic=None, _pmp=None):
     gerar_aba_anual(wb,resultados,cp_data=_cp_ano)
     wb.save(out); out.seek(0); return out
 
-def exportar_cenario_vs_base(res_base, res_cenario, mes, nome_cenario):
+def exportar_cenario_vs_base(res_base, res_cenario, meses_lista, nome_cenario):
+    """Exporta base vs cenário para todos os meses em meses_lista.
+    Gera: uma aba BASE por mês, uma aba CENÁRIO por mês, e uma aba Comparação consolidada.
+    """
+    # meses_lista pode ser str (compatibilidade retroativa) ou list
+    if isinstance(meses_lista, str):
+        meses_lista = [meses_lista]
+
     out=BytesIO(); wb=openpyxl.Workbook()
     brd=Border(left=Side(style='thin',color='CCCCCC'),right=Side(style='thin',color='CCCCCC'),top=Side(style='thin',color='CCCCCC'),bottom=Side(style='thin',color='CCCCCC'))
     JD_V=JD_VERDE_ESC.replace("#",""); JD_Y=JD_AMARELO.replace("#","")
@@ -1058,31 +1065,68 @@ def exportar_cenario_vs_base(res_base, res_cenario, mes, nome_cenario):
             ec_c(ws.cell(ri,10,f"{v2:.1%}"),JD_Y if dest else "FFFFFF",JD_V if dest else "000000",dest)
             ri+=1
         for ci,w in enumerate([14,8,8,8,8,8,8,24,10,10],1): ws.column_dimensions[get_column_letter(ci)].width=w
-    r_b=res_base.get(mes); r_c=res_cenario.get(mes)
-    ws1=wb.active; ws1.title=f"{mes[:8]} Base"[:31]
-    if r_b: escrever_mes(ws1,r_b,f"{mes.upper()} — BASE")
-    else: ws1.cell(1,1,"Sem dados para este mês no cenário base")
-    ws2=wb.create_sheet(f"{mes[:6]} {nome_cenario[:8]}"[:31])
-    if r_c: escrever_mes(ws2,r_c,f"{mes.upper()} — {nome_cenario.upper()}")
-    else: ws2.cell(1,1,"Sem dados para este mês no cenário")
-    ws3=wb.create_sheet("Comparação")
+
+    # ── gera uma aba BASE e uma aba CENÁRIO para cada mês ─────────────
+    first_sheet_used = False
+    _used_titles = set()
+    def _unique_title(base_title):
+        t = base_title[:31]
+        if t not in _used_titles:
+            _used_titles.add(t); return t
+        for i in range(2, 99):
+            tt = f"{base_title[:28]}_{i}"[:31]
+            if tt not in _used_titles:
+                _used_titles.add(tt); return tt
+        return base_title[:31]
+
+    for mes in meses_lista:
+        r_b = res_base.get(mes); r_c = res_cenario.get(mes)
+        abrev = mes[:3].upper()
+        # Aba BASE
+        title_base = _unique_title(f"{abrev} Base")
+        if not first_sheet_used:
+            ws1 = wb.active; ws1.title = title_base; first_sheet_used = True
+        else:
+            ws1 = wb.create_sheet(title_base)
+        if r_b: escrever_mes(ws1, r_b, f"{mes.upper()} — BASE")
+        else: ws1.cell(1,1,"Sem dados para este mês no cenário base")
+        # Aba CENÁRIO
+        title_cen = _unique_title(f"{abrev} {nome_cenario[:10]}")
+        ws2 = wb.create_sheet(title_cen)
+        if r_c: escrever_mes(ws2, r_c, f"{mes.upper()} — {nome_cenario.upper()}")
+        else: ws2.cell(1,1,"Sem dados para este mês no cenário")
+
+    # ── aba Comparação consolidada (todos os meses) ───────────────────
+    ws3 = wb.create_sheet("Comparação")
+    header_title = f"COMPARAÇÃO | Base vs {nome_cenario} | {' / '.join(m[:3].upper() for m in meses_lista)}"
     ws3.merge_cells("A1:N1")
-    ct=ws3.cell(1,1,f"COMPARAÇÃO — {mes.upper()} | Base vs {nome_cenario}")
-    ct.font=Font(name="Arial",bold=True,color="FFFFFF",size=11); ct.fill=PatternFill("solid",fgColor=JD_V); ct.alignment=Alignment(horizontal="center",vertical="center"); ct.border=brd
+    ct = ws3.cell(1,1,header_title)
+    ct.font=Font(name="Arial",bold=True,color="FFFFFF",size=11); ct.fill=PatternFill("solid",fgColor=JD_V)
+    ct.alignment=Alignment(horizontal="center",vertical="center"); ct.border=brd
     ws3.row_dimensions[1].height=24
-    for i,h in enumerate(["","Base","Cenário","Δ"],1): ec_c(ws3.cell(2,i,h),JD_V,"FFFFFF",True)
+    for i,h in enumerate(["Mês","","Base","Cenário","Δ"],1): ec_c(ws3.cell(2,i,h),JD_V,"FFFFFF",True)
     ws3.row_dimensions[2].height=15
-    metricas=[]
-    if r_b and r_c:
+    ri3 = 3
+    for mes in meses_lista:
+        r_b = res_base.get(mes); r_c = res_cenario.get(mes)
+        if not r_b or not r_c: continue
         metricas=[("Turno A (total)",r_b["tot_A"],r_c["tot_A"]),("Turno B (total)",r_b["tot_B"],r_c["tot_B"]),("Turno C (total)",r_b["tot_C"],r_c["tot_C"]),("TOTAL FUNCIONÁRIOS",r_b["total"],r_c["total"]),("Operadores CEN A",r_b["op_A"],r_c["op_A"]),("Operadores CEN B",r_b["op_B"],r_c["op_B"]),("Operadores CEN C",r_b["op_C"],r_c["op_C"])]
-    for ri3,(nome3,vb3,vc3) in enumerate(metricas,3):
-        is_total="TOTAL" in nome3; delta3=vc3-vb3
-        ec_c(ws3.cell(ri3,1,nome3),JD_Y if is_total else "F5F5F5",JD_V if is_total else "000000",is_total,False)
-        ec_c(ws3.cell(ri3,2,vb3),"EAF3FB","000000",is_total); ec_c(ws3.cell(ri3,3,vc3),"EAF3FB","000000",is_total)
-        cor_d="003D10" if delta3<0 else ("3D0000" if delta3>0 else "555555")
-        bg_d="B9F6CA" if delta3<0 else ("FFCDD2" if delta3>0 else "F5F5F5")
-        ec_c(ws3.cell(ri3,4,f"{delta3:+d}"),bg_d,cor_d,is_total); ws3.row_dimensions[ri3].height=14
-    for ci,w in enumerate([16,9,9,9],1): ws3.column_dimensions[get_column_letter(ci)].width=w
+        # Cabeçalho do mês
+        ws3.merge_cells(start_row=ri3,start_column=1,end_row=ri3,end_column=5)
+        mc = ws3.cell(ri3,1,mes.upper())
+        mc.font=Font(name="Arial",bold=True,color="FFFFFF",size=9); mc.fill=PatternFill("solid",fgColor="1F4D19")
+        mc.alignment=Alignment(horizontal="left",vertical="center"); mc.border=brd
+        ws3.row_dimensions[ri3].height=14; ri3+=1
+        for nome3,vb3,vc3 in metricas:
+            is_total="TOTAL" in nome3; delta3=vc3-vb3
+            ec_c(ws3.cell(ri3,1,mes[:3].upper()),"F0F0F0","888888",False,True)
+            ec_c(ws3.cell(ri3,2,nome3),JD_Y if is_total else "F5F5F5",JD_V if is_total else "000000",is_total,False)
+            ec_c(ws3.cell(ri3,3,vb3),"EAF3FB","000000",is_total); ec_c(ws3.cell(ri3,4,vc3),"EAF3FB","000000",is_total)
+            cor_d="003D10" if delta3<0 else ("3D0000" if delta3>0 else "555555")
+            bg_d="B9F6CA" if delta3<0 else ("FFCDD2" if delta3>0 else "F5F5F5")
+            ec_c(ws3.cell(ri3,5,f"{delta3:+d}"),bg_d,cor_d,is_total); ws3.row_dimensions[ri3].height=14; ri3+=1
+        ri3+=1  # linha em branco entre meses
+    for ci,w in enumerate([8,18,9,9,9],1): ws3.column_dimensions[get_column_letter(ci)].width=w
     wb.save(out); out.seek(0); return out
 
 @st.cache_data(show_spinner=False)
@@ -1922,7 +1966,7 @@ with tab_cen:
                     label_dl = f"📥 {nm} ({_label_meses})"
                     fname_dl = f"cenario_{nm.replace(' ','_')}_{'ANO' if v.get('eh_ano') else '_'.join(m[:3] for m in _meses_exp)}.xlsx"
                     _cen_vs_hash = hash(nm + str(v["resultados"]) + str(_meses_exp))
-                    st.download_button(label_dl, data=exportar_cenario_vs_base_cached(_cen_vs_hash, res_base, v["resultados"], _m_exp, nm),
+                    st.download_button(label_dl, data=exportar_cenario_vs_base_cached(_cen_vs_hash, res_base, v["resultados"], _meses_exp, nm),
                                        file_name=fname_dl, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                        key=f"dl_cen_{nm}")
         with col_del:
