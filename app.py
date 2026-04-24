@@ -672,6 +672,10 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None):
     for _ci,_ww in [(_CF,14),(_CF+1,8),(_CF+2,8),(_CF+3,8),(_CF+4,8),(_CF+5,8),(_CF+6,8),(_CF+7,10),(_CF+8,10),(_CF+9,10)]:
         ws.column_dimensions[get_column_letter(_ci)].width=_ww
 
+@st.cache_data(show_spinner=False)
+def exportar_cached(res_hash, _resultados, _tempo=None, _dist=None, _aplic=None, _pmp=None):
+    return exportar(_resultados, _tempo, _dist, _aplic, _pmp)
+
 def exportar(resultados, _tempo=None, _dist=None, _aplic=None, _pmp=None):
     out=BytesIO(); wb=openpyxl.Workbook()
     brd=Border(left=Side(style='thin',color='CCCCCC'),right=Side(style='thin',color='CCCCCC'),top=Side(style='thin',color='CCCCCC'),bottom=Side(style='thin',color='CCCCCC'))
@@ -831,6 +835,10 @@ def exportar_cenario_vs_base(res_base, res_cenario, mes, nome_cenario):
     for ci,w in enumerate([16,9,9,9],1): ws3.column_dimensions[get_column_letter(ci)].width=w
     wb.save(out); out.seek(0); return out
 
+@st.cache_data(show_spinner=False)
+def comparar_com_excel_cached(res_hash, _res_app, file_hash, _file_bytes, _tempo, _dist, _aplic, _pmp, _dias, _horas_turno, _thresholds, _suporte_cfg):
+    return comparar_com_excel(_res_app, _file_bytes, _tempo, _dist, _aplic, _pmp, _dias, _horas_turno, _thresholds, _suporte_cfg)
+
 def comparar_com_excel(res_app, file_bytes, tempo, dist, aplic, pmp, dias, horas_turno, thresholds, suporte_cfg):
     MAPA={"Novembro":"NovFY26","Dezembro":"DezFY26","Janeiro":"JanFY26","Fevereiro":"FevFY26","Março":"MarFY26","Abril":"AbrFY26","Maio":"MaiFY26","Junho":"JunFY26","Julho":"JulFY26","Agosto":"AgoFY26","Setembro":"SetFY26","Outubro":"OutFY26"}
     try:
@@ -928,6 +936,110 @@ def show_memoria(r, mes, df_intermediario, agg, horas_turno, thresholds):
     buf=BytesIO(); df_intermediario[df_intermediario.mes==mes].to_excel(buf,index=False); buf.seek(0)
     st.download_button("📥 Baixar base completa pós-JOIN",data=buf,file_name=f"base_{mes}.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
+def show_memoria_ano(res_base, df_intermediario, agg, horas_turno, thresholds):
+    """Memória de cálculo consolidada para o ANO inteiro."""
+    meses_ativos = [(m, res_base[m]) for m in MESES if res_base.get(m)]
+    if not meses_ativos:
+        st.warning("Nenhum mês calculado."); return
+
+    st.markdown('<div class="jd-section">Memória de cálculo — 📅 ANO COMPLETO</div>', unsafe_allow_html=True)
+
+    # ── Passo 1: Inputs do ano
+    st.markdown('<div class="mem-step"><span class="step-num">1</span> <b>Inputs consolidados do ano</b></div>', unsafe_allow_html=True)
+    n_meses = len(meses_ativos)
+    dias_ano = sum(r["dias"] for _, r in meses_ativos)
+    hA = meses_ativos[0][1]["hA"]; hB = meses_ativos[0][1]["hB"]; hC = meses_ativos[0][1]["hC"]
+    heA = meses_ativos[0][1].get("heA", hA); heB = meses_ativos[0][1].get("heB", hB); heC = meses_ativos[0][1].get("heC", hC)
+    minA_ano = dias_ano * hA * 60; minB_ano = dias_ano * hB * 60; minC_ano = dias_ano * hC * 60
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Meses calculados", n_meses)
+    c2.metric("Dias trabalhados (total)", dias_ano)
+    c3.metric("Min. disponíveis Turno A", f"{minA_ano:,.0f}")
+    c4.metric("Min. disponíveis Turno B/C", f"{minB_ano:,.0f}")
+
+    # ── Passo 2: Fórmula
+    st.markdown('<div class="mem-step"><span class="step-num">2</span> <b>Índice de ciclo (igual ao mensal)</b></div>', unsafe_allow_html=True)
+    st.markdown('<div class="formula-box">indice_ciclo = (t_ciclo × div_carga × div_volume × vol_interna) ÷ disponibilidade<br>min_ciclo_ano = Σ (indice_ciclo × qtd) em todos os meses</div>', unsafe_allow_html=True)
+
+    # ── Passo 3: Acumulado por centro
+    st.markdown('<div class="mem-step"><span class="step-num">3</span> <b>Minutos acumulados por centro (todos os meses)</b></div>', unsafe_allow_html=True)
+    from collections import defaultdict
+    cen_mc = defaultdict(float); cen_ml = defaultdict(float)
+    for _, r in meses_ativos:
+        for _, row in r["centros"].iterrows():
+            cen_mc[row.centro] += row.min_ciclo_total
+            cen_ml[row.centro] += row.min_labor_total
+    rows_cen = []
+    for cen in sorted(cen_mc.keys()):
+        mc = cen_mc[cen]; ml = cen_ml[cen]
+        pA = mc / minA_ano if minA_ano > 0 else 0
+        pB = mc / minB_ano if minB_ano > 0 else 0
+        pC = mc / minC_ano if minC_ano > 0 else 0
+        thr_A = thresholds["A"] / 100; thr_B = thresholds["B"] / 100; thr_C = thresholds["C"] / 100
+        aA = 1 if pA > thr_A else 0; aB = 1 if pA > thr_B else 0; aC = 1 if pB > thr_C else 0
+        rows_cen.append({"Centro": cen, "Σ Min.Ciclo (ano)": round(mc, 1), "Σ Min.Labor (ano)": round(ml, 1),
+                         "Ocup. A (ano)": pA, "Ocup. B (ano)": pB, "Ocup. C (ano)": pC,
+                         "Ativo A": aA, "Ativo B": aB, "Ativo C": aC})
+    df_ano_cen = pd.DataFrame(rows_cen)
+    st.dataframe(df_ano_cen.style.format({"Ocup. A (ano)": "{:.1%}", "Ocup. B (ano)": "{:.1%}", "Ocup. C (ano)": "{:.1%}", "Σ Min.Ciclo (ano)": "{:,.1f}", "Σ Min.Labor (ano)": "{:,.1f}"}),
+                 use_container_width=True, hide_index=True)
+
+    # ── Passo 4: Ativação de turno
+    st.markdown('<div class="mem-step"><span class="step-num">4</span> <b>Ativação de turno — lógica anual</b></div>', unsafe_allow_html=True)
+    st.markdown(f"A ocupação anual é calculada com os **minutos acumulados do ano inteiro** ÷ minutos disponíveis totais.\n"
+                f"- Turno A abre se ocup_A (ano) > **{thresholds['A']}%**\n"
+                f"- Turno B abre se ocup_A (ano) > **{thresholds['B']}%**\n"
+                f"- Turno C abre se ocup_B (ano) > **{thresholds['C']}%**")
+
+    # ── Passo 5: Resumo mês a mês
+    st.markdown('<div class="mem-step"><span class="step-num">5</span> <b>Evolução mês a mês</b></div>', unsafe_allow_html=True)
+    rows_mes = []
+    for m, r in meses_ativos:
+        rows_mes.append({"Mês": m, "Dias": r["dias"],
+                         "Op. A": r["op_A"], "Op. B": r["op_B"], "Op. C": r["op_C"],
+                         "Total func.": r["total"],
+                         "Labor Total": r["prod_labor_tot"], "Ciclo Total": r["prod_ciclo_tot"]})
+    df_mes = pd.DataFrame(rows_mes)
+    def _sty_mes(row):
+        styles = [""] * len(row)
+        try:
+            lv = float(row["Labor Total"])
+            cor = "#003D10" if lv >= 0.45 else ("#3D2D00" if lv >= 0.30 else "#3D0000")
+            txt = "#B9F6CA" if lv >= 0.45 else ("#FFE57F" if lv >= 0.30 else "#FF8A80")
+            for i, col in enumerate(df_mes.columns):
+                if col == "Labor Total": styles[i] = f"background-color:{cor};color:{txt};font-weight:600"
+        except: pass
+        return styles
+    st.dataframe(df_mes.style.apply(_sty_mes, axis=1).format({"Labor Total": "{:.1%}", "Ciclo Total": "{:.1%}"}),
+                 use_container_width=True, hide_index=True)
+
+    # ── Passo 6: Totais por turno (médias anuais)
+    st.markdown('<div class="mem-step"><span class="step-num">6</span> <b>Totais médios por turno (ano)</b></div>', unsafe_allow_html=True)
+    sh_ciclo = sum(r["h_ciclo"] for _, r in meses_ativos)
+    sh_labor = sum(r["h_labor"] for _, r in meses_ativos)
+    sh_ativos = sum(r["h_ativos"] for _, r in meses_ativos)
+    sh_todos = sum(r["h_todos"] for _, r in meses_ativos)
+    prod_lt = sh_labor / sh_todos if sh_todos > 0 else 0
+    prod_ct = sh_ciclo / sh_todos if sh_todos > 0 else 0
+    prod_lo = sh_labor / sh_ativos if sh_ativos > 0 else 0
+    prod_co = sh_ciclo / sh_ativos if sh_ativos > 0 else 0
+    media_A = sum(r["tot_A"] for _, r in meses_ativos) / n_meses
+    media_B = sum(r["tot_B"] for _, r in meses_ativos) / n_meses
+    media_C = sum(r["tot_C"] for _, r in meses_ativos) / n_meses
+    media_tot = sum(r["total"] for _, r in meses_ativos) / n_meses
+    prod_data = {"Indicador": ["Ciclo Operacional", "Ciclo Total", "Labor Operacional", "⭐ Labor Total"],
+                 "Resultado": [f"{prod_co:.1%}", f"{prod_ct:.1%}", f"{prod_lo:.1%}", f"{prod_lt:.1%}"]}
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Média Turno A", f"{media_A:.1f}"); c2.metric("Média Turno B", f"{media_B:.1f}")
+    c3.metric("Média Turno C", f"{media_C:.1f}"); c4.metric("Média Total", f"{media_tot:.1f}")
+    st.markdown('<div class="formula-box">Labor Total ★ (ano) = Σ horas_labor ÷ Σ horas_todos (todos os meses)</div>', unsafe_allow_html=True)
+    st.dataframe(pd.DataFrame(prod_data), use_container_width=True, hide_index=True)
+
+    # ── Download base completa do ano
+    buf = BytesIO(); df_intermediario.to_excel(buf, index=False); buf.seek(0)
+    st.download_button("📥 Baixar base completa pós-JOIN (ano todo)", data=buf, file_name="base_ano_completo.xlsx",
+                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
 # ════════════════════════════════════════
 # INTERFACE PRINCIPAL
 # ════════════════════════════════════════
@@ -955,7 +1067,7 @@ if not uploaded:
 file_bytes=uploaded.read()
 _file_id=hash(file_bytes)
 if st.session_state.get("_file_id")!=_file_id:
-    for _k in ["diag_mensal_buf","diag_inp_buf","layout_buf","tabelona_buf","tab_pura_buf"]:
+    for _k in ["diag_mensal_buf","diag_inp_buf","layout_buf","tabelona_buf","tab_pura_buf","cmp_cache_key","cmp_cache_resumo","cmp_cache_detalhe","cmp_cache_err"]:
         st.session_state.pop(_k,None)
     st.session_state["_file_id"]=_file_id
 if "log_leitura" not in st.session_state: st.session_state.log_leitura=[]
@@ -1068,9 +1180,11 @@ with tab_inp:
 
 # ── TAB 3 MEMÓRIA
 with tab_mem:
-    _opcoes_mem=[m for m in MESES if res_base.get(m)]
+    _opcoes_mem=[m for m in MESES if res_base.get(m)] + ["📅 ANO (visão consolidada)"]
     mes_mem=st.selectbox("Mês",_opcoes_mem,key="mes_mem")
-    if mes_mem and res_base.get(mes_mem):
+    if mes_mem == "📅 ANO (visão consolidada)":
+        show_memoria_ano(res_base, df_interm, agg_interm, horas_turno, thresholds)
+    elif mes_mem and res_base.get(mes_mem):
         show_memoria(res_base[mes_mem],mes_mem,df_interm,agg_interm,horas_turno,thresholds)
 
 # ── TAB 4 RESULTADOS
@@ -1437,7 +1551,9 @@ with tab_cmp:
     cache_key=f"cmp_{hash(str(dias))}_{hash(str(thresholds))}_{hash(str(horas_turno))}"
     if st.session_state.get("cmp_cache_key")!=cache_key:
         with st.spinner("Comparando..."):
-            _r,_d,_e=comparar_com_excel(res_base,file_bytes,tempo,dist,aplic,pmp,dias,horas_turno,thresholds,suporte_cfg)
+            _res_hash = hash(str(res_base))
+            _file_hash = hash(file_bytes)
+            _r,_d,_e=comparar_com_excel_cached(_res_hash, res_base, _file_hash, file_bytes, tempo, dist, aplic, pmp, dias, horas_turno, thresholds, suporte_cfg)
         st.session_state["cmp_cache_key"]=cache_key; st.session_state["cmp_cache_resumo"]=_r; st.session_state["cmp_cache_detalhe"]=_d; st.session_state["cmp_cache_err"]=_e
     df_resumo=st.session_state["cmp_cache_resumo"]; err=st.session_state["cmp_cache_err"]
     if err: st.error(err)
@@ -1486,7 +1602,8 @@ with tab_exp:
     c1,c2=st.columns(2)
     with c1:
         st.markdown("**Resultado completo (todas as abas)**")
-        st.download_button("📥 Baixar resultado base",data=exportar(res_base,tempo,dist,aplic,pmp),file_name="resultado_usinagem.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_res_base")
+        _exp_hash = hash(str(res_base) + str(horas_turno) + str(thresholds))
+        st.download_button("📥 Baixar resultado base",data=exportar_cached(_exp_hash, res_base, tempo, dist, aplic, pmp),file_name="resultado_usinagem.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_res_base")
     with c2:
         st.markdown("**Base tratada (pós-JOIN)**")
         def _to_xlsx_full():
@@ -1495,4 +1612,5 @@ with tab_exp:
     if st.session_state.get("cenarios"):
         st.markdown('<div class="jd-sub">Cenários salvos</div>',unsafe_allow_html=True)
         for nm,v in st.session_state.cenarios.items():
-            st.download_button(f"📥 Cenário: {nm}",data=exportar(v["resultados"],tempo,dist,aplic,pmp),file_name=f"cenario_{nm.replace(' ','_')}.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key=f"exp_{nm}")
+            _cen_hash = hash(str(v["resultados"]) + nm)
+            st.download_button(f"📥 Cenário: {nm}",data=exportar_cached(_cen_hash, v["resultados"],tempo,dist,aplic,pmp),file_name=f"cenario_{nm.replace(' ','_')}.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key=f"exp_{nm}")
