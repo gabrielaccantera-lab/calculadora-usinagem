@@ -3545,7 +3545,7 @@ with st.sidebar:
         ("facilitador","Facilitador",{"A":1,"B":1,"C":0}),
     ]:
         with st.expander(f"🔧 {label}"):
-            modo = st.radio("",["Automático","Manual"],key=f"m_{key}",horizontal=True)
+            modo = st.radio("Modo de configuração",["Automático","Manual"],key=f"m_{key}",horizontal=True,label_visibility="collapsed")
             if modo=="Automático":
                 st.caption(f"Padrão: A={defs['A']} · B={defs['B']} · C={defs['C']}")
                 suporte_cfg[key]={"modo":"auto",**defs}
@@ -3838,9 +3838,9 @@ with tab_cen:
                 eC="🔴" if rc.ocup_C>1 else ("🟡" if rc.ocup_C>=0.85 else "🟢")
                 c0,c1,c2,c3 = st.columns([3,1,1,1])
                 c0.markdown(f"`{cen}` {eA}{rc.ocup_A:.0%}/{eB}{rc.ocup_B:.0%}/{eC}{rc.ocup_C:.0%}")
-                vA=c1.number_input("",0,5,int(rc.ativo_A),key=f"n_{novo_nome}_{cen}_A",label_visibility="collapsed",help=f"Base:{rc.ativo_A}")
-                vB=c2.number_input("",0,5,int(rc.ativo_B),key=f"n_{novo_nome}_{cen}_B",label_visibility="collapsed",help=f"Base:{rc.ativo_B}")
-                vC=c3.number_input("",0,5,int(rc.ativo_C),key=f"n_{novo_nome}_{cen}_C",label_visibility="collapsed",help=f"Base:{rc.ativo_C}")
+                vA=c1.number_input("Turno A",0,5,int(rc.ativo_A),key=f"n_{novo_nome}_{cen}_A",label_visibility="collapsed",help=f"Base:{rc.ativo_A}")
+                vB=c2.number_input("Turno B",0,5,int(rc.ativo_B),key=f"n_{novo_nome}_{cen}_B",label_visibility="collapsed",help=f"Base:{rc.ativo_B}")
+                vC=c3.number_input("Turno C",0,5,int(rc.ativo_C),key=f"n_{novo_nome}_{cen}_C",label_visibility="collapsed",help=f"Base:{rc.ativo_C}")
                 novo_ov[cen]={"A":vA,"B":vB,"C":vC}
             if st.button("💾 Salvar cenário", type="primary", key="btn_salvar_cen"):
                 ov_c={mes_novo:novo_ov}
@@ -4120,8 +4120,10 @@ está diferente do que foi usado para gerar aquele Excel. O diagnóstico abaixo 
                     styles.append("")
             return styles
 
+        # Converter para string para evitar erro de serialização Arrow com tipos mistos
+        df_vis_str = df_vis.astype(str)
         st.dataframe(
-            df_vis.style.apply(style_resumo, axis=1),
+            df_vis_str.style.apply(style_resumo, axis=1),
             use_container_width=True, hide_index=True
         )
 
@@ -4198,7 +4200,15 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                 agg_cp_t=df_all_t.groupby(["centro","peca","mes"])[["min_ciclo","min_labor"]].sum()
 
                 wb_r=_opx.load_workbook(BytesIO(file_bytes),read_only=True,data_only=True)
-                ws_nov_t=wb_r[next(a for a in ["NovFY26","DezFY26"] if a in wb_r.sheetnames)]
+                _aba_ref_t=next((a for a in ["NovFY26","DezFY26","JanFY26","FevFY26","MarFY26","AbrFY26",
+                                              "MaiFY26","JunFY26","JulFY26","AgoFY26","SetFY26","OutFY26"]
+                                 if a in wb_r.sheetnames), None)
+                if _aba_ref_t is None:
+                    st.error("❌ Nenhuma aba mensal (NovFY26, DezFY26 etc.) encontrada no arquivo. "
+                             "A exportação precisa de pelo menos uma aba mensal para ler o layout de referência.")
+                    wb_r.close()
+                    st.stop()
+                ws_nov_t=wb_r[_aba_ref_t]
                 base_rows_t=list(ws_nov_t.iter_rows(min_row=7,max_row=63,min_col=1,max_col=87,values_only=True))
                 base_rows_t=[r for r in base_rows_t if r[0] and r[1]]
                 modelos_xl_t=[str(ws_nov_t.cell(6,c).value) for c in range(19,88)
