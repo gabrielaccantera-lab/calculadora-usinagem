@@ -2450,9 +2450,9 @@ with st.sidebar:
     st.caption("Alterações afetam todos os cálculos em tempo real.")
 
 # ─── TABS ────────────────────────────────
-tab_vis, tab_inp, tab_mem, tab_res, tab_cmp, tab_diag, tab_exp = st.tabs([
+tab_vis, tab_inp, tab_mem, tab_res, tab_cmp, tab_exp = st.tabs([
     "🏠 Visão Geral", "📂 Dados de Input", "🔬 Como foi Calculado",
-    "📊 Resultado por Mês", "🔄 Comparar com Excel", "🩺 Diagnóstico", "📥 Exportar"
+    "📊 Resultado por Mês", "🔄 Comparar com Excel", "📥 Exportar"
 ])
 
 # Cache do resultado base
@@ -2763,189 +2763,31 @@ está diferente do que foi usado para gerar aquele Excel. O diagnóstico abaixo 
             use_container_width=True, hide_index=True
         )
 
-        # Detalhe das divergências
-        if df_detalhe is not None and len(df_detalhe) > 0:
-            st.markdown('<div class="jd-sub">Detalhamento das divergências por centro</div>', unsafe_allow_html=True)
-            st.caption(f"{len(df_detalhe)} divergência(s) encontrada(s) em {len(df_detalhe['Mês'].unique())} mês(es). Selecione o mês para ver a análise detalhada.")
-
-            meses_div = df_detalhe["Mês"].unique().tolist()
-            mes_sel_div = st.selectbox("Ver detalhes do mês", meses_div, key="mes_div")
-
-            df_mes = df_detalhe[df_detalhe["Mês"] == mes_sel_div].reset_index(drop=True)
-
-            # Tabela resumida por centro
-            cols_tab = ["Centro","Turno","App — Ativo","Excel — Ativo",
-                        "Ocup. App","Ocup. Excel","Δ Ocupação","Causa"]
-            cols_tab = [c for c in cols_tab if c in df_mes.columns]
-
-            def style_det(row):
-                causa = str(row.get("Causa","")).lower()
-                if "menor" in causa or "maior" in causa:
-                    return ["background-color:#3D0000;color:#FF8A80"]*len(row)
-                if "índice" in causa or "indice" in causa:
-                    return ["background-color:#3D1A00;color:#FFAB40"]*len(row)
-                return ["background-color:#3D2D00;color:#FFE57F"]*len(row)
-
-            st.dataframe(
-                df_mes[cols_tab].style.apply(style_det, axis=1),
-                use_container_width=True, hide_index=True
-            )
-
-            st.markdown('<div class="jd-sub">Análise detalhada — clique para expandir cada divergência</div>', unsafe_allow_html=True)
-            for _, row in df_mes.iterrows():
-                causa = str(row.get("Causa",""))
-                icon  = "🔴" if "volume" in causa.lower() else ("🟠" if "índice" in causa.lower() or "indice" in causa.lower() else "🟡")
-                label = f"{icon} {row.get('Centro','')} — Turno {row.get('Turno','')}: {causa}"
-                with st.expander(label):
-                    c1,c2,c3,c4 = st.columns(4)
-                    c1.metric("App — Ativo",    row.get("App — Ativo",""))
-                    c2.metric("Excel — Ativo",  row.get("Excel — Ativo",""))
-                    c3.metric("Ocupação App",   row.get("Ocup. App",""))
-                    c4.metric("Ocupação Excel", row.get("Ocup. Excel",""))
-                    onde = row.get("Onde investigar","")
-                    expl = row.get("Explicação","")
-                    if onde:
-                        st.markdown(f'<div class="aviso-warn">📍 <b>Onde investigar:</b> {onde}</div>', unsafe_allow_html=True)
-                    if expl:
-                        st.markdown(f'<div class="aviso-warn">🔍 <b>O que aconteceu:</b> {expl}</div>', unsafe_allow_html=True)
-
-        # Export
-        buf = BytesIO()
-        with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-            df_resumo.to_excel(writer, sheet_name="Resumo", index=False)
-            if df_detalhe is not None and len(df_detalhe) > 0:
-                df_detalhe.to_excel(writer, sheet_name="Divergências", index=False)
-        buf.seek(0)
-        st.download_button("📥 Exportar comparação completa",
-            data=buf, file_name="comparacao.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        # (detalhamento removido — divergências integradas na tabelona)
     else:
         st.warning("Nenhuma aba mensal encontrada no arquivo (NovFY26, DezFY26 etc.). O arquivo precisa ter as abas mensais calculadas para a comparação funcionar.")
 
 
 
 # ══════════════════════════════════════════
-# TAB 6 — DIAGNÓSTICO
-# ══════════════════════════════════════════
-with tab_diag:
-    st.markdown('<div class="jd-section">Diagnóstico de divergências</div>', unsafe_allow_html=True)
-    st.markdown("Quando o resultado do app divergir do Excel, use esta seção para identificar a causa.")
-
-    mes_diag = st.selectbox("Mês para diagnosticar", [m for m in MESES if res_base.get(m)], key="mes_diag")
-    ref_total_input = st.number_input("Total de funcionários esperado (do Excel)", min_value=0, max_value=500, value=0, step=1)
-
-    if mes_diag and ref_total_input > 0 and res_base.get(mes_diag):
-        r = res_base[mes_diag]
-        delta = r["total"] - ref_total_input
-        st.markdown("---")
-        if delta == 0:
-            st.markdown('<div class="aviso-ok">✅ Resultado idêntico ao esperado. Nenhuma divergência.</div>', unsafe_allow_html=True)
-        else:
-            st.markdown(f'<div class="aviso-{"warn" if abs(delta)<=2 else "erro"}">{"⚠️" if abs(delta)<=2 else "🔴"} Diferença de <b>{delta:+d} funcionários</b> ({r["total"]} app vs {ref_total_input} esperado)</div>', unsafe_allow_html=True)
-            st.markdown('<div class="jd-sub">Causas mais prováveis — em ordem de investigação</div>', unsafe_allow_html=True)
-
-            causas = []
-            if abs(delta) == 1:
-                causas.append(("🔢 Arredondamento", "Uma função de suporte pode estar sendo computada diferente (ex: Preset=2 no app vs 1 no Excel).", "Verificar configuração de suporte na sidebar"))
-            if abs(delta) <= 3:
-                causas.append(("⚙️ Threshold de ativação", f"O turno pode estar sendo ativado com threshold diferente. App usa: A>{thr_A}% / B>{thr_B}% / C>{thr_C}%.", "Conferir thresholds na sidebar e comparar com lógica SE() do Excel"))
-            causas.append(("📅 Dias trabalhados", f"App usa {r['dias']} dias para {mes_diag}. Se o Excel usa valor diferente, todos os denominadores de ocupação mudam.", "Conferir célula de dias na aba INPUT_PMP"))
-            causas.append(("🗂️ Mapeamento de colunas", "Se colunas foram reordenadas no Excel, o app pode ter lido campo errado (verificar log de leitura na aba Inputs).", "Abrir aba Inputs → Log de leitura e checar avisos de fallback posicional"))
-            causas.append(("📊 Demanda divergente", "Volume de peças diferente entre arquivos.", "Comparar soma de qtd por modelo na aba Inputs"))
-
-            for titulo, descricao, acao in causas:
-                with st.expander(titulo):
-                    st.markdown(f"**O que pode ter acontecido:** {descricao}")
-                    st.markdown(f"**👉 Como investigar:** {acao}")
-
-            st.markdown('<div class="jd-sub">Rastreabilidade — onde olhar primeiro</div>', unsafe_allow_html=True)
-            df_rastr = r["centros"][["centro","ocup_A","ocup_B","ocup_C","ativo_A","ativo_B","ativo_C","min_ciclo_total"]].copy()
-            df_rastr["min_ciclo_total"] = df_rastr.min_ciclo_total.round(0)
-            st.dataframe(
-                df_rastr.style.format({
-                    "ocup_A": "{:.1%}", "ocup_B": "{:.1%}", "ocup_C": "{:.1%}",
-                    "min_ciclo_total": "{:.0f}"
-                }),
-                use_container_width=True, hide_index=True
-            )
-            st.caption("Verifique centros onde a ocupação está próxima dos thresholds — são os mais sensíveis a pequenas variações.")
-    else:
-        st.info("Selecione o mês e informe o total esperado do Excel para iniciar o diagnóstico.")
-
-# ══════════════════════════════════════════
-# TAB 7 — EXPORTAÇÃO
+# TAB 6 — EXPORTAÇÃO
 # ══════════════════════════════════════════
 with tab_exp:
     st.markdown('<div class="jd-section">Exportação</div>', unsafe_allow_html=True)
 
-    sub_cmp, sub_res = st.tabs(["🔍 Comparação e Diagnóstico", "📊 Resultados"])
+    sub_tab, sub_res = st.tabs(["📋 Tabelona completa — layout IMPUTDISTRIBUIÇÃO", "📊 Resultados"])
 
     # ══════════════════════════════════════════
-    # SUB-ABA 1 — COMPARAÇÃO E DIAGNÓSTICO
+    # SUB-ABA 1 — TABELONA COMPLETA
     # ══════════════════════════════════════════
-    with sub_cmp:
-        st.markdown('<div class="jd-sub">🔴 Diagnóstico de divergências</div>', unsafe_allow_html=True)
-        st.markdown("""
-Gera um Excel com **uma aba por mês** mostrando, centro a centro, onde o App diverge do Excel de referência.
-Células em **vermelho** = divergência de ativação de turno. Inclui a ocupação calculada vs Excel e a causa provável.
-        """)
-
-        col_d1, col_d2 = st.columns(2)
-        with col_d1:
-            if st.button("🔴 Gerar diagnóstico por mês", type="primary", key="btn_diag_mensal"):
-                with st.spinner("Gerando diagnóstico por mês... (~6s)"):
-                    diag_mensal = gerar_diagnostico_mensal(
-                        file_bytes, res_base, tempo, dist, aplic, pmp, dias,
-                        horas_turno, thresholds)
-                    st.session_state["diag_mensal_buf"] = diag_mensal
-            if st.session_state.get("diag_mensal_buf"):
-                st.download_button(
-                    "📥 Baixar diagnóstico por mês (recomendado)",
-                    data=st.session_state["diag_mensal_buf"],
-                    file_name="diagnostico_por_mes.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="dl_diag_mensal"
-                )
-        with col_d2:
-            if st.button("🔍 Gerar diagnóstico de inputs", key="btn_diag_inp"):
-                with st.spinner("Gerando diagnóstico de inputs..."):
-                    diag_inp = gerar_excel_diagnostico(file_bytes)
-                    st.session_state["diag_inp_buf"] = diag_inp
-            if st.session_state.get("diag_inp_buf"):
-                st.download_button(
-                    "📥 Baixar diagnóstico de inputs (IMPUTDISTRIBUIÇÃO vs Excel)",
-                    data=st.session_state["diag_inp_buf"],
-                    file_name="diagnostico_inputs.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="dl_diag_inp"
-                )
-
-        st.markdown("---")
-        st.markdown('<div class="jd-sub">📊 Resultado no layout do Excel original</div>', unsafe_allow_html=True)
-        st.markdown("""
-Gera um Excel **idêntico ao layout do seu Excel de referência** — mesmas colunas, mesmas cores (Verde=Turno A, Amarelo=Turno B, Azul=Turno C).
-**Células em vermelho** = divergência entre o que o App calculou e o que está no seu Excel.
-        """)
-        if st.button("📊 Gerar resultado no layout do Excel", type="primary", key="btn_layout"):
-            with st.spinner("Gerando resultado no layout do Excel... (~8s)"):
-                layout_data = gerar_output_layout(
-                    file_bytes, res_base, tempo, dist, aplic, pmp, dias,
-                    horas_turno, thresholds, suporte_cfg)
-                st.session_state["layout_buf"] = layout_data
-        if st.session_state.get("layout_buf"):
-            st.download_button(
-                "📥 Baixar resultado no layout do Excel (com divergências em vermelho)",
-                data=st.session_state["layout_buf"],
-                file_name="resultado_layout_excel.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="dl_layout"
-            )
-
-        st.markdown("---")
+    with sub_tab:
         st.markdown('<div class="jd-sub">📋 Tabelona completa — layout idêntico ao IMPUTDISTRIBUIÇÃO</div>', unsafe_allow_html=True)
         st.markdown("""
 Gera a **tabelona completa** no mesmo layout do seu Excel — colunas A até os modelos todos —
 com as colunas de % ocupação calculadas pelo App. Células em **vermelho** = divergência com o Excel de referência.
+
+Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá em cima, e o bloco de
+**DADOS AUTOMÁTICOS** (% ocupação, ativo/inativo, horas disponíveis, suporte e produtividades) a partir da coluna F linha 66.
         """)
         if st.button("📋 Gerar tabelona completa", key="btn_tabelona"):
             with st.spinner("Gerando tabelona... (~10s)"):
@@ -3019,11 +2861,42 @@ com as colunas de % ocupação calculadas pelo App. Células em **vermelho** = d
                     d_t=dias.get(mes_t,0)
                     if d_t==0: continue
                     minA_t=d_t*hA_t*60; minB_t=d_t*hB_t*60; minC_t=d_t*hC_t*60
+                    heA_t=horas_efetivas["A"]; heB_t=horas_efetivas["B"]; heC_t=horas_efetivas["C"]
                     dm_t=dados_mes_t.get(mes_t,{}); pmp_mes_t=pmp[pmp.mes==mes_t]
 
                     if primeira_t: ws_out=wb_out.active; ws_out.title=mes_t[:10]; primeira_t=False
                     else: ws_out=wb_out.create_sheet(mes_t[:10])
                     ws_out.freeze_panes="F7"
+
+                    # ── LINHAS 1-4: TOTAIS DE MINUTOS / HORAS / DIAS ──────────────
+                    _F_CINZA_H=_PF("solid",fgColor="D9D9D9"); _F_VD_H=_PF("solid",fgColor="1F4D19")
+                    # Linha 1: cabeçalho turnos
+                    ws_out.merge_cells("A1:O1")
+                    _ec(ws_out,1,1,f"TOTAIS — {mes_t.upper()}",_F_VD_H,True,"FFFFFF",9,True)
+                    for ci_h,txt_h,f_h in [(16,"TURNO A",_F_VERDE),(17,"TURNO B",_F_AMAR),(18,"TURNO C",_F_AZUL)]:
+                        _ec(ws_out,1,ci_h,txt_h,f_h,True,"000000",8,True)
+                    ws_out.row_dimensions[1].height=14
+                    # Linha 2: Total de Minutos
+                    ws_out.merge_cells("A2:O2")
+                    _ec(ws_out,2,1,"TOTAL DE MINUTOS",_F_CINZA_H,True,"000000",8,False)
+                    _ec(ws_out,2,16,round(minA_t,1),_F_VERDE,True,"000000",8)
+                    _ec(ws_out,2,17,round(minB_t,1),_F_AMAR,True,"000000",8)
+                    _ec(ws_out,2,18,round(minC_t,1),_F_AZUL,True,"000000",8)
+                    ws_out.row_dimensions[2].height=13
+                    # Linha 3: Total de Horas
+                    ws_out.merge_cells("A3:O3")
+                    _ec(ws_out,3,1,"TOTAL DE HORAS",_F_CINZA_H,True,"000000",8,False)
+                    _ec(ws_out,3,16,round(minA_t/60,2),_F_VERDE,True,"000000",8)
+                    _ec(ws_out,3,17,round(minB_t/60,2),_F_AMAR,True,"000000",8)
+                    _ec(ws_out,3,18,round(minC_t/60,2),_F_AZUL,True,"000000",8)
+                    ws_out.row_dimensions[3].height=13
+                    # Linha 4: Nº Dias Trabalhados
+                    ws_out.merge_cells("A4:O4")
+                    _ec(ws_out,4,1,"Nº DIAS TRABALHADOS",_F_CINZA_H,True,"000000",8,False)
+                    _ec(ws_out,4,16,d_t,_F_VERDE,True,"FF0000",9)
+                    _ec(ws_out,4,17,d_t,_F_AMAR,True,"FF0000",9)
+                    _ec(ws_out,4,18,d_t,_F_AZUL,True,"FF0000",9)
+                    ws_out.row_dimensions[4].height=13
 
                     ws_out.merge_cells(f"A5:{get_column_letter(18+len(modelos_xl_t))}5")
                     _ec(ws_out,5,1,f"RESUMO DA CARGA — {mes_t.upper()} ({d_t} dias)",_F_VERDE_JD,True,"FFFFFF",10,True)
@@ -3135,6 +3008,139 @@ com as colunas de % ocupação calculadas pelo App. Células em **vermelho** = d
                     nt.fill=_PF("solid",fgColor="FFEEEE")
                     nt.alignment=_Al(horizontal="left",vertical="center")
                     ws_out.row_dimensions[nota_rt].height=14
+
+                    # ── BLOCO DADOS AUTOMÁTICOS — a partir da linha 66, coluna F (col 6) ──
+                    # Usa resultado calculado do res_base para esse mês
+                    r_auto = res_base.get(mes_t)
+                    _COL_F = 6  # coluna F = 6
+                    _ROW_START = 66
+
+                    if r_auto:
+                        _F_VD_JD = _PF("solid",fgColor="1F4D19")
+                        _F_AMAR_JD = _PF("solid",fgColor="FFDE00")
+                        _F_CINZA_D = _PF("solid",fgColor="D9D9D9")
+                        _F_ROSA_D  = _PF("solid",fgColor="FFB6C1")
+
+                        # ── Cabeçalho do bloco ──────────────────────────────────────
+                        # Linha 66 col F: "DADOS AUTOMÁTICOS"
+                        ws_out.merge_cells(start_row=_ROW_START, start_column=_COL_F,
+                                           end_row=_ROW_START, end_column=_COL_F+9)
+                        _ec(ws_out,_ROW_START,_COL_F,"DADOS AUTOMÁTICOS",_F_CINZA_D,True,"000000",9,True)
+                        ws_out.row_dimensions[_ROW_START].height=14
+
+                        # Linha 67: PERÍODO / DATA / HORAS POR TURNO DE TRABALHO
+                        _r67 = _ROW_START+1
+                        _ec(ws_out,_r67,_COL_F,"PERÍODO:",_F_CINZA_D,True,"000000",8,False)
+                        _ec(ws_out,_r67,_COL_F+1,mes_t,_F_BRANCO,True,"FF0000",9,False)
+                        _ec(ws_out,_r67,_COL_F+3,"DATA DE REVISÃO:",_F_CINZA_D,True,"000000",8,False)
+                        _ec(ws_out,_r67,_COL_F+4,datetime.now().strftime("%d/%m/%Y"),_F_BRANCO,True,"FF0000",9)
+                        _ec(ws_out,_r67,_COL_F+6,"HORAS POR TURNO DE TRABALHO",_F_CINZA_D,True,"000000",8,True)
+                        ws_out.row_dimensions[_r67].height=14
+
+                        # Linha 68: valores das horas efetivas
+                        _r68 = _ROW_START+2
+                        _ec(ws_out,_r68,_COL_F+6,heA_t,_F_CINZA_D,True,"000000",8)
+                        _ec(ws_out,_r68,_COL_F+7,heB_t,_F_CINZA_D,True,"000000",8)
+                        _ec(ws_out,_r68,_COL_F+8,heC_t,_F_CINZA_D,True,"000000",8)
+                        ws_out.row_dimensions[_r68].height=14
+
+                        # Linha 69: cabeçalho grupos (TURNO A, TURNO B, TURNO C)
+                        _r69 = _ROW_START+3
+                        for _ci_g,_txt_g,_fg in [
+                            (_COL_F+1,"TURNO A",_F_VERDE),(_COL_F+2,"TURNO B",_F_AMAR),(_COL_F+3,"TURNO C",_F_AZUL),
+                            (_COL_F+4,"TURNO A",_F_VERDE),(_COL_F+5,"TURNO B",_F_AMAR),(_COL_F+6,"TURNO C",_F_AZUL),
+                            (_COL_F+7,"TURNO A",_F_VERDE),(_COL_F+8,"TURNO B",_F_AMAR),(_COL_F+9,"TURNO C",_F_AZUL),
+                        ]:
+                            _ec(ws_out,_r69,_ci_g,_txt_g,_fg,True,"000000",8,True)
+                        ws_out.row_dimensions[_r69].height=14
+
+                        # Linha 70: sub-cabeçalho (% Ocupação / Ativo / Horas)
+                        _r70 = _ROW_START+4
+                        _ec(ws_out,_r70,_COL_F,"Centro",_F_PRETO,True,"FFFFFF",8)
+                        for _ci_s,_txt_s in [
+                            (_COL_F+1,"% Ocup"),(_COL_F+2,"% Ocup"),(_COL_F+3,"% Ocup"),
+                            (_COL_F+4,"Ativo"),(_COL_F+5,"Ativo"),(_COL_F+6,"Ativo"),
+                            (_COL_F+7,"Horas"),(_COL_F+8,"Horas"),(_COL_F+9,"Horas"),
+                        ]:
+                            _ec(ws_out,_r70,_ci_s,_txt_s,_F_PRETO,True,"FFFFFF",8)
+                        ws_out.row_dimensions[_r70].height=14
+
+                        # Linhas de centros
+                        _ri_c = _ROW_START+5
+                        _centros_df = r_auto["centros"]
+                        for _,_crow in _centros_df.iterrows():
+                            def _cbg_t(v):
+                                if v>=1.06: return _PF("solid",fgColor="FF0000")
+                                if v>=1.00: return _PF("solid",fgColor="FFFF00")
+                                if v>=0.40: return _PF("solid",fgColor="92D050")
+                                return _F_BRANCO
+                            _ec(ws_out,_ri_c,_COL_F,_crow.centro,_F_BRANCO,False,"000000",8,False)
+                            _ec(ws_out,_ri_c,_COL_F+1,f"{_crow.ocup_A:.1%}",_cbg_t(_crow.ocup_A),False,"000000",8)
+                            _ec(ws_out,_ri_c,_COL_F+2,f"{_crow.ocup_B:.1%}",_cbg_t(_crow.ocup_B),False,"000000",8)
+                            _ec(ws_out,_ri_c,_COL_F+3,f"{_crow.ocup_C:.1%}",_cbg_t(_crow.ocup_C),False,"000000",8)
+                            _ec(ws_out,_ri_c,_COL_F+4,int(_crow.ativo_A),_F_VERDE if _crow.ativo_A else _F_AMAR,True,"000000",8)
+                            _ec(ws_out,_ri_c,_COL_F+5,int(_crow.ativo_B),_F_VERDE if _crow.ativo_B else _F_AMAR,True,"000000",8)
+                            _ec(ws_out,_ri_c,_COL_F+6,int(_crow.ativo_C),_F_AZUL  if _crow.ativo_C else _F_CINZA,True,"000000",8)
+                            _ec(ws_out,_ri_c,_COL_F+7,round(_crow.horas_disp_A,2) if _crow.ativo_A else 0,_F_VERDE if _crow.ativo_A else _F_BRANCO,True,"000000",8)
+                            _ec(ws_out,_ri_c,_COL_F+8,round(_crow.horas_disp_B,2) if _crow.ativo_B else 0,_F_AMAR  if _crow.ativo_B else _F_BRANCO,True,"000000",8)
+                            _ec(ws_out,_ri_c,_COL_F+9,round(_crow.horas_disp_C,2) if _crow.ativo_C else 0,_F_AZUL  if _crow.ativo_C else _F_BRANCO,True,"000000",8)
+                            ws_out.row_dimensions[_ri_c].height=13
+                            _ri_c += 1
+
+                        # Suporte + totais
+                        _sup_a = r_auto["suporte"]
+                        for _snm,_skey in [("TOTAL DE OPERADORES",None),("LAVADORA E INSPEÇÃO","lavadora"),
+                                           ("GRAVAÇÃO E ESTANQUEIDADE","gravacao"),("PRESET","preset"),
+                                           ("CORINGA","coringa"),("FACILITADOR","facilitador"),
+                                           ("TOTAL POR TURNO",None),("TOTAL FUNCIONÁRIOS",None)]:
+                            _bold_s = "TOTAL" in _snm
+                            _bg_s = _F_AMAR_JD if _bold_s else _F_BRANCO
+                            _fg_s = "1F4D19" if _bold_s else "000000"
+                            _ec(ws_out,_ri_c,_COL_F,_snm,_bg_s,_bold_s,_fg_s,8,False)
+                            if _skey:
+                                _sv = _sup_a[_skey]
+                                for _ci_sv,_tk in [(_COL_F+4,"A"),(_COL_F+5,"B"),(_COL_F+6,"C")]:
+                                    _ec(ws_out,_ri_c,_ci_sv,_sv[_tk],_F_VERDE if _tk=="A" else (_F_AMAR if _tk=="B" else _F_AZUL),True,"000000",8)
+                                for _ci_hv,_tk,_hef in [(_COL_F+7,"A",heA_t),(_COL_F+8,"B",heB_t),(_COL_F+9,"C",heC_t)]:
+                                    _hv = _sv[_tk]*_hef*d_t
+                                    _ec(ws_out,_ri_c,_ci_hv,round(_hv,2) if _hv else 0,
+                                        _F_VERDE if _tk=="A" else (_F_AMAR if _tk=="B" else _F_AZUL),True,"000000",8)
+                            elif "TOTAL DE OPERADORES" in _snm:
+                                for _ci_sv,_vv,_ff in [(_COL_F+4,r_auto["op_A"],_F_VERDE),(_COL_F+5,r_auto["op_B"],_F_AMAR),(_COL_F+6,r_auto["op_C"],_F_AZUL)]:
+                                    _ec(ws_out,_ri_c,_ci_sv,_vv,_F_AMAR_JD,True,"1F4D19",8)
+                                for _ci_hv,_vv,_hef in [(_COL_F+7,r_auto["op_A"],heA_t),(_COL_F+8,r_auto["op_B"],heB_t),(_COL_F+9,r_auto["op_C"],heC_t)]:
+                                    _ec(ws_out,_ri_c,_ci_hv,round(_vv*_hef*d_t,2),_F_AMAR_JD,True,"1F4D19",8)
+                            elif "TOTAL POR TURNO" in _snm:
+                                for _ci_sv,_vv,_ff in [(_COL_F+4,r_auto["tot_A"],_F_VERDE),(_COL_F+5,r_auto["tot_B"],_F_AMAR),(_COL_F+6,r_auto["tot_C"],_F_AZUL)]:
+                                    _ec(ws_out,_ri_c,_ci_sv,_vv,_F_AMAR_JD,True,"1F4D19",8)
+                                for _ci_hv,_vv,_hef in [(_COL_F+7,r_auto["tot_A"],heA_t),(_COL_F+8,r_auto["tot_B"],heB_t),(_COL_F+9,r_auto["tot_C"],heC_t)]:
+                                    _ec(ws_out,_ri_c,_ci_hv,round(_vv*_hef*d_t,2),_F_AMAR_JD,True,"1F4D19",8)
+                            elif "FUNCIONÁRIOS" in _snm:
+                                _ec(ws_out,_ri_c,_COL_F+4,r_auto["total"],_F_AMAR_JD,True,"1F4D19",9)
+                                _th=r_auto["tot_A"]*heA_t*d_t+r_auto["tot_B"]*heB_t*d_t+r_auto["tot_C"]*heC_t*d_t
+                                _ec(ws_out,_ri_c,_COL_F+7,round(_th,2),_F_AMAR_JD,True,"1F4D19",9)
+                            ws_out.row_dimensions[_ri_c].height=13
+                            _ri_c += 1
+
+                        # Produtividades
+                        _ri_c += 1
+                        for _pnm,_pv,_dest in [
+                            ("PRODUTIVIDADE POR TEMPO DE CICLO OPERACIONAL",r_auto["prod_ciclo_op"],False),
+                            ("PRODUTIVIDADE POR TEMPO DE CICLO TOTAL",r_auto["prod_ciclo_tot"],False),
+                            ("PRODUTIVIDADE POR TEMPO DE LABOR OPERACIONAL",r_auto["prod_labor_op"],False),
+                            ("PRODUTIVIDADE POR TEMPO DE LABOR TOTAL ★",r_auto["prod_labor_tot"],True),
+                        ]:
+                            ws_out.merge_cells(start_row=_ri_c,start_column=_COL_F,end_row=_ri_c,end_column=_COL_F+8)
+                            _ec(ws_out,_ri_c,_COL_F,_pnm,_F_AMAR_JD if _dest else _F_BRANCO,_dest,"1F4D19" if _dest else "000000",8,False)
+                            _ec(ws_out,_ri_c,_COL_F+9,f"{_pv:.1%}",_F_AMAR_JD if _dest else _F_BRANCO,_dest,"1F4D19" if _dest else "000000",8)
+                            ws_out.row_dimensions[_ri_c].height=14
+                            _ri_c += 1
+
+                        # Larguras das colunas do bloco
+                        for _ci_w,_ww in [(_COL_F,14),(_COL_F+1,8),(_COL_F+2,8),(_COL_F+3,8),
+                                          (_COL_F+4,8),(_COL_F+5,8),(_COL_F+6,8),
+                                          (_COL_F+7,10),(_COL_F+8,10),(_COL_F+9,10)]:
+                            ws_out.column_dimensions[get_column_letter(_ci_w)].width=_ww
 
                 tabelona_buf=BytesIO(); wb_out.save(tabelona_buf); tabelona_buf.seek(0)
                 st.session_state["tabelona_buf"] = tabelona_buf
