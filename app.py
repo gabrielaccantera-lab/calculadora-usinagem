@@ -194,26 +194,99 @@ def validar(pmp, tempo, dist, aplic, dias):
     chaves_tempo = set(zip(tempo.centro, tempo.peca))
     chaves_dist  = set(zip(dist.centro,  dist.peca))
     chaves_aplic = set(zip(aplic.centro, aplic.peca))
+
+    # ── ERROS CRÍTICOS ──────────────────────────────────────────────
+    # 1. Disponibilidade zero (divisor zero → infinito)
     zero_disp = dist[dist.disponib == 0]
     if len(zero_disp):
-        erros.append(f"Disponibilidade=0 em {len(zero_disp)} linha(s)")
+        exemplos = zero_disp[["centro","peca"]].head(3).apply(lambda r: f"{r.centro}/{r.peca}", axis=1).tolist()
+        erros.append(f"Disponibilidade=0 em {len(zero_disp)} linha(s) — causa divisão por zero no índice de ciclo. Ex: {', '.join(exemplos)}")
+
+    # 2. IMPUTTEMPO sem IMPUTDISTRIBUIÇÃO
     diff_td = chaves_tempo - chaves_dist
     if diff_td:
-        erros.append(f"{len(diff_td)} combinações em IMPUTTEMPO sem IMPUTDISTRIBUIÇÃO")
+        exemplos = list(diff_td)[:3]
+        erros.append(f"{len(diff_td)} combinações em IMPUTTEMPO sem IMPUTDISTRIBUIÇÃO — não terão carga calculada. Ex: {exemplos}")
+
+    # 3. Tempos negativos ou zero (impossível fisicamente)
+    t_invalidos = tempo[(tempo.t_ciclo <= 0) | (tempo.t_labor < 0)]
+    if len(t_invalidos):
+        exemplos = t_invalidos[["centro","peca","t_ciclo","t_labor"]].head(3).to_dict("records")
+        erros.append(f"Tempo de ciclo ≤0 ou labor <0 em {len(t_invalidos)} linha(s) — verifique IMPUTTEMPO. Ex: {exemplos[0]}")
+
+    # 4. div_carga ou div_volume zero (zera a carga inteira daquele centro)
+    dist_num = dist.copy()
+    dist_num["div_carga"]  = pd.to_numeric(dist_num["div_carga"],  errors="coerce").fillna(0)
+    dist_num["div_volume"] = pd.to_numeric(dist_num["div_volume"], errors="coerce").fillna(0)
+    zero_carga  = dist_num[dist_num["div_carga"]  == 0]
+    zero_volume = dist_num[dist_num["div_volume"] == 0]
+    if len(zero_carga):
+        erros.append(f"div_carga=0 em {len(zero_carga)} linha(s) — zera completamente a carga daquele centro/peça")
+    if len(zero_volume):
+        erros.append(f"div_volume=0 em {len(zero_volume)} linha(s) — zera completamente a carga daquele centro/peça")
+
+    # ── ALERTAS ─────────────────────────────────────────────────────
+    # 5. Centro+peça sem modelo (peças cadastradas mas sem produção ligada)
     sem_aplic = chaves_tempo - chaves_aplic
     if sem_aplic:
-        alertas.append(f"{len(sem_aplic)} centro+peça sem modelo em IMPUTAPLICAÇÃO")
+        exemplos = list(sem_aplic)[:3]
+        alertas.append(f"{len(sem_aplic)} centro+peça sem modelo em IMPUTAPLICAÇÃO — não entrarão no cálculo de carga. Ex: {exemplos}")
+
+    # 6. Modelos com demanda mas sem aplicação
     modelos_sem = set(pmp.modelo.unique()) - set(aplic.modelo.unique())
     if modelos_sem:
-        alertas.append(f"{len(modelos_sem)} modelo(s) com demanda mas sem aplicação")
+        exemplos = list(modelos_sem)[:5]
+        alertas.append(f"{len(modelos_sem)} modelo(s) com demanda no PMP mas sem aplicação em nenhuma máquina: {exemplos}")
+
+    # 7. t_labor > t_ciclo (operador ocupado mais tempo que a máquina — suspeito)
     merged = tempo.merge(dist, on=["centro","peca"], how="inner")
     labor_maior = merged[merged.t_labor > merged.t_ciclo]
     if len(labor_maior):
-        alertas.append(f"{len(labor_maior)} linha(s) com t_labor > t_ciclo")
+        exemplos = labor_maior[["centro","peca"]].head(3).apply(lambda r: f"{r.centro}/{r.peca}", axis=1).tolist()
+        alertas.append(f"{len(labor_maior)} linha(s) com t_labor > t_ciclo — operador mais ocupado que a máquina, verifique se é intencional. Ex: {', '.join(exemplos)}")
+
+    # 8. Mês com demanda mas dias=0
     for m in MESES:
         qtd_m = pmp[pmp.mes==m].qtd.sum() if len(pmp[pmp.mes==m]) else 0
         if qtd_m > 0 and dias.get(m,0) == 0:
-            alertas.append(f"Mês '{m}' tem {int(qtd_m)} peças mas dias=0")
+            alertas.append(f"Mês '{m}' tem {int(qtd_m)} peças no PMP mas dias trabalhados=0 — mês será ignorado no cálculo")
+
+    # 9. Meses com dias configurados mas sem nenhuma demanda
+    for m in MESES:
+        qtd_m = pmp[pmp.mes==m].qtd.sum() if len(pmp[pmp.mes==m]) else 0
+        if qtd_m == 0 and dias.get(m,0) > 0:
+            alertas.append(f"Mês '{m}' tem {dias[m]} dias configurados mas nenhuma demanda no PMP — headcount será zero")
+
+    # 10. Concentração de carga: div_carga somada por centro > 1 (sobrecarga declarada)
+    dist_num2 = dist.copy()
+    dist_num2["div_carga"] = pd.to_numeric(dist_num2["div_carga"], errors="coerce").fillna(0)
+    soma_carga = dist_num2.groupby("centro")["div_carga"].sum()
+    sobrecarga = soma_carga[soma_carga > 1.001]
+    if len(sobrecarga):
+        detalhes = [f"{c}={v:.2f}" for c,v in sobrecarga.items()][:4]
+        alertas.append(f"div_carga soma >1 em {len(sobrecarga)} centro(s) — a carga está sendo multiplicada, verifique a distribuição. Ex: {', '.join(detalhes)}")
+
+    # 11. Disponibilidade > 1 (percentual acima de 100% — geralmente erro de digitação)
+    disp_alta = dist[pd.to_numeric(dist.disponib, errors="coerce").fillna(0) > 1]
+    if len(disp_alta):
+        exemplos = disp_alta[["centro","peca","disponib"]].head(3).apply(lambda r: f"{r.centro} disp={r.disponib}", axis=1).tolist()
+        alertas.append(f"Disponibilidade >1 (>100%) em {len(disp_alta)} linha(s) — verifique se está em decimal (ex: 0.85 = 85%). Ex: {', '.join(exemplos)}")
+
+    # 12. Centros com dados em IMPUTTEMPO mas sem nenhuma demanda associada (pelas peças)
+    pecas_com_demanda = set(pmp.merge(aplic, on="modelo")["peca"].unique()) if len(pmp) > 0 else set()
+    centros_sem_demanda = set(tempo.centro.unique()) - set(
+        tempo[tempo.peca.isin(pecas_com_demanda)].centro.unique()
+    )
+    if centros_sem_demanda:
+        alertas.append(f"{len(centros_sem_demanda)} centro(s) sem nenhuma demanda ativa — aparecem em IMPUTTEMPO mas nenhuma peça deles tem produção no PMP: {sorted(centros_sem_demanda)[:5]}")
+
+    # 13. vol_int fora de range esperado (muito diferente de 1.0 pode ser erro)
+    dist_vi = dist.copy()
+    dist_vi["vol_int"] = pd.to_numeric(dist_vi["vol_int"], errors="coerce")
+    vi_alto = dist_vi[dist_vi["vol_int"] > 5]
+    if len(vi_alto):
+        alertas.append(f"vol_interna > 5 em {len(vi_alto)} linha(s) — valor incomum, verifique se não é um erro de digitação")
+
     if not erros and not alertas:
         oks.append("Todos os inputs validados sem inconsistências.")
     return erros, alertas, oks
@@ -1331,7 +1404,7 @@ with tab_res:
 with tab_cen:
     if "cenarios" not in st.session_state: st.session_state.cenarios={}
     st.markdown('<div class="jd-section">Simulador de cenários</div>',unsafe_allow_html=True)
-    st.caption("Crie variações alterando turnos ativos por centro — por mês ou para o ANO inteiro.")
+    st.markdown('<div class="aviso-ok">🎯 <b>Como usar:</b> dê um nome, escolha mês ou ANO, ajuste os turnos por centro à vontade (sem travar a tela) e clique em <b>Salvar</b>. Até 4 cenários podem ser comparados no gráfico ao mesmo tempo.</div>', unsafe_allow_html=True)
 
     with st.expander("➕ Criar novo cenário",expanded=len(st.session_state.cenarios)==0):
         ca,cb=st.columns([2,1])
@@ -1369,31 +1442,43 @@ with tab_cen:
                 centros_list=[]; ocup_ref={}
 
         if novo_nome and centros_list:
+            st.markdown('<div class="aviso-ok" style="margin-bottom:8px;">✏️ <b>Edite livremente</b> — a tela não recarrega enquanto você ajusta os valores. Clique em <b>Salvar cenário</b> quando terminar.</div>', unsafe_allow_html=True)
             cols_h=st.columns([3,1,1,1])
-            cols_h[0].markdown("**Centro — ocup. média anual**" if eh_ano_novo else "**Centro — ocup. A/B/C**")
-            cols_h[1].markdown("**A**"); cols_h[2].markdown("**B**"); cols_h[3].markdown("**C**")
-            novo_ov={}
-            for cen in centros_list:
-                ref=ocup_ref.get(cen,{"oA":0,"oB":0,"oC":0,"aA":0,"aB":0,"aC":0})
-                eA="🔴" if ref["oA"]>1 else ("🟡" if ref["oA"]>=0.85 else "🟢")
-                eB="🔴" if ref["oB"]>1 else ("🟡" if ref["oB"]>=0.85 else "🟢")
-                eC="🔴" if ref["oC"]>1 else ("🟡" if ref["oC"]>=0.85 else "🟢")
-                c0,c1,c2,c3=st.columns([3,1,1,1])
-                c0.markdown(f"`{cen}` {eA}{ref['oA']:.0%}/{eB}{ref['oB']:.0%}/{eC}{ref['oC']:.0%}")
-                vA=c1.number_input("A",0,5,ref["aA"],key=f"n_{novo_nome}_{cen}_A",label_visibility="collapsed")
-                vB=c2.number_input("B",0,5,ref["aB"],key=f"n_{novo_nome}_{cen}_B",label_visibility="collapsed")
-                vC=c3.number_input("C",0,5,ref["aC"],key=f"n_{novo_nome}_{cen}_C",label_visibility="collapsed")
-                novo_ov[cen]={"A":vA,"B":vB,"C":vC}
+            cols_h[0].markdown("**Centro — ocup. A/B/C**")
+            cols_h[1].markdown("**Turno A**"); cols_h[2].markdown("**Turno B**"); cols_h[3].markdown("**Turno C**")
 
-            if st.button("💾 Salvar cenário",type="primary",key="btn_salvar_cen"):
-                if eh_ano_novo:
-                    _meses_ativos=[m for m in MESES if res_base.get(m)]
-                    ov_c={m:novo_ov for m in _meses_ativos}
+            # ── Usar st.form para evitar reruns durante edição (elimina tela preta)
+            with st.form(key=f"form_cenario_{novo_nome}_{mes_novo}"):
+                novo_ov={}
+                for cen in centros_list:
+                    ref=ocup_ref.get(cen,{"oA":0,"oB":0,"oC":0,"aA":0,"aB":0,"aC":0})
+                    eA="🔴" if ref["oA"]>1 else ("🟡" if ref["oA"]>=0.85 else "🟢")
+                    eB="🔴" if ref["oB"]>1 else ("🟡" if ref["oB"]>=0.85 else "🟢")
+                    eC="🔴" if ref["oC"]>1 else ("🟡" if ref["oC"]>=0.85 else "🟢")
+                    c0,c1,c2,c3=st.columns([3,1,1,1])
+                    c0.markdown(f"`{cen}` {eA}{ref['oA']:.0%}/{eB}{ref['oB']:.0%}/{eC}{ref['oC']:.0%}")
+                    vA=c1.number_input("A",0,5,ref["aA"],key=f"f_{novo_nome}_{cen}_A",label_visibility="collapsed")
+                    vB=c2.number_input("B",0,5,ref["aB"],key=f"f_{novo_nome}_{cen}_B",label_visibility="collapsed")
+                    vC=c3.number_input("C",0,5,ref["aC"],key=f"f_{novo_nome}_{cen}_C",label_visibility="collapsed")
+                    novo_ov[cen]={"A":vA,"B":vB,"C":vC}
+
+                salvar=st.form_submit_button("💾 Salvar cenário",type="primary",use_container_width=True)
+
+            if salvar:
+                if not novo_nome.strip():
+                    st.error("Dê um nome ao cenário antes de salvar.")
+                elif novo_nome in st.session_state.cenarios:
+                    st.warning(f"Já existe um cenário com o nome '{novo_nome}'. Escolha outro nome ou remova o existente.")
                 else:
-                    ov_c={mes_novo:novo_ov}
-                res_cen=calcular(pmp,tempo,dist,aplic,dias,horas_turno,thresholds,suporte_cfg,horas_efetivas=horas_efetivas,overrides=ov_c)
-                st.session_state.cenarios[novo_nome]={"resultados":res_cen,"mes":mes_novo,"overrides":ov_c,"eh_ano":eh_ano_novo}
-                st.success(f"✅ '{novo_nome}' salvo!"); st.rerun()
+                    with st.spinner(f"Calculando cenário '{novo_nome}'..."):
+                        if eh_ano_novo:
+                            _meses_ativos=[m for m in MESES if res_base.get(m)]
+                            ov_c={m:novo_ov for m in _meses_ativos}
+                        else:
+                            ov_c={mes_novo:novo_ov}
+                        res_cen=calcular(pmp,tempo,dist,aplic,dias,horas_turno,thresholds,suporte_cfg,horas_efetivas=horas_efetivas,overrides=ov_c)
+                    st.session_state.cenarios[novo_nome]={"resultados":res_cen,"mes":mes_novo,"overrides":ov_c,"eh_ano":eh_ano_novo}
+                    st.success(f"✅ Cenário '{novo_nome}' salvo com sucesso!"); st.rerun()
 
     if st.session_state.cenarios:
         todos={"📌 Base":res_base}
