@@ -1595,126 +1595,144 @@ with tab_cen:
     st.markdown('<div class="jd-section">Simulador de cenários</div>',unsafe_allow_html=True)
     st.markdown('<div class="aviso-ok">🎯 <b>Como usar:</b> dê um nome, escolha mês ou ANO, ajuste os turnos por centro à vontade (sem travar a tela) e clique em <b>Salvar</b>. Até 4 cenários podem ser comparados no gráfico ao mesmo tempo.</div>', unsafe_allow_html=True)
 
-    with st.expander("➕ Criar novo cenário",expanded=len(st.session_state.cenarios)==0):
-        ca,cb=st.columns([2,1])
-        novo_nome=ca.text_input("Nome do cenário",placeholder="Ex: Redução B nov + Aumento A mar")
+    # ── Funções de lookup — definidas fora do expander para cache funcionar corretamente
+    @st.cache_data(show_spinner=False)
+    def _get_ocup_mes(_pmp_hash, mes, _centros_json):
+        """Lê ocupação e ativação por centro para um mês. Cacheia por hash dos dados."""
+        import json
+        centros_data = json.loads(_centros_json)
+        return centros_data
 
-        _meses_disponiveis=[m for m in MESES if res_base.get(m)]
-        escopo_opcoes=["📅 ANO (todos os meses iguais)","🗓️ Meses específicos (overrides por mês)"]
-        escopo=cb.radio("Escopo",escopo_opcoes,key="cen_escopo",label_visibility="collapsed")
-        eh_ano_novo = escopo==escopo_opcoes[0]
+    def _build_ocup_ref(mes):
+        if not res_base.get(mes): return {}
+        df_c = res_base[mes]["centros"]
+        ref = {}
+        for cen in sorted(df_c.centro.tolist()):
+            row_ = df_c[df_c.centro == cen]
+            if not row_.empty:
+                r_ = row_.iloc[0]
+                ref[cen] = {"oA": r_.ocup_A, "oB": r_.ocup_B, "oC": r_.ocup_C,
+                             "aA": int(r_.ativo_A), "aB": int(r_.ativo_B), "aC": int(r_.ativo_C)}
+        return ref
+
+    def _build_ocup_ref_ano(meses_lista):
+        centros_set = set()
+        for _m in meses_lista:
+            if res_base.get(_m):
+                centros_set.update(res_base[_m]["centros"].centro.tolist())
+        ref = {}
+        for cen in sorted(centros_set):
+            vA,vB,vC,aA,aB,aC = [],[],[],[],[],[]
+            for _m in meses_lista:
+                if not res_base.get(_m): continue
+                df_c = res_base[_m]["centros"]; row_ = df_c[df_c.centro == cen]
+                if not row_.empty:
+                    r_ = row_.iloc[0]
+                    vA.append(r_.ocup_A); vB.append(r_.ocup_B); vC.append(r_.ocup_C)
+                    aA.append(int(r_.ativo_A)); aB.append(int(r_.ativo_B)); aC.append(int(r_.ativo_C))
+            if vA:
+                ref[cen] = {"oA": np.mean(vA), "oB": np.mean(vB), "oC": np.mean(vC),
+                             "aA": round(np.mean(aA)), "aB": round(np.mean(aB)), "aC": round(np.mean(aC))}
+        return ref
+
+    def _render_grade_form(centros_ref, prefix):
+        """Grade de centros×turnos dentro de um st.form. Retorna dict {centro: {A,B,C}}."""
+        cols_h = st.columns([3, 1, 1, 1])
+        cols_h[0].markdown("**Centro — Ocup. A / B / C**")
+        cols_h[1].markdown("**A**"); cols_h[2].markdown("**B**"); cols_h[3].markdown("**C**")
+        ov = {}
+        for cen, ref in centros_ref.items():
+            eA = "🔴" if ref["oA"] > 1 else ("🟡" if ref["oA"] >= 0.85 else "🟢")
+            eB = "🔴" if ref["oB"] > 1 else ("🟡" if ref["oB"] >= 0.85 else "🟢")
+            eC = "🔴" if ref["oC"] > 1 else ("🟡" if ref["oC"] >= 0.85 else "🟢")
+            c0, c1, c2, c3 = st.columns([3, 1, 1, 1])
+            c0.markdown(f"`{cen}` {eA}{ref['oA']:.0%} / {eB}{ref['oB']:.0%} / {eC}{ref['oC']:.0%}")
+            vA = c1.number_input("A", 0, 5, ref["aA"], key=f"{prefix}_{cen}_A", label_visibility="collapsed")
+            vB = c2.number_input("B", 0, 5, ref["aB"], key=f"{prefix}_{cen}_B", label_visibility="collapsed")
+            vC = c3.number_input("C", 0, 5, ref["aC"], key=f"{prefix}_{cen}_C", label_visibility="collapsed")
+            ov[cen] = {"A": vA, "B": vB, "C": vC}
+        return ov
+
+    _meses_disponiveis = [m for m in MESES if res_base.get(m)]
+
+    with st.expander("➕ Criar novo cenário", expanded=len(st.session_state.cenarios) == 0):
+        ca, cb = st.columns([2, 1])
+        novo_nome = ca.text_input("Nome do cenário", placeholder="Ex: Redução B nov + Aumento A mar",
+                                   key="cen_novo_nome")
+
+        escopo_opcoes = ["📅 ANO (todos os meses iguais)", "🗓️ Meses específicos (overrides por mês)"]
+        escopo = cb.radio("Escopo", escopo_opcoes, key="cen_escopo", label_visibility="collapsed")
+        eh_ano_novo = (escopo == escopo_opcoes[0])
 
         if not eh_ano_novo:
-            meses_sel=st.multiselect(
-                "Quais meses configurar?",
-                _meses_disponiveis,
+            meses_sel = st.multiselect(
+                "Quais meses configurar?", _meses_disponiveis,
                 default=[_meses_disponiveis[0]] if _meses_disponiveis else [],
                 key="cen_meses_sel",
-                help="Selecione um ou mais meses. Cada mês terá seus próprios overrides de turno."
+                help="Selecione um ou mais meses — cada um terá overrides independentes."
             )
         else:
-            meses_sel=_meses_disponiveis
+            meses_sel = _meses_disponiveis
 
-        # ── Funções de lookup memoizadas por hash do res_base
-        # Rodam uma única vez por combinação — não repetem em cada rerender
-        @st.cache_data(show_spinner=False)
-        def _get_ocup_ref_cached(_rb_hash, mes):
-            ref={}
-            if not res_base.get(mes): return ref
-            df_c=res_base[mes]["centros"]
-            for cen in sorted(df_c.centro.tolist()):
-                row_=df_c[df_c.centro==cen]
-                if not row_.empty:
-                    r_=row_.iloc[0]
-                    ref[cen]={"oA":r_.ocup_A,"oB":r_.ocup_B,"oC":r_.ocup_C,
-                              "aA":int(r_.ativo_A),"aB":int(r_.ativo_B),"aC":int(r_.ativo_C)}
-            return ref
-
-        @st.cache_data(show_spinner=False)
-        def _get_ocup_ref_ano_cached(_rb_hash, meses_tuple):
-            centros_set=set()
-            for _m in meses_tuple: centros_set.update(res_base[_m]["centros"].centro.tolist())
-            ref={}
-            for cen in sorted(centros_set):
-                vA,vB,vC,aA,aB,aC=[],[],[],[],[],[]
-                for _m in meses_tuple:
-                    df_c=res_base[_m]["centros"]; row_=df_c[df_c.centro==cen]
-                    if not row_.empty:
-                        r_=row_.iloc[0]
-                        vA.append(r_.ocup_A); vB.append(r_.ocup_B); vC.append(r_.ocup_C)
-                        aA.append(int(r_.ativo_A)); aB.append(int(r_.ativo_B)); aC.append(int(r_.ativo_C))
-                ref[cen]={"oA":np.mean(vA) if vA else 0,"oB":np.mean(vB) if vB else 0,"oC":np.mean(vC) if vC else 0,
-                           "aA":round(np.mean(aA)) if aA else 0,"aB":round(np.mean(aB)) if aB else 0,"aC":round(np.mean(aC)) if aC else 0}
-            return ref
-
-        _rb_hash=pmp_hash  # hash estável baseado nos dados do arquivo
-
-        if novo_nome and meses_sel:
+        if not novo_nome.strip():
+            st.info("👆 Digite o nome do cenário para continuar.")
+        elif not meses_sel:
+            st.warning("Selecione ao menos um mês para configurar.")
+        else:
             if eh_ano_novo:
-                st.markdown(f'<div class="aviso-warn">📅 <b>Modo ANO</b> — override aplicado em todos os {len(meses_sel)} meses com os mesmos valores.</div>',unsafe_allow_html=True)
+                st.markdown(f'<div class="aviso-warn">📅 <b>Modo ANO</b> — os mesmos overrides serão aplicados nos {len(meses_sel)} meses. Ocupação exibida = média anual.</div>', unsafe_allow_html=True)
             else:
-                st.markdown(f'<div class="aviso-ok">🗓️ <b>Modo multi-mês</b> — cada mês tem seus próprios overrides. Meses não configurados ficam iguais à base.</div>',unsafe_allow_html=True)
-            st.markdown('<div class="aviso-ok" style="margin-bottom:8px;">✏️ <b>Edite livremente</b> — a tela não recarrega enquanto você ajusta. Clique em <b>Salvar cenário</b> quando terminar.</div>', unsafe_allow_html=True)
+                n = len(meses_sel)
+                meses_str = ", ".join(m[:3].upper() for m in meses_sel)
+                st.markdown(f'<div class="aviso-ok">🗓️ <b>Modo multi-mês</b> — {n} mês(es) selecionado(s): {meses_str}. Cada aba tem overrides independentes.</div>', unsafe_allow_html=True)
 
-            # Pré-calcular todos os refs ANTES do form (uma vez, com cache)
+            st.markdown('<div class="aviso-ok" style="margin-bottom:8px;">✏️ <b>Edite à vontade</b> — nada recalcula enquanto você ajusta. Só roda quando clicar em <b>Salvar</b>.</div>', unsafe_allow_html=True)
+
+            # Pré-calcular referências de ocupação (fora do form, sem penalty de rerender)
             if eh_ano_novo:
-                _refs={"__ano__": _get_ocup_ref_ano_cached(_rb_hash, tuple(meses_sel))}
+                _refs = {"__ano__": _build_ocup_ref_ano(meses_sel)}
             else:
-                _refs={_m: _get_ocup_ref_cached(_rb_hash, _m) for _m in meses_sel}
+                _refs = {_m: _build_ocup_ref(_m) for _m in meses_sel}
 
-            with st.form(key=f"form_cen_{novo_nome}_{escopo}_{','.join(meses_sel)}"):
-                novo_ov_por_mes={}
+            # Form key única por nome + seleção para evitar colisão entre cenários
+            _form_key = f"form_cen_{'_'.join(meses_sel) if not eh_ano_novo else 'ANO'}_{novo_nome}"
 
-                def _render_grade(centros_ref, prefix):
-                    """Renderiza a grade de centros×turnos dentro do form."""
-                    cols_h=st.columns([3,1,1,1])
-                    cols_h[0].markdown("**Centro — ocup. A/B/C**")
-                    cols_h[1].markdown("**A**"); cols_h[2].markdown("**B**"); cols_h[3].markdown("**C**")
-                    ov={}
-                    for cen,ref in centros_ref.items():
-                        eA="🔴" if ref["oA"]>1 else ("🟡" if ref["oA"]>=0.85 else "🟢")
-                        eB="🔴" if ref["oB"]>1 else ("🟡" if ref["oB"]>=0.85 else "🟢")
-                        eC="🔴" if ref["oC"]>1 else ("🟡" if ref["oC"]>=0.85 else "🟢")
-                        c0,c1,c2,c3=st.columns([3,1,1,1])
-                        c0.markdown(f"`{cen}` {eA}{ref['oA']:.0%}/{eB}{ref['oB']:.0%}/{eC}{ref['oC']:.0%}")
-                        vA=c1.number_input("A",0,5,ref["aA"],key=f"{prefix}_{cen}_A",label_visibility="collapsed")
-                        vB=c2.number_input("B",0,5,ref["aB"],key=f"{prefix}_{cen}_B",label_visibility="collapsed")
-                        vC=c3.number_input("C",0,5,ref["aC"],key=f"{prefix}_{cen}_C",label_visibility="collapsed")
-                        ov[cen]={"A":vA,"B":vB,"C":vC}
-                    return ov
+            with st.form(key=_form_key):
+                novo_ov_por_mes = {}
 
                 if eh_ano_novo:
-                    _ov_ano=_render_grade(_refs["__ano__"], f"fa_{novo_nome}")
+                    _ov = _render_grade_form(_refs["__ano__"], f"fa_{novo_nome}")
                     for _m in meses_sel:
-                        novo_ov_por_mes[_m]=_ov_ano
-                elif len(meses_sel)==1:
-                    _m=meses_sel[0]
-                    st.markdown(f"**{_m}**")
-                    novo_ov_por_mes[_m]=_render_grade(_refs[_m], f"fm_{novo_nome}_{_m}")
+                        novo_ov_por_mes[_m] = _ov
+                elif len(meses_sel) == 1:
+                    _m = meses_sel[0]
+                    st.markdown(f"**Configurando: {_m}**")
+                    novo_ov_por_mes[_m] = _render_grade_form(_refs[_m], f"fm_{novo_nome}_{_m}")
                 else:
-                    tabs_mes=st.tabs([f"📅 {m[:3].upper()}" for m in meses_sel])
-                    for tab_m,_m in zip(tabs_mes,meses_sel):
-                        with tab_m:
-                            novo_ov_por_mes[_m]=_render_grade(_refs[_m], f"fm_{novo_nome}_{_m}")
+                    # Tabs por mês dentro do form
+                    _tabs = st.tabs([f"📅 {m[:3].upper()}" for m in meses_sel])
+                    for _tab, _m in zip(_tabs, meses_sel):
+                        with _tab:
+                            novo_ov_por_mes[_m] = _render_grade_form(_refs[_m], f"fm_{novo_nome}_{_m}")
 
-                salvar=st.form_submit_button("💾 Salvar cenário",type="primary",use_container_width=True)
+                salvar = st.form_submit_button("💾 Salvar cenário", type="primary", use_container_width=True)
 
             if salvar:
-                if not novo_nome.strip():
-                    st.error("Dê um nome ao cenário antes de salvar.")
-                elif novo_nome in st.session_state.cenarios:
-                    st.warning(f"Já existe um cenário com o nome '{novo_nome}'. Escolha outro nome ou remova o existente.")
+                if novo_nome in st.session_state.cenarios:
+                    st.warning(f"Já existe um cenário chamado '{novo_nome}'. Escolha outro nome.")
                 else:
-                    with st.spinner(f"Calculando cenário '{novo_nome}'..."):
-                        res_cen=calcular(pmp,tempo,dist,aplic,dias,horas_turno,thresholds,suporte_cfg,
-                                         horas_efetivas=horas_efetivas,overrides=novo_ov_por_mes)
-                    _mes_ref=meses_sel[0] if meses_sel else MESES[0]
-                    st.session_state.cenarios[novo_nome]={
-                        "resultados":res_cen,"mes":_mes_ref,
-                        "meses_configurados":meses_sel,
-                        "overrides":novo_ov_por_mes,"eh_ano":eh_ano_novo
+                    with st.spinner(f"Calculando '{novo_nome}'..."):
+                        res_cen = calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg,
+                                           horas_efetivas=horas_efetivas, overrides=novo_ov_por_mes)
+                    st.session_state.cenarios[novo_nome] = {
+                        "resultados": res_cen,
+                        "mes": meses_sel[0],
+                        "meses_configurados": list(meses_sel),
+                        "overrides": novo_ov_por_mes,
+                        "eh_ano": eh_ano_novo,
                     }
-                    st.success(f"✅ Cenário '{novo_nome}' salvo — {len(meses_sel)} mês(es) configurado(s)!")
+                    n_meses = len(meses_sel) if not eh_ano_novo else len(_meses_disponiveis)
+                    st.success(f"✅ '{novo_nome}' salvo — {'ANO inteiro' if eh_ano_novo else str(n_meses) + ' mês(es)'} configurado(s)!")
                     st.rerun()
 
     if st.session_state.cenarios:
