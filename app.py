@@ -1744,59 +1744,104 @@ with tab_cen:
         st.markdown('<div class="jd-sub">📋 Cenários salvos</div>',unsafe_allow_html=True)
         for nm,v in st.session_state.cenarios.items():
             _meses_conf=v.get("meses_configurados",([v.get("mes","")] if not v.get("eh_ano") else [m for m in MESES if res_base.get(m)]))
-            _tag="ANO" if v.get("eh_ano") else (f"{len(_meses_conf)} mês(es): " + ", ".join(m[:3].upper() for m in _meses_conf))
-            st.markdown(f'<div class="aviso-ok" style="margin:2px 0;padding:6px 12px;">📌 <b>{nm}</b> &nbsp;—&nbsp; {_tag}</div>', unsafe_allow_html=True)
+            _tag="ANO inteiro" if v.get("eh_ano") else (", ".join(m[:3].upper() for m in _meses_conf))
+            st.markdown(f'<div class="aviso-ok" style="margin:2px 0;padding:6px 12px;">📌 <b>{nm}</b> &nbsp;—&nbsp; meses com override: <b>{_tag}</b></div>', unsafe_allow_html=True)
 
         st.markdown('<div class="jd-sub">📊 Comparação detalhada</div>',unsafe_allow_html=True)
-        opcoes_cmp=[m for m in MESES if res_base.get(m)]+["📅 ANO (todos os meses)"]
-        mes_cmp=st.selectbox("Mês para comparar",opcoes_cmp,key="mes_cmp_r")
-        eh_ano_cmp=mes_cmp=="📅 ANO (todos os meses)"
-        meses_cmp_lista=[m for m in MESES if res_base.get(m)] if eh_ano_cmp else ([mes_cmp] if res_base.get(mes_cmp) else [])
 
-        if meses_cmp_lista:
-            r_base_agg=agregar_ano(res_base,meses_cmp_lista)
-            sufixo=" (méd.)" if eh_ano_cmp else ""
-            cmp_rows=[]
-            for nm,res in todos.items():
-                r_agg=agregar_ano(res,meses_cmp_lista)
+        # Monta lista de meses relevantes = união de todos os meses modificados em qualquer cenário
+        _meses_modificados = set()
+        for v in st.session_state.cenarios.values():
+            if v.get("eh_ano"):
+                _meses_modificados.update(m for m in MESES if res_base.get(m))
+            else:
+                _meses_modificados.update(v.get("meses_configurados", [v.get("mes","")]))
+        _meses_relevantes = [m for m in MESES if m in _meses_modificados and res_base.get(m)]
+        _opcoes_cmp = _meses_relevantes + (["📅 ANO (todos os meses)"] if len(_meses_relevantes) > 1 else [])
+
+        if not _opcoes_cmp:
+            st.info("Nenhum mês modificado identificado nos cenários.")
+        else:
+            # Contexto: explica o que o seletor significa
+            if len(_meses_relevantes) < len([m for m in MESES if res_base.get(m)]):
+                _ignorados = [m[:3].upper() for m in MESES if res_base.get(m) and m not in _meses_modificados]
+                st.markdown(f'<div class="aviso-warn">🗓️ Exibindo apenas os <b>{len(_meses_relevantes)} meses que têm overrides</b> em algum cenário. Meses sem override ({", ".join(_ignorados)}) são iguais à base em todos os cenários.</div>', unsafe_allow_html=True)
+
+            mes_cmp = st.selectbox("Mês para comparar", _opcoes_cmp, key="mes_cmp_r",
+                                   help="Apenas meses com overrides em algum cenário aparecem aqui.")
+            eh_ano_cmp = mes_cmp == "📅 ANO (todos os meses)"
+            meses_cmp_lista = [m for m in MESES if res_base.get(m)] if eh_ano_cmp else ([mes_cmp] if res_base.get(mes_cmp) else [])
+
+        if _opcoes_cmp and meses_cmp_lista:
+            r_base_agg = agregar_ano(res_base, meses_cmp_lista)
+            sufixo = " (méd.)" if eh_ano_cmp else ""
+            cmp_rows = []
+            for nm, res in todos.items():
+                r_agg = agregar_ano(res, meses_cmp_lista)
                 if not r_agg or not r_base_agg: continue
-                is_base="Base" in nm
-                dA=round(r_agg["tot_A"]-r_base_agg["tot_A"],1) if not is_base else "—"
-                dB=round(r_agg["tot_B"]-r_base_agg["tot_B"],1) if not is_base else "—"
-                dC=round(r_agg["tot_C"]-r_base_agg["tot_C"],1) if not is_base else "—"
-                dT=round(r_agg["total"]-r_base_agg["total"],1) if not is_base else "—"
-                dL=f'{r_agg["prod_labor_tot"]-r_base_agg["prod_labor_tot"]:+.1%}' if not is_base else "—"
-                cmp_rows.append({"Cenário":nm,f"Turno A{sufixo}":r_agg["tot_A"],f"Turno B{sufixo}":r_agg["tot_B"],f"Turno C{sufixo}":r_agg["tot_C"],f"Total{sufixo}":r_agg["total"],"Labor Tot.":f'{r_agg["prod_labor_tot"]:.1%}',"Ciclo Tot.":f'{r_agg["prod_ciclo_tot"]:.1%}',"ΔA":f"{dA:+.1f}" if isinstance(dA,float) else dA,"ΔB":f"{dB:+.1f}" if isinstance(dB,float) else dB,"ΔC":f"{dC:+.1f}" if isinstance(dC,float) else dC,"Δ Total":f"{dT:+.1f}" if isinstance(dT,float) else dT,"Δ Labor":dL})
-            df_cmp=pd.DataFrame(cmp_rows)
+                is_base = "Base" in nm
+                # Verifica se este cenário tem override no(s) mês(es) selecionado(s)
+                if not is_base:
+                    dados_c = st.session_state.cenarios.get(nm, {})
+                    _meses_c = dados_c.get("meses_configurados", []) if not dados_c.get("eh_ano") else meses_cmp_lista
+                    tem_override = eh_ano_cmp or any(m in _meses_c for m in meses_cmp_lista)
+                else:
+                    tem_override = True
+                dA = round(r_agg["tot_A"]-r_base_agg["tot_A"],1) if not is_base else "—"
+                dB = round(r_agg["tot_B"]-r_base_agg["tot_B"],1) if not is_base else "—"
+                dC = round(r_agg["tot_C"]-r_base_agg["tot_C"],1) if not is_base else "—"
+                dT = round(r_agg["total"]-r_base_agg["total"],1) if not is_base else "—"
+                dL = f'{r_agg["prod_labor_tot"]-r_base_agg["prod_labor_tot"]:+.1%}' if not is_base else "—"
+                _nm_label = nm if tem_override else f"{nm} ⚠️ sem override aqui"
+                cmp_rows.append({"Cenário":_nm_label,
+                    f"Turno A{sufixo}":r_agg["tot_A"],f"Turno B{sufixo}":r_agg["tot_B"],
+                    f"Turno C{sufixo}":r_agg["tot_C"],f"Total{sufixo}":r_agg["total"],
+                    "Labor Tot.":f'{r_agg["prod_labor_tot"]:.1%}',"Ciclo Tot.":f'{r_agg["prod_ciclo_tot"]:.1%}',
+                    "ΔA":f"{dA:+.1f}" if isinstance(dA,float) else dA,
+                    "ΔB":f"{dB:+.1f}" if isinstance(dB,float) else dB,
+                    "ΔC":f"{dC:+.1f}" if isinstance(dC,float) else dC,
+                    "Δ Total":f"{dT:+.1f}" if isinstance(dT,float) else dT,"Δ Labor":dL})
+            df_cmp = pd.DataFrame(cmp_rows)
             def _sty_cmp(row):
-                is_base="Base" in str(row["Cenário"])
+                nm_r = str(row["Cenário"])
+                is_base = "Base" in nm_r
+                sem_ov = "⚠️ sem override" in nm_r
                 if is_base: return [f"background-color:{JD_VERDE_ESC};color:#FFFFFF;font-weight:700"]*len(row)
-                styles=[""]*len(row)
+                if sem_ov: return ["background-color:#1A1A1A;color:#666;font-style:italic"]*len(row)
+                styles = [""]*len(row)
                 try:
-                    d=float(str(row["Δ Total"]).replace("+",""))
-                    cd="#003D10" if d<0 else ("#3D0000" if d>0 else ""); td="#B9F6CA" if d<0 else ("#FF8A80" if d>0 else "")
+                    d = float(str(row["Δ Total"]).replace("+",""))
+                    cd = "#003D10" if d<0 else ("#3D0000" if d>0 else "")
+                    td = "#B9F6CA" if d<0 else ("#FF8A80" if d>0 else "")
                     for i,col in enumerate(df_cmp.columns):
-                        if col in("ΔA","ΔB","ΔC","Δ Total","Δ Labor"): styles[i]=f"background-color:{cd};color:{td};font-weight:600"
+                        if col in ("ΔA","ΔB","ΔC","Δ Total","Δ Labor"):
+                            styles[i] = f"background-color:{cd};color:{td};font-weight:600"
                 except: pass
                 return styles
-            st.dataframe(df_cmp.style.apply(_sty_cmp,axis=1),use_container_width=True,hide_index=True)
+            st.dataframe(df_cmp.style.apply(_sty_cmp,axis=1), use_container_width=True, hide_index=True)
 
-            for nome_cen,dados_cen in st.session_state.cenarios.items():
-                r_cen_res=dados_cen["resultados"]
-                with st.expander("🔍 Detalhamento — " + nome_cen + " vs Base"):
-                    _m_ref=meses_cmp_lista[0] if meses_cmp_lista else None
-                    _meses_prod=meses_cmp_lista if eh_ano_cmp else ([_m_ref] if _m_ref else [])
+            for nome_cen, dados_cen in st.session_state.cenarios.items():
+                r_cen_res = dados_cen["resultados"]
+                _meses_c = dados_cen.get("meses_configurados",[dados_cen.get("mes","")]) if not dados_cen.get("eh_ano") else [m for m in MESES if res_base.get(m)]
+                tem_ov_aqui = eh_ano_cmp or any(m in _meses_c for m in meses_cmp_lista)
+
+                with st.expander(f"🔍 Detalhamento — {nome_cen} vs Base"):
+                    if not tem_ov_aqui:
+                        st.markdown(f'<div class="aviso-warn">⚠️ Este cenário não tem overrides em <b>{mes_cmp}</b> — os valores são idênticos à base. Os meses configurados são: <b>{", ".join(m[:3].upper() for m in _meses_c)}</b>.</div>', unsafe_allow_html=True)
+
+                    _m_ref = meses_cmp_lista[0] if meses_cmp_lista else None
+                    _meses_prod = meses_cmp_lista if eh_ano_cmp else ([_m_ref] if _m_ref else [])
 
                     def _calc_prod(res_d, meses_l):
-                        rr=[res_d.get(m) for m in meses_l if res_d.get(m)]
+                        rr = [res_d.get(m) for m in meses_l if res_d.get(m)]
                         if not rr: return None
                         shc=sum(r["h_ciclo"] for r in rr); shl=sum(r["h_labor"] for r in rr)
                         sha=sum(r["h_ativos"] for r in rr); sht=sum(r["h_todos"] for r in rr)
                         return {"ciclo_op":shc/sha if sha>0 else 0,"ciclo_tot":shc/sht if sht>0 else 0,
                                 "labor_op":shl/sha if sha>0 else 0,"labor_tot":shl/sht if sht>0 else 0}
 
-                    prod_b=_calc_prod(res_base,_meses_prod)
-                    prod_c=_calc_prod(r_cen_res,_meses_prod)
+                    prod_b = _calc_prod(res_base, _meses_prod)
+                    prod_c = _calc_prod(r_cen_res, _meses_prod)
 
                     if prod_b and prod_c:
                         st.markdown('<div class="jd-sub">Produtividades — Base vs Cenário</div>',unsafe_allow_html=True)
@@ -1806,7 +1851,6 @@ with tab_cen:
                             ("Labor Operacional",prod_b["labor_op"],prod_c["labor_op"],False),
                             ("⭐ Labor Total",prod_b["labor_tot"],prod_c["labor_tot"],True),
                         ]
-                        # 4 cards lado a lado
                         parts=[]
                         for lbl,vb,vc,dest in _items:
                             delta=vc-vb
@@ -1815,26 +1859,22 @@ with tab_cen:
                             bg="linear-gradient(135deg,#1F4D19,#0D2A0D)" if dest else "linear-gradient(135deg,#151525,#0D0D1A)"
                             brd="#FFDE00" if dest else "#2A3A4A"
                             parts.append(
-                                '<div style="background:' + bg + ';border:1.5px solid ' + brd + ';border-radius:10px;padding:12px 14px;">'
-                                + '<div style="font-size:9px;color:#7BC67A;text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin-bottom:8px;">' + lbl + '</div>'
-                                + '<div style="display:flex;justify-content:space-between;align-items:flex-end;">'
-                                + '<div><div style="font-size:9px;color:#888;margin-bottom:1px;">Base</div>'
-                                + '<div style="font-size:19px;font-weight:800;color:#AAAAAA;">' + f"{vb:.1%}" + '</div></div>'
-                                + '<div style="font-size:16px;color:#444;padding-bottom:3px;">→</div>'
-                                + '<div style="text-align:right"><div style="font-size:9px;color:#FFDE00;margin-bottom:1px;">Cenário</div>'
-                                + '<div style="font-size:19px;font-weight:800;color:#FFFFFF;">' + f"{vc:.1%}" + '</div></div>'
-                                + '</div>'
-                                + '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #333;display:flex;align-items:center;gap:5px;">'
-                                + '<span style="font-size:13px;">' + arrow + '</span>'
-                                + '<span style="font-size:13px;font-weight:700;color:' + cor_d + ';">' + f"{delta:+.1%}" + '</span>'
-                                + '<span style="font-size:10px;color:#666;">vs base</span>'
-                                + '</div>'
-                                + '</div>'
+                                '<div style="background:'+bg+';border:1.5px solid '+brd+';border-radius:10px;padding:12px 14px;">'
+                                +'<div style="font-size:9px;color:#7BC67A;text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin-bottom:8px;">'+lbl+'</div>'
+                                +'<div style="display:flex;justify-content:space-between;align-items:flex-end;">'
+                                +'<div><div style="font-size:9px;color:#888;margin-bottom:1px;">Base</div>'
+                                +'<div style="font-size:19px;font-weight:800;color:#AAAAAA;">'+f"{vb:.1%}"+'</div></div>'
+                                +'<div style="font-size:16px;color:#444;padding-bottom:3px;">→</div>'
+                                +'<div style="text-align:right"><div style="font-size:9px;color:#FFDE00;margin-bottom:1px;">Cenário</div>'
+                                +'<div style="font-size:19px;font-weight:800;color:#FFFFFF;">'+f"{vc:.1%}"+'</div></div>'
+                                +'</div>'
+                                +'<div style="margin-top:6px;padding-top:6px;border-top:1px solid #333;display:flex;align-items:center;gap:5px;">'
+                                +'<span style="font-size:13px;">'+arrow+'</span>'
+                                +'<span style="font-size:13px;font-weight:700;color:'+cor_d+';">'+f"{delta:+.1%}"+'</span>'
+                                +'<span style="font-size:10px;color:#666;">vs base</span>'
+                                +'</div></div>'
                             )
-                        cards_html = '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;">' + "".join(parts) + '</div>'
-                        st.markdown(cards_html, unsafe_allow_html=True)
-
-                        # tabela compacta
+                        st.markdown('<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;">'+"".join(parts)+'</div>',unsafe_allow_html=True)
                         _prod_rows=[]
                         for lbl,vb,vc,dest in _items:
                             delta=vc-vb
@@ -1859,43 +1899,36 @@ with tab_cen:
                             rb_r=rb_c[rb_c.centro==cen]; rc_r=rc_c[rc_c.centro==cen]
                             if rb_r.empty or rc_r.empty: continue
                             rb=rb_r.iloc[0]; rc=rc_r.iloc[0]
-                            mA=int(rb.ativo_A)!=int(rc.ativo_A)
-                            mB=int(rb.ativo_B)!=int(rc.ativo_B)
-                            mC=int(rb.ativo_C)!=int(rc.ativo_C)
-                            det_rows.append({
-                                "Centro":cen,
-                                "Ocup.A":f"{rb.ocup_A:.0%}","Base A":int(rb.ativo_A),"Cen A":int(rc.ativo_A),
-                                "Ocup.B":f"{rb.ocup_B:.0%}","Base B":int(rb.ativo_B),"Cen B":int(rc.ativo_B),
-                                "Ocup.C":f"{rb.ocup_C:.0%}","Base C":int(rb.ativo_C),"Cen C":int(rc.ativo_C),
-                                "Mudou":"✅ Igual" if not(mA or mB or mC) else
-                                    ("A " if mA else "")+("B " if mB else "")+("C" if mC else "")+"alterado(s)"
-                            })
+                            mA=int(rb.ativo_A)!=int(rc.ativo_A); mB=int(rb.ativo_B)!=int(rc.ativo_B); mC=int(rb.ativo_C)!=int(rc.ativo_C)
+                            det_rows.append({"Centro":cen,"Ocup.A":f"{rb.ocup_A:.0%}","Base A":int(rb.ativo_A),"Cen A":int(rc.ativo_A),"Ocup.B":f"{rb.ocup_B:.0%}","Base B":int(rb.ativo_B),"Cen B":int(rc.ativo_B),"Ocup.C":f"{rb.ocup_C:.0%}","Base C":int(rb.ativo_C),"Cen C":int(rc.ativo_C),"Mudou":"✅ Igual" if not(mA or mB or mC) else ("A " if mA else "")+("B " if mB else "")+("C" if mC else "")+"alterado(s)"})
                     if det_rows:
                         df_det=pd.DataFrame(det_rows)
                         def _sty_det(row):
-                            if "alterado" in str(row["Mudou"]):
-                                return ["background-color:#3D2D00;color:#FFE57F"]*len(row)
+                            if "alterado" in str(row["Mudou"]): return ["background-color:#3D2D00;color:#FFE57F"]*len(row)
                             return [""]*len(row)
                         st.dataframe(df_det.style.apply(_sty_det,axis=1),use_container_width=True,hide_index=True)
-                    if dados_cen.get("eh_ano"):
-                        st.markdown('<div class="aviso-ok">📅 Cenário anual — override em todos os meses. Detalhamento acima = ' + str(_m_ref) + '</div>',unsafe_allow_html=True)
+
         st.markdown("---")
-        col_exp,col_del=st.columns([3,1])
+        col_exp, col_del = st.columns([3, 1])
         with col_exp:
-            for nm,v in st.session_state.cenarios.items():
-                if v.get("eh_ano"):
-                    _m_exp=next((m for m in MESES if res_base.get(m)),None)
-                else:
-                    _m_exp=v.get("mes",MESES[0])
-                if _m_exp and res_base.get(_m_exp):
-                    label_dl=f"📥 {nm} ({'ANO' if v.get('eh_ano') else _m_exp})"
-                    fname_dl=f"cenario_{nm.replace(' ','_')}_{'ANO' if v.get('eh_ano') else _m_exp}.xlsx"
-                    _cen_vs_hash = hash(nm + str(v["resultados"]) + str(res_base.get(_m_exp,{})))
-                    st.download_button(label_dl,data=exportar_cenario_vs_base_cached(_cen_vs_hash,res_base,v["resultados"],_m_exp,nm),file_name=fname_dl,mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key=f"dl_cen_{nm}")
+            st.markdown('<div class="jd-sub">📥 Exportar cenários (todos os meses configurados)</div>', unsafe_allow_html=True)
+            for nm, v in st.session_state.cenarios.items():
+                # Exporta sempre cobrindo todos os meses modificados do cenário
+                _meses_exp = v.get("meses_configurados", [v.get("mes", MESES[0])]) if not v.get("eh_ano") else [m for m in MESES if res_base.get(m)]
+                # Usa o primeiro mês com dados para a comparação base vs cenário
+                _m_exp = next((m for m in _meses_exp if res_base.get(m)), None)
+                if _m_exp:
+                    _label_meses = "ANO" if v.get("eh_ano") else ", ".join(m[:3].upper() for m in _meses_exp)
+                    label_dl = f"📥 {nm} ({_label_meses})"
+                    fname_dl = f"cenario_{nm.replace(' ','_')}_{'ANO' if v.get('eh_ano') else '_'.join(m[:3] for m in _meses_exp)}.xlsx"
+                    _cen_vs_hash = hash(nm + str(v["resultados"]) + str(_meses_exp))
+                    st.download_button(label_dl, data=exportar_cenario_vs_base_cached(_cen_vs_hash, res_base, v["resultados"], _m_exp, nm),
+                                       file_name=fname_dl, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                       key=f"dl_cen_{nm}")
         with col_del:
             if st.session_state.cenarios:
-                dn=st.selectbox("Remover",list(st.session_state.cenarios.keys()),key="del_c")
-                if st.button("🗑️ Remover",type="secondary",key="btn_del_cen"):
+                dn = st.selectbox("Remover", list(st.session_state.cenarios.keys()), key="del_c")
+                if st.button("🗑️ Remover", type="secondary", key="btn_del_cen"):
                     del st.session_state.cenarios[dn]; st.rerun()
     else:
         st.info("Nenhum cenário criado ainda.")
