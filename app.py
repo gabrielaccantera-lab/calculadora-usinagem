@@ -839,10 +839,6 @@ def exportar_cenario_vs_base(res_base, res_cenario, mes, nome_cenario):
 def comparar_com_excel_cached(res_hash, _res_app, file_hash, _file_bytes, _tempo, _dist, _aplic, _pmp, _dias, _horas_turno, _thresholds, _suporte_cfg):
     return comparar_com_excel(_res_app, _file_bytes, _tempo, _dist, _aplic, _pmp, _dias, _horas_turno, _thresholds, _suporte_cfg)
 
-@st.cache_data(show_spinner=False)
-def df_to_xlsx_cached(df_hash, _df):
-    b = BytesIO(); _df.to_excel(b, index=False); b.seek(0); return b.read()
-
 def comparar_com_excel(res_app, file_bytes, tempo, dist, aplic, pmp, dias, horas_turno, thresholds, suporte_cfg):
     MAPA={"Novembro":"NovFY26","Dezembro":"DezFY26","Janeiro":"JanFY26","Fevereiro":"FevFY26","Março":"MarFY26","Abril":"AbrFY26","Maio":"MaiFY26","Junho":"JunFY26","Julho":"JulFY26","Agosto":"AgoFY26","Setembro":"SetFY26","Outubro":"OutFY26"}
     try:
@@ -1057,11 +1053,11 @@ st.markdown("""
 with st.expander("👋 Primeira vez aqui? Veja como usar em 3 passos", expanded=False):
     col1,col2,col3=st.columns(3)
     with col1:
-        st.markdown('<div class="mem-step"><span class="step-num">1</span> <b>Suba seu arquivo Excel</b><br><br>📁 O app lê automaticamente as abas:<br>• <b>INPUT_PMP</b> — demanda por mês<br>• <b>IMPUTTEMPO</b> — tempos de ciclo e labor<br>• <b>IMPUTDISTRIBUIÇÃO</b> — divisão de carga<br>• <b>IMPUTAPLICAÇÃO</b> — modelos por máquina<br>• <b>IMPUTTURNOS</b> — horas por turno</div>', unsafe_allow_html=True)
+        st.markdown('<div class="mem-step"><span class="step-num">1</span> <b>Suba seu arquivo Excel</b><br><br>O app lê: INPUT_PMP, IMPUTTEMPO, IMPUTDISTRIBUIÇÃO, IMPUTAPLICAÇÃO, IMPUTTURNOS</div>', unsafe_allow_html=True)
     with col2:
-        st.markdown('<div class="mem-step"><span class="step-num">2</span> <b>Confira os resultados</b><br><br>📊 <b>Resultado por Mês</b> — headcount por turno (A/B/C)<br>🔬 <b>Como foi Calculado</b> — passo a passo do cálculo, inclusive visão <b>anual</b><br>🔄 <b>Comparar com Excel</b> — valida se o app bate com seu Excel atual<br>📥 <b>Exportar</b> — baixa o resultado formatado</div>', unsafe_allow_html=True)
+        st.markdown('<div class="mem-step"><span class="step-num">2</span> <b>Confira os resultados</b><br><br>Veja headcount por turno. Compare com seu Excel atual na aba Comparar.</div>', unsafe_allow_html=True)
     with col3:
-        st.markdown('<div class="mem-step"><span class="step-num">3</span> <b>Crie cenários</b><br><br>🎯 Na aba <b>Cenários</b>: simule alterações de turno por centro<br>• Por mês: ajuste um período específico<br>• <b>ANO inteiro</b>: override em todos os meses de uma vez<br>• Compare múltiplos cenários no mesmo gráfico<br>• Baixe o cenário comparado com a base</div>', unsafe_allow_html=True)
+        st.markdown('<div class="mem-step"><span class="step-num">3</span> <b>Crie cenários</b><br><br>Simule alterações por mês OU para o ANO inteiro de uma vez.</div>', unsafe_allow_html=True)
 
 uploaded=st.file_uploader("Upload do arquivo de inputs (.xlsm ou .xlsx)",type=["xlsm","xlsx"])
 if not uploaded:
@@ -1178,27 +1174,24 @@ with tab_inp:
     st.markdown(f'<div style="background:#1A1A1A;padding:12px;border-radius:8px;max-height:180px;overflow-y:auto">{log_html}</div>',unsafe_allow_html=True)
     def to_xlsx(df): b=BytesIO(); df.to_excel(b,index=False); b.seek(0); return b
     c1,c2,c3=st.columns(3)
-    c1.download_button("📥 IMPUTTEMPO",data=df_to_xlsx_cached(hash(tempo.to_json()),tempo),file_name="tempo.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_inp_tempo")
-    c2.download_button("📥 IMPUTDIST.",data=df_to_xlsx_cached(hash(dist.to_json()),dist),file_name="dist.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_inp_dist")
-    c3.download_button("📥 IMPUTAPLIC.",data=df_to_xlsx_cached(hash(aplic.to_json()),aplic),file_name="aplic.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_inp_aplic")
+    c1.download_button("📥 IMPUTTEMPO",data=to_xlsx(tempo),file_name="tempo.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    c2.download_button("📥 IMPUTDIST.",data=to_xlsx(dist),file_name="dist.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    c3.download_button("📥 IMPUTAPLIC.",data=to_xlsx(aplic),file_name="aplic.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 # ── TAB 3 MEMÓRIA
 with tab_mem:
-    st.markdown('<div class="jd-section">Como foi calculado</div>', unsafe_allow_html=True)
-    st.markdown('<div class="aviso-ok">💡 Selecione <b>📅 ANO</b> para ver a memória consolidada de todos os meses, ou escolha um mês específico para detalhar aquele período.</div>', unsafe_allow_html=True)
-    _opcoes_mem = ["📅 ANO (visão consolidada)"] + [m for m in MESES if res_base.get(m)]
-    mes_mem = st.selectbox("Período de análise", _opcoes_mem, key="mes_mem")
+    _opcoes_mem=[m for m in MESES if res_base.get(m)] + ["📅 ANO (visão consolidada)"]
+    mes_mem=st.selectbox("Mês",_opcoes_mem,key="mes_mem")
     if mes_mem == "📅 ANO (visão consolidada)":
         show_memoria_ano(res_base, df_interm, agg_interm, horas_turno, thresholds)
     elif mes_mem and res_base.get(mes_mem):
-        show_memoria(res_base[mes_mem], mes_mem, df_interm, agg_interm, horas_turno, thresholds)
+        show_memoria(res_base[mes_mem],mes_mem,df_interm,agg_interm,horas_turno,thresholds)
 
 # ── TAB 4 RESULTADOS
 with tab_res:
     st.markdown('<div class="jd-section">Resultado por mês</div>',unsafe_allow_html=True)
-    st.markdown('<div class="aviso-ok">💡 Selecione <b>📅 ANO</b> para ver o resumo consolidado anual, ou escolha um mês específico.</div>', unsafe_allow_html=True)
-    _opcoes_res=["📅 ANO (resumo anual)"] + [m for m in MESES if res_base.get(m)]
-    mes_r=st.selectbox("Período",_opcoes_res,key="mes_r")
+    _opcoes_res=[m for m in MESES if res_base.get(m)]+["📅 ANO (resumo anual)"]
+    mes_r=st.selectbox("Selecione o mês",_opcoes_res,key="mes_r")
 
     if mes_r=="📅 ANO (resumo anual)":
         _meses_ano=[(m,res_base[m]) for m in MESES if res_base.get(m)]
@@ -1555,16 +1548,13 @@ with tab_cen:
 # ── TAB 6 COMPARAÇÃO
 with tab_cmp:
     st.markdown('<div class="jd-section">Comparação com o Excel atual</div>',unsafe_allow_html=True)
-    st.markdown('<div class="aviso-warn">🔄 Esta aba compara automaticamente os resultados calculados pelo app com as abas mensais do seu arquivo Excel (ex: <b>NovFY26, DezFY26…</b>). A comparação usa cache — só recalcula quando você muda thresholds, horas de turno ou sobe um novo arquivo.</div>', unsafe_allow_html=True)
     cache_key=f"cmp_{hash(str(dias))}_{hash(str(thresholds))}_{hash(str(horas_turno))}"
     if st.session_state.get("cmp_cache_key")!=cache_key:
-        with st.spinner("Comparando com o Excel... (executado uma única vez por configuração)"):
+        with st.spinner("Comparando..."):
             _res_hash = hash(str(res_base))
             _file_hash = hash(file_bytes)
             _r,_d,_e=comparar_com_excel_cached(_res_hash, res_base, _file_hash, file_bytes, tempo, dist, aplic, pmp, dias, horas_turno, thresholds, suporte_cfg)
         st.session_state["cmp_cache_key"]=cache_key; st.session_state["cmp_cache_resumo"]=_r; st.session_state["cmp_cache_detalhe"]=_d; st.session_state["cmp_cache_err"]=_e
-    else:
-        st.caption("✅ Resultado em cache — nenhum recálculo necessário.")
     df_resumo=st.session_state["cmp_cache_resumo"]; err=st.session_state["cmp_cache_err"]
     if err: st.error(err)
     elif df_resumo is not None and len(df_resumo)>0:
@@ -1616,10 +1606,9 @@ with tab_exp:
         st.download_button("📥 Baixar resultado base",data=exportar_cached(_exp_hash, res_base, tempo, dist, aplic, pmp),file_name="resultado_usinagem.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_res_base")
     with c2:
         st.markdown("**Base tratada (pós-JOIN)**")
-        if "base_tratada_cache" not in st.session_state or st.session_state.get("_file_id") != _file_id:
-            _buf_base = BytesIO(); df_interm.to_excel(_buf_base, index=False); _buf_base.seek(0)
-            st.session_state["base_tratada_cache"] = _buf_base.read()
-        st.download_button("📥 Baixar base tratada", data=st.session_state["base_tratada_cache"], file_name="base_tratada.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_base")
+        def _to_xlsx_full():
+            b=BytesIO(); df_interm.to_excel(b,index=False); b.seek(0); return b
+        st.download_button("📥 Baixar base tratada",data=_to_xlsx_full(),file_name="base_tratada.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_base")
     if st.session_state.get("cenarios"):
         st.markdown('<div class="jd-sub">Cenários salvos</div>',unsafe_allow_html=True)
         for nm,v in st.session_state.cenarios.items():
