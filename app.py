@@ -113,14 +113,68 @@ def find_col(df, candidates, aba, campo):
 # ─────────────────────────────────────────
 # LEITURA COM LOG
 # ─────────────────────────────────────────
+# ─────────────────────────────────────────
+# DESCRIÇÕES DE FORMATO ESPERADO (para avisos)
+# ─────────────────────────────────────────
+ABA_FORMATOS = {
+    "INPUT_PMP": (
+        "**INPUT_PMP** — Linha 1: dias trabalhados por mês (colunas B→M = Nov→Out). "
+        "Linhas 3+: cada linha = um modelo (ex: MODELO01), colunas B→M = quantidade de peças no mês. "
+        "Coluna A = nome do modelo."
+    ),
+    "IMPUTTEMPO": (
+        "**IMPUTTEMPO** — Cabeçalho na linha 1. Colunas obrigatórias: "
+        "`Máquina` (ou Centro), `PEÇA`, `Tempo Ciclo (min)`, `Tempo Labor (min)`. "
+        "Cada linha = uma combinação centro+peça com seus tempos."
+    ),
+    "IMPUTDISTRIBUIÇÃO": (
+        "**IMPUTDISTRIBUIÇÃO** — Cabeçalho na linha 1. Colunas obrigatórias: "
+        "`Máquina` (ou Centro), `PEÇA`, `Divisão Carga`, `Vol. Interna`, `Divisão de Volume`, `Disponibilidade`. "
+        "Disponibilidade deve ser > 0 (ex: 0.9 = 90%)."
+    ),
+    "IMPUTAPLICAÇÃO": (
+        "**IMPUTAPLICAÇÃO** — Cabeçalho na linha 1. Colunas: `Centro` (col A), `PEÇA` (col B), "
+        "depois uma coluna por modelo (MODELO01, MODELO02…). Célula = 1 se aquele modelo passa por aquele centro+peça, "
+        "0 ou vazio se não passa."
+    ),
+    "IMPUTTURNOS": (
+        "**IMPUTTURNOS** — Linha 1: horas acumuladas dos turnos. "
+        "Célula B1 = hora de fim do Turno A (ex: 7.5), C1 = hora de fim do Turno B (ex: 14.25), "
+        "D1 = hora de fim do Turno C (ex: 19.5). Sem cabeçalho."
+    ),
+}
+
+def verificar_abas(fb):
+    """Verifica quais abas de input existem no arquivo. Retorna dict {aba: existe}."""
+    try:
+        wb = openpyxl.load_workbook(BytesIO(fb), read_only=True, data_only=True)
+        abas = set(wb.sheetnames)
+        wb.close()
+    except:
+        abas = set()
+    obrigatorias = ["INPUT_PMP","IMPUTTEMPO","IMPUTDISTRIBUIÇÃO","IMPUTAPLICAÇÃO"]
+    opcional     = ["IMPUTTURNOS"]
+    resultado = {}
+    for a in obrigatorias + opcional:
+        resultado[a] = a in abas
+    return resultado
+
 def read_pmp(fb, log):
-    df = pd.read_excel(BytesIO(fb), sheet_name='INPUT_PMP', header=None)
+    try:
+        df = pd.read_excel(BytesIO(fb), sheet_name='INPUT_PMP', header=None)
+    except Exception as e:
+        raise ValueError(f"Não foi possível ler a aba INPUT_PMP: {e}\n\n{ABA_FORMATOS['INPUT_PMP']}")
     log.append(f"✅ INPUT_PMP lido: {df.shape[0]} linhas × {df.shape[1]} colunas")
+    if df.shape[1] < 2:
+        raise ValueError(f"INPUT_PMP parece vazio ou mal formatado (apenas {df.shape[1]} coluna(s)).\n\n{ABA_FORMATOS['INPUT_PMP']}")
     dias = {}
     for i, m in enumerate(MESES, 1):
         v = df.iloc[0, i] if i < df.shape[1] else None
-        dias[m] = int(v) if pd.notna(v) else 0
+        try: dias[m] = int(v) if pd.notna(v) else 0
+        except: dias[m] = 0
     log.append(f"   Dias trabalhados: { {m:d for m,d in dias.items() if d>0} }")
+    if all(d==0 for d in dias.values()):
+        log.append("⚠️ INPUT_PMP: todos os dias trabalhados são 0 — verifique a linha 1 da aba.")
 
     rows = []
     modelos_lidos = 0
@@ -130,28 +184,39 @@ def read_pmp(fb, log):
         modelos_lidos += 1
         for i, m in enumerate(MESES, 1):
             v = df.iloc[r, i] if i < df.shape[1] else None
-            qtd = int(v) if pd.notna(v) else 0
+            try: qtd = int(v) if pd.notna(v) else 0
+            except: qtd = 0
             if qtd > 0:
                 rows.append({"modelo": str(modelo).strip(), "mes": m, "qtd": qtd})
     log.append(f"   {modelos_lidos} modelos · {len(rows)} registros com qtd > 0")
+    if modelos_lidos == 0:
+        log.append(f"⚠️ INPUT_PMP: nenhum modelo encontrado. Esperado: {ABA_FORMATOS['INPUT_PMP']}")
     return pd.DataFrame(rows), dias
 
 def read_turnos(fb):
-    """Lê IMPUTTURNOS — retorna horas acumuladas por turno (7.5, 14.25, 19.5)."""
+    """Lê IMPUTTURNOS. Retorna (dict_horas, encontrado:bool)."""
     try:
         df = pd.read_excel(BytesIO(fb), sheet_name='IMPUTTURNOS', header=None)
         hA = float(df.iloc[0,1]) if pd.notna(df.iloc[0,1]) else 7.5
         hB = float(df.iloc[0,2]) if pd.notna(df.iloc[0,2]) else 14.25
         hC = float(df.iloc[0,3]) if pd.notna(df.iloc[0,3]) else 19.5
-        return {"A": hA, "B": hB, "C": hC}
-    except:
-        return {"A": 7.5, "B": 14.25, "C": 19.5}
+        return {"A": hA, "B": hB, "C": hC}, True
+    except Exception:
+        return {"A": 7.5, "B": 14.25, "C": 19.5}, False
 
 def read_tempo(fb, log):
-    df = pd.read_excel(BytesIO(fb), sheet_name='IMPUTTEMPO', header=0)
-    log.append(f"✅ IMPUTTEMPO lido: {df.shape[0]} linhas · colunas: {list(df.columns[:4])}")
-    mp = COL_MAP["IMPUTTEMPO"]
-    c = {k: find_col(df, v, "IMPUTTEMPO", k) for k,v in mp.items()}
+    try:
+        df = pd.read_excel(BytesIO(fb), sheet_name='IMPUTTEMPO', header=0)
+    except Exception as e:
+        raise ValueError(f"Não foi possível ler a aba IMPUTTEMPO: {e}\n\n{ABA_FORMATOS['IMPUTTEMPO']}")
+    log.append(f"✅ IMPUTTEMPO lido: {df.shape[0]} linhas · colunas: {list(df.columns[:6])}")
+    if df.shape[0] == 0:
+        raise ValueError(f"IMPUTTEMPO está vazio.\n\n{ABA_FORMATOS['IMPUTTEMPO']}")
+    try:
+        mp = COL_MAP["IMPUTTEMPO"]
+        c = {k: find_col(df, v, "IMPUTTEMPO", k) for k,v in mp.items()}
+    except ValueError as e:
+        raise ValueError(f"IMPUTTEMPO com colunas inesperadas: {e}\n\nFormato esperado: {ABA_FORMATOS['IMPUTTEMPO']}\n\nColunas encontradas: {list(df.columns)}")
     out = df[[c["centro"],c["peca"],c["t_ciclo"],c["t_labor"]]].copy()
     out.columns = ["centro","peca","t_ciclo","t_labor"]
     out = out.dropna(subset=["centro"])
@@ -163,24 +228,42 @@ def read_tempo(fb, log):
     return out.copy()
 
 def read_dist(fb, log):
-    df = pd.read_excel(BytesIO(fb), sheet_name='IMPUTDISTRIBUIÇÃO', header=0)
-    log.append(f"✅ IMPUTDISTRIBUIÇÃO lido: {df.shape[0]} linhas")
-    mp = COL_MAP["IMPUTDISTRIBUIÇÃO"]
-    c = {k: find_col(df, v, "IMPUTDISTRIBUIÇÃO", k) for k,v in mp.items()}
+    try:
+        df = pd.read_excel(BytesIO(fb), sheet_name='IMPUTDISTRIBUIÇÃO', header=0)
+    except Exception as e:
+        raise ValueError(f"Não foi possível ler a aba IMPUTDISTRIBUIÇÃO: {e}\n\n{ABA_FORMATOS['IMPUTDISTRIBUIÇÃO']}")
+    log.append(f"✅ IMPUTDISTRIBUIÇÃO lido: {df.shape[0]} linhas · colunas: {list(df.columns[:6])}")
+    if df.shape[0] == 0:
+        raise ValueError(f"IMPUTDISTRIBUIÇÃO está vazio.\n\n{ABA_FORMATOS['IMPUTDISTRIBUIÇÃO']}")
+    try:
+        mp = COL_MAP["IMPUTDISTRIBUIÇÃO"]
+        c = {k: find_col(df, v, "IMPUTDISTRIBUIÇÃO", k) for k,v in mp.items()}
+    except ValueError as e:
+        raise ValueError(f"IMPUTDISTRIBUIÇÃO com colunas inesperadas: {e}\n\nFormato esperado: {ABA_FORMATOS['IMPUTDISTRIBUIÇÃO']}\n\nColunas encontradas: {list(df.columns)}")
     out = df[[c["centro"],c["peca"],c["div_carga"],c["vol_int"],c["div_volume"],c["disponib"]]].copy()
     out.columns = ["centro","peca","div_carga","vol_int","div_volume","disponib"]
     out["vol_int"] = pd.to_numeric(out["vol_int"], errors="coerce").fillna(1.0)
     out = out.dropna(subset=["centro"])
     zero_d = (out["disponib"] == 0).sum()
-    if zero_d: log.append(f"⚠️ IMPUTDISTRIBUIÇÃO: {zero_d} linhas com disponib=0")
+    if zero_d: log.append(f"⚠️ IMPUTDISTRIBUIÇÃO: {zero_d} linhas com disponib=0 (divisão por zero no cálculo)")
     log.append(f"   {len(out)} combinações carregadas")
     return out.copy()
 
 def read_aplic(fb, log):
-    df = pd.read_excel(BytesIO(fb), sheet_name='IMPUTAPLICAÇÃO', header=0)
-    log.append(f"✅ IMPUTAPLICAÇÃO lido: {df.shape[0]} linhas")
+    try:
+        df = pd.read_excel(BytesIO(fb), sheet_name='IMPUTAPLICAÇÃO', header=0)
+    except Exception as e:
+        raise ValueError(f"Não foi possível ler a aba IMPUTAPLICAÇÃO: {e}\n\n{ABA_FORMATOS['IMPUTAPLICAÇÃO']}")
+    log.append(f"✅ IMPUTAPLICAÇÃO lido: {df.shape[0]} linhas · colunas: {list(df.columns[:4])}")
+    if df.shape[0] == 0:
+        raise ValueError(f"IMPUTAPLICAÇÃO está vazio.\n\n{ABA_FORMATOS['IMPUTAPLICAÇÃO']}")
     df = df.rename(columns={df.columns[0]:"centro", df.columns[1]:"peca"})
     mcols = [c for c in df.columns if str(c).startswith("MODELO")]
+    if not mcols:
+        raise ValueError(
+            f"IMPUTAPLICAÇÃO: nenhuma coluna de modelo encontrada (esperado colunas começando com 'MODELO').\n\n"
+            f"Formato esperado: {ABA_FORMATOS['IMPUTAPLICAÇÃO']}\n\nColunas encontradas: {list(df.columns)}"
+        )
     log.append(f"   {len(mcols)} modelos encontrados na matriz")
     melted = df[["centro","peca"]+mcols].melt(id_vars=["centro","peca"], var_name="modelo", value_name="ativo")
     out = melted[melted["ativo"]==1][["centro","peca","modelo"]].reset_index(drop=True)
@@ -2383,15 +2466,15 @@ def read_indices(fb, log):
         return None
 
 def read_turnos(fb):
-    """Lê IMPUTTURNOS — retorna horas acumuladas por turno (7.5, 14.25, 19.5)."""
+    """Lê IMPUTTURNOS — retorna (dict_horas, encontrado:bool)."""
     try:
         df = pd.read_excel(BytesIO(fb), sheet_name='IMPUTTURNOS', header=None)
         hA = float(df.iloc[0,1]) if pd.notna(df.iloc[0,1]) else 7.5
         hB = float(df.iloc[0,2]) if pd.notna(df.iloc[0,2]) else 14.25
         hC = float(df.iloc[0,3]) if pd.notna(df.iloc[0,3]) else 19.5
-        return {"A": hA, "B": hB, "C": hC}
+        return {"A": hA, "B": hB, "C": hC}, True
     except:
-        return {"A": 7.5, "B": 14.25, "C": 19.5}
+        return {"A": 7.5, "B": 14.25, "C": 19.5}, False
 
 def read_tempo(fb, log):
     df = pd.read_excel(BytesIO(fb), sheet_name='IMPUTTEMPO', header=0)
@@ -3025,20 +3108,48 @@ if "log_leitura" not in st.session_state:
     st.session_state.log_leitura = []
 st.session_state.log_leitura = []
 
+# ── Verificar abas antes de tentar ler ─────────────────────────────────────
+_abas_status = verificar_abas(file_bytes)
+_abas_obrig  = ["INPUT_PMP","IMPUTTEMPO","IMPUTDISTRIBUIÇÃO","IMPUTAPLICAÇÃO"]
+_abas_falt   = [a for a in _abas_obrig if not _abas_status.get(a)]
+
+if _abas_falt:
+    st.error("🔴 **Abas obrigatórias não encontradas no arquivo:**")
+    for _aba_f in _abas_falt:
+        with st.expander(f"❌ {_aba_f} — como deve ser esta aba"):
+            st.markdown(ABA_FORMATOS[_aba_f])
+    st.info("💡 O arquivo deve conter todas as abas de input acima. Se você subiu um arquivo com apenas alguns inputs, adicione as abas que faltam e tente novamente.")
+    st.stop()
+
+if not _abas_status.get("IMPUTTURNOS"):
+    st.warning(
+        "⚠️ **Aba IMPUTTURNOS não encontrada.** Usando valores padrão: Turno A = 7,5h · Turno B = 14,25h · Turno C = 19,5h. "
+        "Para usar seus próprios valores, adicione a aba IMPUTTURNOS ao arquivo.\n\n"
+        f"{ABA_FORMATOS['IMPUTTURNOS']}"
+    )
+
 with st.spinner("Lendo planilha..."):
     try:
         log = st.session_state.log_leitura
-        pmp, dias  = read_pmp(file_bytes, log)
-        tempo       = read_tempo(file_bytes, log)
-        dist        = read_dist(file_bytes, log)
-        aplic       = read_aplic(file_bytes, log)
-        turnos_arq  = read_turnos(file_bytes)
+        pmp, dias   = read_pmp(file_bytes, log)
+        tempo        = read_tempo(file_bytes, log)
+        dist         = read_dist(file_bytes, log)
+        aplic        = read_aplic(file_bytes, log)
+        turnos_arq, _turnos_encontrado = read_turnos(file_bytes)
         st.session_state["turnos_arq"] = turnos_arq
-        log.append(f"✅ IMPUTTURNOS lido: A={turnos_arq['A']}h · B={turnos_arq['B']}h · C={turnos_arq['C']}h (acumulados)")
-
+        if _turnos_encontrado:
+            log.append(f"✅ IMPUTTURNOS lido: A={turnos_arq['A']}h · B={turnos_arq['B']}h · C={turnos_arq['C']}h (acumulados)")
+        else:
+            log.append("⚠️ IMPUTTURNOS ausente — usando defaults: A=7.5h · B=14.25h · C=19.5h")
         log.append(f"✅ Leitura concluída em {datetime.now().strftime('%H:%M:%S')}")
+    except ValueError as e:
+        st.error("🔴 **Erro de formato em um dos inputs:**")
+        st.markdown(f"```\n{e}\n```")
+        st.info("💡 Verifique se a aba está no formato correto conforme descrito acima e tente novamente.")
+        st.stop()
     except Exception as e:
-        st.error(f"Erro ao ler: {e}"); st.stop()
+        st.error(f"🔴 Erro inesperado ao ler o arquivo: {e}")
+        st.stop()
 
 st.success(f"✅ {len(aplic)} combinações · {pmp.modelo.nunique()} modelos · {pmp.mes.nunique()} meses")
 
@@ -3230,9 +3341,54 @@ with tab_inp:
 # TAB 3 — MEMÓRIA DE CÁLCULO
 # ══════════════════════════════════════════
 with tab_mem:
-    mes_mem = st.selectbox("Mês", [m for m in MESES if res_base.get(m)], key="mes_mem")
-    if mes_mem and res_base.get(mes_mem):
+    _opcoes_mem = [m for m in MESES if res_base.get(m)] + ["📅 ANO (resumo anual)"]
+    mes_mem = st.selectbox("Mês", _opcoes_mem, key="mes_mem")
+    if mes_mem and mes_mem != "📅 ANO (resumo anual)" and res_base.get(mes_mem):
         show_memoria(res_base[mes_mem], mes_mem, df_interm, agg_interm, horas_turno, thresholds)
+    elif mes_mem == "📅 ANO (resumo anual)":
+        st.markdown('<div class="jd-section">Resumo anual — todos os meses</div>', unsafe_allow_html=True)
+        _meses_ano = [(m, res_base[m]) for m in MESES if res_base.get(m)]
+        if _meses_ano:
+            _dias_ano = sum(r["dias"] for _,r in _meses_ano)
+            _n_meses  = len(_meses_ano)
+            st.markdown(f"**{_n_meses} meses com dados · {_dias_ano} dias trabalhados no total**")
+            _ano_rows = []
+            for _m, _r in _meses_ano:
+                _ano_rows.append({
+                    "Mês": _m, "Dias": _r["dias"],
+                    "Turno A": _r["tot_A"], "Turno B": _r["tot_B"], "Turno C": _r["tot_C"],
+                    "Total": _r["total"],
+                    "Labor Total": f'{_r["prod_labor_tot"]:.1%}',
+                    "Ciclo Total": f'{_r["prod_ciclo_tot"]:.1%}'
+                })
+            _df_ano = pd.DataFrame(_ano_rows)
+            # Linha de totais / médias
+            _shc = sum(r["h_ciclo"] for _,r in _meses_ano)
+            _shl = sum(r["h_labor"] for _,r in _meses_ano)
+            _sha = sum(r["h_ativos"] for _,r in _meses_ano)
+            _sht = sum(r["h_todos"] for _,r in _meses_ano)
+            _prod_lt_ano = _shl/_sht if _sht>0 else 0
+            _prod_ct_ano = _shc/_sht if _sht>0 else 0
+            _ano_rows.append({
+                "Mês": "📅 TOTAL/MÉDIA ANO",
+                "Dias": _dias_ano,
+                "Turno A": round(sum(r["tot_A"] for _,r in _meses_ano)/_n_meses,1),
+                "Turno B": round(sum(r["tot_B"] for _,r in _meses_ano)/_n_meses,1),
+                "Turno C": round(sum(r["tot_C"] for _,r in _meses_ano)/_n_meses,1),
+                "Total":   round(sum(r["total"] for _,r in _meses_ano)/_n_meses,1),
+                "Labor Total": f'{_prod_lt_ano:.1%}',
+                "Ciclo Total": f'{_prod_ct_ano:.1%}'
+            })
+            _df_ano2 = pd.DataFrame(_ano_rows)
+            def _style_ano(row):
+                if "ANO" in str(row["Mês"]): return [f"background-color:{JD_AMARELO};color:{JD_VERDE_ESC};font-weight:700"]*len(row)
+                return [""]*len(row)
+            st.dataframe(_df_ano2.style.apply(_style_ano, axis=1), use_container_width=True, hide_index=True)
+            c1,c2,c3,c4 = st.columns(4)
+            c1.metric("⭐ Labor Total Ano", f"{_prod_lt_ano:.1%}")
+            c2.metric("Ciclo Total Ano",    f"{_prod_ct_ano:.1%}")
+            c3.metric("Dias trabalhados",   _dias_ano)
+            c4.metric("Meses com dados",    _n_meses)
 
 # ══════════════════════════════════════════
 # TAB 4 — RESULTADOS
@@ -3242,9 +3398,54 @@ with tab_res:
         st.session_state.cenarios = {}
 
     st.markdown('<div class="jd-section">Resultado por mês</div>', unsafe_allow_html=True)
-    mes_r = st.selectbox("Selecione o mês", [m for m in MESES if res_base.get(m)], key="mes_r")
+    _opcoes_res = [m for m in MESES if res_base.get(m)] + ["📅 ANO (resumo anual)"]
+    mes_r = st.selectbox("Selecione o mês", _opcoes_res, key="mes_r")
 
-    if mes_r and res_base.get(mes_r):
+    if mes_r and mes_r == "📅 ANO (resumo anual)":
+        _meses_ano_r = [(m, res_base[m]) for m in MESES if res_base.get(m)]
+        if _meses_ano_r:
+            _n_r = len(_meses_ano_r); _d_r = sum(r["dias"] for _,r in _meses_ano_r)
+            _shc_r = sum(r["h_ciclo"] for _,r in _meses_ano_r)
+            _shl_r = sum(r["h_labor"] for _,r in _meses_ano_r)
+            _sha_r = sum(r["h_ativos"] for _,r in _meses_ano_r)
+            _sht_r = sum(r["h_todos"] for _,r in _meses_ano_r)
+            _pl_r  = _shl_r/_sht_r if _sht_r>0 else 0
+            _pc_r  = _shc_r/_sht_r if _sht_r>0 else 0
+            _tA_r  = round(sum(r["tot_A"] for _,r in _meses_ano_r)/_n_r,1)
+            _tB_r  = round(sum(r["tot_B"] for _,r in _meses_ano_r)/_n_r,1)
+            _tC_r  = round(sum(r["tot_C"] for _,r in _meses_ano_r)/_n_r,1)
+            _tf_r  = round(sum(r["total"] for _,r in _meses_ano_r)/_n_r,1)
+            st.markdown(f"""
+<div class="aviso-ok">
+📅 <b>ANO — {_n_r} meses</b> — {_d_r} dias trabalhados no total &nbsp;|&nbsp;
+Média Turno A: <b>{_tA_r}</b> &nbsp;|&nbsp;
+Média Turno B: <b>{_tB_r}</b> &nbsp;|&nbsp;
+Média Turno C: <b>{_tC_r}</b> &nbsp;|&nbsp;
+<b>Média Total: {_tf_r} funcionários/mês</b>
+</div>""", unsafe_allow_html=True)
+            c1,c2,c3,c4 = st.columns(4)
+            c1.metric("⭐ Labor Total Ano",  f"{_pl_r:.1%}")
+            c2.metric("Ciclo Total Ano",     f"{_pc_r:.1%}")
+            c3.metric("Total dias",          _d_r)
+            c4.metric("Meses com dados",     _n_r)
+            st.markdown('<div class="jd-sub">Resultado mês a mês</div>', unsafe_allow_html=True)
+            _rows_r = []
+            for _m, _r in _meses_ano_r:
+                _rows_r.append({"Mês":_m,"Dias":_r["dias"],
+                    "Turno A":_r["tot_A"],"Turno B":_r["tot_B"],"Turno C":_r["tot_C"],
+                    "Total":_r["total"],
+                    "Labor Total":f'{_r["prod_labor_tot"]:.1%}',
+                    "Labor Op.":f'{_r["prod_labor_op"]:.1%}',
+                    "Ciclo Total":f'{_r["prod_ciclo_tot"]:.1%}'})
+            _rows_r.append({"Mês":"📅 MÉDIA ANO","Dias":_d_r,
+                "Turno A":_tA_r,"Turno B":_tB_r,"Turno C":_tC_r,"Total":_tf_r,
+                "Labor Total":f'{_pl_r:.1%}',"Labor Op.":"—","Ciclo Total":f'{_pc_r:.1%}'})
+            def _sty_r(row):
+                if "ANO" in str(row["Mês"]): return [f"background-color:{JD_AMARELO};color:{JD_VERDE_ESC};font-weight:700"]*len(row)
+                return [""]*len(row)
+            st.dataframe(pd.DataFrame(_rows_r).style.apply(_sty_r, axis=1), use_container_width=True, hide_index=True)
+
+    elif mes_r and res_base.get(mes_r):
         r = res_base[mes_r]
         # Resumo rápido antes da tabela detalhada
         st.markdown(f"""
