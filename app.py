@@ -1315,8 +1315,74 @@ with tab_cen:
 
             for nome_cen,dados_cen in st.session_state.cenarios.items():
                 r_cen_res=dados_cen["resultados"]
-                with st.expander(f"🔍 Detalhamento — {nome_cen} vs Base"):
+                with st.expander("🔍 Detalhamento — " + nome_cen + " vs Base"):
                     _m_ref=meses_cmp_lista[0] if meses_cmp_lista else None
+                    _meses_prod=meses_cmp_lista if eh_ano_cmp else ([_m_ref] if _m_ref else [])
+
+                    def _calc_prod(res_d, meses_l):
+                        rr=[res_d.get(m) for m in meses_l if res_d.get(m)]
+                        if not rr: return None
+                        shc=sum(r["h_ciclo"] for r in rr); shl=sum(r["h_labor"] for r in rr)
+                        sha=sum(r["h_ativos"] for r in rr); sht=sum(r["h_todos"] for r in rr)
+                        return {"ciclo_op":shc/sha if sha>0 else 0,"ciclo_tot":shc/sht if sht>0 else 0,
+                                "labor_op":shl/sha if sha>0 else 0,"labor_tot":shl/sht if sht>0 else 0}
+
+                    prod_b=_calc_prod(res_base,_meses_prod)
+                    prod_c=_calc_prod(r_cen_res,_meses_prod)
+
+                    if prod_b and prod_c:
+                        st.markdown('<div class="jd-sub">Produtividades — Base vs Cenário</div>',unsafe_allow_html=True)
+                        _items=[
+                            ("Ciclo Operacional",prod_b["ciclo_op"],prod_c["ciclo_op"],False),
+                            ("Ciclo Total",prod_b["ciclo_tot"],prod_c["ciclo_tot"],False),
+                            ("Labor Operacional",prod_b["labor_op"],prod_c["labor_op"],False),
+                            ("⭐ Labor Total",prod_b["labor_tot"],prod_c["labor_tot"],True),
+                        ]
+                        # 4 cards lado a lado
+                        parts=[]
+                        for lbl,vb,vc,dest in _items:
+                            delta=vc-vb
+                            arrow="↑" if delta>0 else ("↓" if delta<0 else "→")
+                            cor_d="#69F0AE" if delta>0 else ("#FF5252" if delta<0 else "#888888")
+                            bg="linear-gradient(135deg,#1F4D19,#0D2A0D)" if dest else "linear-gradient(135deg,#151525,#0D0D1A)"
+                            brd="#FFDE00" if dest else "#2A3A4A"
+                            parts.append(
+                                '<div style="background:' + bg + ';border:1.5px solid ' + brd + ';border-radius:10px;padding:12px 14px;">'
+                                + '<div style="font-size:9px;color:#7BC67A;text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin-bottom:8px;">' + lbl + '</div>'
+                                + '<div style="display:flex;justify-content:space-between;align-items:flex-end;">'
+                                + '<div><div style="font-size:9px;color:#888;margin-bottom:1px;">Base</div>'
+                                + '<div style="font-size:19px;font-weight:800;color:#AAAAAA;">' + f"{vb:.1%}" + '</div></div>'
+                                + '<div style="font-size:16px;color:#444;padding-bottom:3px;">→</div>'
+                                + '<div style="text-align:right"><div style="font-size:9px;color:#FFDE00;margin-bottom:1px;">Cenário</div>'
+                                + '<div style="font-size:19px;font-weight:800;color:#FFFFFF;">' + f"{vc:.1%}" + '</div></div>'
+                                + '</div>'
+                                + '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #333;display:flex;align-items:center;gap:5px;">'
+                                + '<span style="font-size:13px;">' + arrow + '</span>'
+                                + '<span style="font-size:13px;font-weight:700;color:' + cor_d + ';">' + f"{delta:+.1%}" + '</span>'
+                                + '<span style="font-size:10px;color:#666;">vs base</span>'
+                                + '</div>'
+                                + '</div>'
+                            )
+                        cards_html = '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;">' + "".join(parts) + '</div>'
+                        st.markdown(cards_html, unsafe_allow_html=True)
+
+                        # tabela compacta
+                        _prod_rows=[]
+                        for lbl,vb,vc,dest in _items:
+                            delta=vc-vb
+                            _prod_rows.append({"Indicador":lbl,"Base":f"{vb:.1%}","Cenário":f"{vc:.1%}","Δ":f"{delta:+.1%}","":("✅" if delta>0 else ("⚠️" if delta<0 else "➖"))})
+                        _df_pr=pd.DataFrame(_prod_rows)
+                        def _sty_pr(row):
+                            dest2="Labor Total" in str(row["Indicador"])
+                            bg_d=f"background-color:{JD_AMARELO};color:{JD_VERDE_ESC};font-weight:700" if dest2 else ""
+                            try:
+                                dv=float(str(row["Δ"]).replace("+","").replace("%",""))/100
+                                cd2="background-color:#003D10;color:#B9F6CA;font-weight:700" if dv>0 else ("background-color:#3D0000;color:#FF8A80;font-weight:700" if dv<0 else "background-color:#222;color:#888")
+                            except: cd2=""
+                            return [bg_d if dest2 else "" for col in _df_pr.columns[:-2]] + [cd2, bg_d if dest2 else ""]
+                        st.dataframe(_df_pr.style.apply(_sty_pr,axis=1),use_container_width=True,hide_index=True)
+
+                    st.markdown('<div class="jd-sub">Ativação por centro</div>',unsafe_allow_html=True)
                     det_rows=[]
                     if _m_ref and res_base.get(_m_ref) and r_cen_res.get(_m_ref):
                         centros_set2=sorted(set(res_base[_m_ref]["centros"].centro.tolist()+r_cen_res[_m_ref]["centros"].centro.tolist()))
@@ -1325,17 +1391,26 @@ with tab_cen:
                             rb_r=rb_c[rb_c.centro==cen]; rc_r=rc_c[rc_c.centro==cen]
                             if rb_r.empty or rc_r.empty: continue
                             rb=rb_r.iloc[0]; rc=rc_r.iloc[0]
-                            mA=int(rb.ativo_A)!=int(rc.ativo_A); mB=int(rb.ativo_B)!=int(rc.ativo_B); mC=int(rb.ativo_C)!=int(rc.ativo_C)
-                            det_rows.append({"Centro":cen,"Ocup.A":f"{rb.ocup_A:.0%}","Base A":int(rb.ativo_A),"Cen A":int(rc.ativo_A),"Ocup.B":f"{rb.ocup_B:.0%}","Base B":int(rb.ativo_B),"Cen B":int(rc.ativo_B),"Ocup.C":f"{rb.ocup_C:.0%}","Base C":int(rb.ativo_C),"Cen C":int(rc.ativo_C),"Mudou":"✅ Igual" if not(mA or mB or mC) else f"{'A ' if mA else ''}{'B ' if mB else ''}{'C' if mC else ''}alterado(s)"})
+                            mA=int(rb.ativo_A)!=int(rc.ativo_A)
+                            mB=int(rb.ativo_B)!=int(rc.ativo_B)
+                            mC=int(rb.ativo_C)!=int(rc.ativo_C)
+                            det_rows.append({
+                                "Centro":cen,
+                                "Ocup.A":f"{rb.ocup_A:.0%}","Base A":int(rb.ativo_A),"Cen A":int(rc.ativo_A),
+                                "Ocup.B":f"{rb.ocup_B:.0%}","Base B":int(rb.ativo_B),"Cen B":int(rc.ativo_B),
+                                "Ocup.C":f"{rb.ocup_C:.0%}","Base C":int(rb.ativo_C),"Cen C":int(rc.ativo_C),
+                                "Mudou":"✅ Igual" if not(mA or mB or mC) else
+                                    ("A " if mA else "")+("B " if mB else "")+("C" if mC else "")+"alterado(s)"
+                            })
                     if det_rows:
                         df_det=pd.DataFrame(det_rows)
                         def _sty_det(row):
-                            if "alterado" in str(row["Mudou"]): return [f"background-color:#3D2D00;color:#FFE57F"]*len(row)
+                            if "alterado" in str(row["Mudou"]):
+                                return ["background-color:#3D2D00;color:#FFE57F"]*len(row)
                             return [""]*len(row)
                         st.dataframe(df_det.style.apply(_sty_det,axis=1),use_container_width=True,hide_index=True)
                     if dados_cen.get("eh_ano"):
-                        st.markdown(f'<div class="aviso-ok">📅 Cenário anual — override em todos os meses. Detalhamento = {_m_ref}.</div>',unsafe_allow_html=True)
-
+                        st.markdown('<div class="aviso-ok">📅 Cenário anual — override em todos os meses. Detalhamento acima = ' + str(_m_ref) + '</div>',unsafe_allow_html=True)
         st.markdown("---")
         col_exp,col_del=st.columns([3,1])
         with col_exp:
