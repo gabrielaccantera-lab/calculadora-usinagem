@@ -817,7 +817,8 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
                           (_COL_F+7,10),(_COL_F+8,10),(_COL_F+9,10)]:
             ws_out.column_dimensions[get_column_letter(_ci_w)].width=_ww
 
-    gerar_aba_anual(wb_out, resultados, label="ANO")
+    _cp_data_ano = build_cp_data_anual(resultados, tempo, dist, aplic, pmp)
+    gerar_aba_anual(wb_out, resultados, label="ANO", cp_data=_cp_data_ano)
     buf_out = BytesIO()
     wb_out.save(buf_out)
     buf_out.seek(0)
@@ -827,7 +828,48 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
 # ─────────────────────────────────────────
 # RESUMO ANUAL — agrega todos os meses
 # ─────────────────────────────────────────
-def gerar_aba_anual(wb, resultados, label="ANO"):
+def build_cp_data_anual(resultados, tempo, dist, aplic, pmp):
+    """
+    Calcula dados por centro×peça acumulados no ano inteiro.
+    Retorna lista de (centro, peca, tc, tl, dc, vi, dv, di, idx_ciclo,
+                      min_ciclo_ano, min_labor_ano, qtd_ano)
+    """
+    meses_c = [m for m in MESES if resultados.get(m)]
+    if not meses_c:
+        return None
+    try:
+        df = (aplic.merge(pmp, on="modelo")
+                   .merge(tempo, on=["centro","peca"])
+                   .merge(dist,  on=["centro","peca"]))
+        if "vol_int" not in df.columns: df["vol_int"] = 1.0
+        df["vol_int"] = pd.to_numeric(df["vol_int"], errors="coerce").fillna(1.0)
+        df["indice_ciclo"] = (df.t_ciclo*df.div_carga*df.div_volume*df.vol_int)/df.disponib
+        df["min_ciclo"] = df.indice_ciclo * df.qtd
+        df["min_labor"] = df.t_labor * df.div_carga * df.qtd
+        df_ano = df[df.mes.isin(meses_c)]
+        agg = df_ano.groupby(["centro","peca"])[["min_ciclo","min_labor","qtd"]].sum().reset_index()
+        # Pegar atributos fixos (t_ciclo, div_carga etc.) de uma linha qualquer de cada par
+        attrs = df_ano.drop_duplicates(["centro","peca"])[
+            ["centro","peca","t_ciclo","t_labor","div_carga","vol_int","div_volume","disponib","indice_ciclo"]
+        ].set_index(["centro","peca"])
+        result = []
+        for _, row in agg.iterrows():
+            cen, peca = row.centro, row.peca
+            try:
+                at = attrs.loc[(cen, peca)]
+                tc=float(at.t_ciclo); tl=float(at.t_labor)
+                dc=float(at.div_carga); vi=float(at.vol_int)
+                dv=float(at.div_volume); di=float(at.disponib)
+                idx=float(at.indice_ciclo)
+            except: tc=tl=dc=vi=dv=di=idx=0.0
+            result.append((cen, peca, tc, tl, dc, vi, dv, di, idx,
+                           float(row.min_ciclo), float(row.min_labor), int(row.qtd)))
+        return result
+    except Exception as e:
+        return None
+
+
+def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None):
     """
     Adiciona aba ANO ao workbook com layout IDÊNTICO ao mensal (NovFY26, etc.).
     Estrutura:
@@ -1043,28 +1085,88 @@ def gerar_aba_anual(wb, resultados, label="ANO"):
         ws.column_dimensions[get_column_letter(ci)].width = largs[ci-1]
     ws.row_dimensions[6].height = 42
 
-    # ── Linhas 7+: dados por centro (uma linha por centro) ────────────────────
-    # No ANO, cada centro tem 1 linha (não há o detalhe por peça como no mensal da tabelona)
-    # mas o bloco automático mostra os pares como no real.
-    # Aqui preenchemos a tabelona de dados com linha por centro (soma do ano)
+    # ── Linhas 7+: dados por centro×peça (igual ao mensal, acumulado no ano) ─────
+    # Agrega min_ciclo e min_labor por centro+peça somando todos os meses
+    from collections import defaultdict as _dd
+    cp_mc_ano = _dd(float)  # (centro,peca) → soma min_ciclo ano
+    cp_ml_ano = _dd(float)  # (centro,peca) → soma min_labor ano
+    cp_tc_ano = {}          # (centro,peca) → t_ciclo (fixo, do primeiro mês)
+    cp_tl_ano = {}          # (centro,peca) → t_labor (fixo)
+    cp_dc_ano = {}          # div_carga
+    cp_vi_ano = {}          # vol_int
+    cp_dv_ano = {}          # div_volume
+    cp_di_ano = {}          # disponib
+    cp_idx_ano= {}          # indice_ciclo
+    cp_ord_ano = []         # ordem dos pares (mantém ordem do primeiro mês)
+    cp_seen   = set()
+
+    for mes, r in meses_com_dados:
+        # Precisamos agg por centro+peça do intermediário — guardamos no resultado
+        # O DataFrame r["centros"] tem min_ciclo_total por CENTRO, não por peça.
+        # Para obter por peça, usamos os dados da função calcular via agg_interm
+        pass  # Veja abaixo: usamos dist+tempo para reconstruir
+
+    # Reconstruir por centro×peça usando os DataFrames de input disponíveis globalmente
+    # agg_cp_ano = groupby(centro,peca,mes) do df intermediário — não temos aqui diretamente.
+    # Solução: recalcular a partir dos mesmos inputs que calcular() usaria
+    # (dist, tempo, aplic, pmp já estão no escopo do chamador, mas não aqui)
+    # Passamos os dados necessários via atributo na primeira chamada ou recalculamos inline.
+    # Como gerar_aba_anual não recebe df_intermediario, usamos o cen_mc por centro
+    # e distribuímos proporcionalmente pelo índice_ciclo de cada peça.
+
+    # Abordagem correta: reconstituir min_ciclo por centro×peça a partir dos dados
+    # que cada resultado mensal já tem — o campo min_ciclo_total por centro é a soma
+    # de todas as peças daquele centro. Vamos iterar pelo atributo _cp_agg se existir,
+    # senão usar centros como fallback.
+
     ri = 7
-    for cen in centros_ordenados:
-        mc = cen_mc[cen]; ml = cen_ml[cen]
-        pA = mc/minA_ano if minA_ano>0 else 0
-        pB = mc/minB_ano if minB_ano>0 else 0
-        pC = mc/minC_ano if minC_ano>0 else 0
-        _e(ws,ri,1,cen,   F_BRANCO,False,"000000",8,False)
-        _e(ws,ri,2,"—",   F_BRANCO,False,"000000",8)   # sem peça individual no resumo anual
-        _e(ws,ri,3,"ANO", F_BRANCO,False,"000000",8,False)
-        for ci_z in range(4,13): _e(ws,ri,ci_z,"",F_BRANCO,False,"000000",8)
-        _e(ws,ri,13,f"{pA:.1%}",_cor_pct(pA),False,"000000",8)
-        _e(ws,ri,14,f"{pB:.1%}",_cor_pct(pB),False,"000000",8)
-        _e(ws,ri,15,f"{pC:.1%}",_cor_pct(pC),False,"000000",8)
-        _e(ws,ri,16,round(mc,1),F_BRANCO,False,"000000",8)
-        _e(ws,ri,17,round(ml,1),F_BRANCO,False,"000000",8)
-        _e(ws,ri,18,"",F_BRANCO,False,"000000",8)
-        ws.row_dimensions[ri].height = 13
-        ri += 1
+    # Tentar pegar agg por centro×peça do resultado (armazenado em _cp_data se disponível)
+    _cp_data = cp_data
+    if _cp_data is not None:
+        # Formato: lista de (centro, peca, tc, tl, dc, vi, dv, di, idx, mc_ano, ml_ano, qtd_ano)
+        for (cen, peca, tc, tl, dc, vi, dv, di, idx_c, mc, ml, _qtd) in _cp_data:
+            pA = mc/minA_ano if minA_ano>0 else 0
+            pB = mc/minB_ano if minB_ano>0 else 0
+            pC = mc/minC_ano if minC_ano>0 else 0
+            _e(ws,ri,1,cen,  F_BRANCO,False,"000000",8,False)
+            _e(ws,ri,2,peca, F_BRANCO,False,"000000",8,False)
+            _e(ws,ri,3,"ANO",F_BRANCO,False,"000000",8,False)
+            _e(ws,ri,4,1,    F_BRANCO,False,"000000",8)
+            _e(ws,ri,5,"PC", F_BRANCO,False,"000000",8)
+            _e(ws,ri,6,round(tc,4)  if tc  else "",F_PRETO,False,"FFFFFF",8)
+            _e(ws,ri,7,round(tl,4)  if tl  else "",F_PRETO,False,"FFFFFF",8)
+            _e(ws,ri,8,round(dc,4)  if dc  else "",PatternFill("solid",fgColor="FF0000"),False,"FFFF00",8)
+            _e(ws,ri,9,round(vi,4)  if vi  else "",F_BRANCO,False,"000000",8)
+            _e(ws,ri,10,round(dv,4) if dv  else "",PatternFill("solid",fgColor="FF0000"),False,"FFFF00",8)
+            _e(ws,ri,11,round(di,4) if di  else "",F_CINZA2,False,"000000",8)
+            _e(ws,ri,12,round(idx_c,4),F_BRANCO,False,"000000",8)
+            _e(ws,ri,13,f"{pA:.1%}",_cor_pct(pA),False,"000000",8)
+            _e(ws,ri,14,f"{pB:.1%}",_cor_pct(pB),False,"000000",8)
+            _e(ws,ri,15,f"{pC:.1%}",_cor_pct(pC),False,"000000",8)
+            _e(ws,ri,16,round(mc,1),F_BRANCO,False,"000000",8)
+            _e(ws,ri,17,round(ml,1),F_BRANCO,False,"000000",8)
+            _e(ws,ri,18,_qtd,       F_BRANCO,False,"000000",8)
+            ws.row_dimensions[ri].height = 13
+            ri += 1
+    else:
+        # Fallback: uma linha por centro (resumo)
+        for cen in centros_ordenados:
+            mc = cen_mc[cen]; ml = cen_ml[cen]
+            pA = mc/minA_ano if minA_ano>0 else 0
+            pB = mc/minB_ano if minB_ano>0 else 0
+            pC = mc/minC_ano if minC_ano>0 else 0
+            _e(ws,ri,1,cen,   F_BRANCO,False,"000000",8,False)
+            _e(ws,ri,2,"—",   F_BRANCO,False,"000000",8)
+            _e(ws,ri,3,"ANO", F_BRANCO,False,"000000",8,False)
+            for ci_z in range(4,13): _e(ws,ri,ci_z,"",F_BRANCO,False,"000000",8)
+            _e(ws,ri,13,f"{pA:.1%}",_cor_pct(pA),False,"000000",8)
+            _e(ws,ri,14,f"{pB:.1%}",_cor_pct(pB),False,"000000",8)
+            _e(ws,ri,15,f"{pC:.1%}",_cor_pct(pC),False,"000000",8)
+            _e(ws,ri,16,round(mc,1),F_BRANCO,False,"000000",8)
+            _e(ws,ri,17,round(ml,1),F_BRANCO,False,"000000",8)
+            _e(ws,ri,18,"",F_BRANCO,False,"000000",8)
+            ws.row_dimensions[ri].height = 13
+            ri += 1
 
     # ── Bloco DADOS AUTOMÁTICOS — linha 66, col F (col 6) ────────────────────
     # Layout IDÊNTICO ao mensal (NovFY26 cols 12-21 → aqui cols F+0 a F+9 = 6 a 15)
@@ -1298,7 +1400,10 @@ def exportar(resultados):
             ri+=1
         for ci,w in enumerate([14,8,8,8,8,8,8,24,10,10],1):
             wsm.column_dimensions[get_column_letter(ci)].width=w
-    gerar_aba_anual(wb, resultados)
+    try:
+        _cp_ano = build_cp_data_anual(resultados, globals()['tempo'], globals()['dist'], globals()['aplic'], globals()['pmp'])
+    except: _cp_ano = None
+    gerar_aba_anual(wb, resultados, cp_data=_cp_ano)
     wb.save(out); out.seek(0)
     return out
 
@@ -2883,7 +2988,10 @@ def exportar(resultados):
             ri+=1
         for ci,w in enumerate([14,8,8,8,8,8,8,24,10,10],1):
             wsm.column_dimensions[get_column_letter(ci)].width=w
-    gerar_aba_anual(wb, resultados)
+    try:
+        _cp_ano2 = build_cp_data_anual(resultados, globals()['tempo'], globals()['dist'], globals()['aplic'], globals()['pmp'])
+    except: _cp_ano2 = None
+    gerar_aba_anual(wb, resultados, cp_data=_cp_ano2)
     wb.save(out); out.seek(0)
     return out
 
@@ -3222,9 +3330,9 @@ with st.sidebar:
     st.caption("Alterações afetam todos os cálculos em tempo real.")
 
 # ─── TABS ────────────────────────────────
-tab_vis, tab_inp, tab_mem, tab_res, tab_cmp, tab_exp = st.tabs([
+tab_vis, tab_inp, tab_mem, tab_res, tab_cen, tab_cmp, tab_exp = st.tabs([
     "🏠 Visão Geral", "📂 Dados de Input", "🔬 Como foi Calculado",
-    "📊 Resultado por Mês", "🔄 Comparar com Excel", "📥 Exportar"
+    "📊 Resultado por Mês", "🎯 Cenários", "🔄 Comparar com Excel", "📥 Exportar"
 ])
 
 # Cache do resultado base
@@ -3394,9 +3502,6 @@ with tab_mem:
 # TAB 4 — RESULTADOS
 # ══════════════════════════════════════════
 with tab_res:
-    if "cenarios" not in st.session_state:
-        st.session_state.cenarios = {}
-
     st.markdown('<div class="jd-section">Resultado por mês</div>', unsafe_allow_html=True)
     _opcoes_res = [m for m in MESES if res_base.get(m)] + ["📅 ANO (resumo anual)"]
     mes_r = st.selectbox("Selecione o mês", _opcoes_res, key="mes_r")
@@ -3475,16 +3580,26 @@ Turno C: <b>{r['tot_C']} pessoas</b> &nbsp;|&nbsp;
 
         show_tabela(r)
 
+# ══════════════════════════════════════════
+# TAB 5 — CENÁRIOS
+# ══════════════════════════════════════════
+with tab_cen:
+    if "cenarios" not in st.session_state:
+        st.session_state.cenarios = {}
+
     st.markdown('<div class="jd-section">Simulador de cenários</div>', unsafe_allow_html=True)
+    st.caption("Crie variações do resultado base alterando quais turnos ficam ativos por centro. Compare lado a lado com o cenário atual.")
+
     with st.expander("➕ Criar novo cenário", expanded=len(st.session_state.cenarios)==0):
         ca,cb = st.columns([2,1])
-        novo_nome = ca.text_input("Nome", placeholder="Ex: Redução turno B novembro")
-        mes_novo  = cb.selectbox("Mês base", MESES, key="mes_novo")
+        novo_nome = ca.text_input("Nome do cenário", placeholder="Ex: Redução turno B novembro")
+        mes_novo  = cb.selectbox("Mês base", [m for m in MESES if res_base.get(m)], key="mes_novo")
         if novo_nome and mes_novo and res_base.get(mes_novo):
             r_orig = res_base[mes_novo]
             centros_list = sorted(r_orig["centros"].centro.tolist())
             cols_h = st.columns([3,1,1,1])
-            cols_h[0].markdown("**Centro — ocup. A/B/C**"); cols_h[1].markdown("**A**"); cols_h[2].markdown("**B**"); cols_h[3].markdown("**C**")
+            cols_h[0].markdown("**Centro — ocup. A/B/C**")
+            cols_h[1].markdown("**A**"); cols_h[2].markdown("**B**"); cols_h[3].markdown("**C**")
             novo_ov = {}
             for cen in centros_list:
                 rc = r_orig["centros"][r_orig["centros"].centro==cen].iloc[0]
@@ -3497,7 +3612,7 @@ Turno C: <b>{r['tot_C']} pessoas</b> &nbsp;|&nbsp;
                 vB=c2.number_input("",0,5,int(rc.ativo_B),key=f"n_{novo_nome}_{cen}_B",label_visibility="collapsed",help=f"Base:{rc.ativo_B}")
                 vC=c3.number_input("",0,5,int(rc.ativo_C),key=f"n_{novo_nome}_{cen}_C",label_visibility="collapsed",help=f"Base:{rc.ativo_C}")
                 novo_ov[cen]={"A":vA,"B":vB,"C":vC}
-            if st.button("💾 Salvar cenário", type="primary"):
+            if st.button("💾 Salvar cenário", type="primary", key="btn_salvar_cen"):
                 ov_c={mes_novo:novo_ov}
                 res_cen=calcular(pmp,tempo,dist,aplic,dias,horas_turno,thresholds,suporte_cfg,
                                  horas_efetivas=horas_efetivas,overrides=ov_c)
@@ -3505,26 +3620,179 @@ Turno C: <b>{r['tot_C']} pessoas</b> &nbsp;|&nbsp;
                 st.success(f"✅ '{novo_nome}' salvo!"); st.rerun()
 
     if st.session_state.cenarios:
-        todos={"📌 Base":res_base}; todos.update({k:v["resultados"] for k,v in st.session_state.cenarios.items()})
+        # ── Gráfico de barras comparando todos os cenários ───────────────────
+        todos={"📌 Base":res_base}
+        todos.update({k:v["resultados"] for k,v in st.session_state.cenarios.items()})
         st.plotly_chart(grafico_cenarios(todos), use_container_width=True)
-        mes_cmp=st.selectbox("Mês para comparar",MESES,key="mes_cmp_r")
-        cmp_rows=[]
-        for nm,res in todos.items():
-            r=res.get(mes_cmp)
-            if r: cmp_rows.append({"Cenário":nm,"Turno A":r["tot_A"],"Turno B":r["tot_B"],"Turno C":r["tot_C"],"Total":r["total"],"Labor Total":f"{r['prod_labor_tot']:.0%}"})
-        if cmp_rows: st.dataframe(pd.DataFrame(cmp_rows),use_container_width=True,hide_index=True)
-        cd,ce = st.columns(2)
-        with cd:
-            dn=st.selectbox("Remover",list(st.session_state.cenarios.keys()),key="del_c")
-            if st.button("🗑️ Remover",type="secondary"): del st.session_state.cenarios[dn]; st.rerun()
-        with ce:
-            for nm,v in st.session_state.cenarios.items():
-                st.download_button(f"📥 {nm}",data=exportar(v["resultados"]),
+
+        # ── Tabela de comparação detalhada ───────────────────────────────────
+        st.markdown('<div class="jd-sub">📊 Comparação detalhada — Base vs Cenários</div>', unsafe_allow_html=True)
+        mes_cmp = st.selectbox("Mês para comparar", [m for m in MESES if res_base.get(m)], key="mes_cmp_r")
+
+        if mes_cmp and res_base.get(mes_cmp):
+            r_base = res_base[mes_cmp]
+
+            # Tabela resumo por cenário
+            cmp_rows=[]
+            for nm, res in todos.items():
+                r = res.get(mes_cmp)
+                if not r: continue
+                delta_A   = r["tot_A"] - r_base["tot_A"]   if nm != "📌 Base" else "—"
+                delta_B   = r["tot_B"] - r_base["tot_B"]   if nm != "📌 Base" else "—"
+                delta_C   = r["tot_C"] - r_base["tot_C"]   if nm != "📌 Base" else "—"
+                delta_tot = r["total"] - r_base["total"]   if nm != "📌 Base" else "—"
+                delta_lab = f'{r["prod_labor_tot"] - r_base["prod_labor_tot"]:+.1%}' if nm != "📌 Base" else "—"
+                cmp_rows.append({
+                    "Cenário":   nm,
+                    "Turno A":   r["tot_A"],
+                    "Turno B":   r["tot_B"],
+                    "Turno C":   r["tot_C"],
+                    "Total":     r["total"],
+                    "Labor Tot.":f'{r["prod_labor_tot"]:.1%}',
+                    "Ciclo Tot.":f'{r["prod_ciclo_tot"]:.1%}',
+                    "ΔA":        f"{delta_A:+d}" if isinstance(delta_A,int) else delta_A,
+                    "ΔB":        f"{delta_B:+d}" if isinstance(delta_B,int) else delta_B,
+                    "ΔC":        f"{delta_C:+d}" if isinstance(delta_C,int) else delta_C,
+                    "Δ Total":   f"{delta_tot:+d}" if isinstance(delta_tot,int) else delta_tot,
+                    "Δ Labor":   delta_lab,
+                })
+
+            df_cmp = pd.DataFrame(cmp_rows)
+
+            def _style_cmp(row):
+                is_base = "Base" in str(row["Cenário"])
+                if is_base:
+                    return [f"background-color:{JD_VERDE_ESC};color:#FFFFFF;font-weight:700"]*len(row)
+                # Colorir Δ Total: verde se melhorou (menos gente), vermelho se piorou
+                styles = [""]*len(row)
+                try:
+                    d = int(str(row["Δ Total"]).replace("+",""))
+                    c_delta = "#003D10" if d < 0 else ("#3D0000" if d > 0 else "")
+                    t_delta = "#B9F6CA" if d < 0 else ("#FF8A80" if d > 0 else "")
+                    for i,col in enumerate(df_cmp.columns):
+                        if col in ("ΔA","ΔB","ΔC","Δ Total","Δ Labor"):
+                            styles[i] = f"background-color:{c_delta};color:{t_delta};font-weight:600"
+                except: pass
+                return styles
+
+            st.dataframe(df_cmp.style.apply(_style_cmp, axis=1),
+                         use_container_width=True, hide_index=True)
+
+            # ── Detalhamento por centro: base vs cada cenário ─────────────────
+            for nome_cen, dados_cen in st.session_state.cenarios.items():
+                r_cen = dados_cen["resultados"].get(mes_cmp)
+                if not r_cen: continue
+                with st.expander(f"🔍 Detalhamento por centro — {nome_cen} vs Base"):
+                    det_rows = []
+                    centros_set = sorted(set(
+                        r_base["centros"].centro.tolist() +
+                        r_cen["centros"].centro.tolist()
+                    ))
+                    for cen in centros_set:
+                        rb_c = r_base["centros"][r_base["centros"].centro==cen]
+                        rc_c = r_cen["centros"][r_cen["centros"].centro==cen]
+                        if rb_c.empty or rc_c.empty: continue
+                        rb = rb_c.iloc[0]; rc = rc_c.iloc[0]
+                        mudou_A = int(rb.ativo_A) != int(rc.ativo_A)
+                        mudou_B = int(rb.ativo_B) != int(rc.ativo_B)
+                        mudou_C = int(rb.ativo_C) != int(rc.ativo_C)
+                        det_rows.append({
+                            "Centro": cen,
+                            "Ocup.A": f"{rb.ocup_A:.0%}",
+                            "Base A": int(rb.ativo_A), "Cen A": int(rc.ativo_A),
+                            "Ocup.B": f"{rb.ocup_B:.0%}",
+                            "Base B": int(rb.ativo_B), "Cen B": int(rc.ativo_B),
+                            "Ocup.C": f"{rb.ocup_C:.0%}",
+                            "Base C": int(rb.ativo_C), "Cen C": int(rc.ativo_C),
+                            "Mudou": "✅ Igual" if not (mudou_A or mudou_B or mudou_C)
+                                     else f"{'A ' if mudou_A else ''}{'B ' if mudou_B else ''}{'C' if mudou_C else ''}alterado(s)",
+                        })
+                    df_det = pd.DataFrame(det_rows)
+                    def _sty_det(row):
+                        if "alterado" in str(row["Mudou"]):
+                            return [f"background-color:#3D2D00;color:#FFE57F"]*len(row)
+                        return [""]*len(row)
+                    st.dataframe(df_det.style.apply(_sty_det,axis=1),
+                                 use_container_width=True, hide_index=True)
+
+        # ── Exportar e gerenciar ──────────────────────────────────────────────
+        st.markdown("---")
+        st.markdown('<div class="jd-sub">📥 Exportar e gerenciar cenários</div>', unsafe_allow_html=True)
+
+        col_exp, col_del = st.columns([3,1])
+        with col_exp:
+            for nm, v in st.session_state.cenarios.items():
+                st.download_button(
+                    f"📥 Exportar — {nm}",
+                    data=exportar(v["resultados"]),
                     file_name=f"cenario_{nm.replace(' ','_')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key=f"dl_{nm}")
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"dl_cen_{nm}")
+
+            # Exportar comparação como Excel
+            if mes_cmp and res_base.get(mes_cmp):
+                def _exportar_comparacao():
+                    buf_c = BytesIO()
+                    wb_c = openpyxl.Workbook()
+                    brd_c = Border(
+                        left=Side(style='thin',color='CCCCCC'),right=Side(style='thin',color='CCCCCC'),
+                        top=Side(style='thin',color='CCCCCC'),bottom=Side(style='thin',color='CCCCCC'))
+                    JD_V_c = JD_VERDE_ESC.replace("#",""); JD_Y_c = JD_AMARELO.replace("#","")
+                    def _ec(c,bg="FFFFFF",fg="000000",bold=False,center=True):
+                        c.font=Font(name="Arial",bold=bold,color=fg,size=9)
+                        c.fill=PatternFill("solid",fgColor=bg)
+                        c.alignment=Alignment(horizontal="center" if center else "left",vertical="center")
+                        c.border=brd_c
+                    ws_c = wb_c.active; ws_c.title = "Comparação"
+                    # Cabeçalho
+                    for i,h in enumerate(["Cenário","Turno A","Turno B","Turno C","Total",
+                                          "Labor Tot.","Ciclo Tot.","ΔA","ΔB","ΔC","Δ Total","Δ Labor"],1):
+                        _ec(ws_c.cell(1,i,h),JD_V_c,"FFFFFF",True)
+                    r_base_exp = res_base[mes_cmp]
+                    todos_exp = {"📌 Base":res_base}
+                    todos_exp.update({k:v["resultados"] for k,v in st.session_state.cenarios.items()})
+                    for ri_e,(nm_e,res_e) in enumerate(todos_exp.items(),2):
+                        r_e = res_e.get(mes_cmp)
+                        if not r_e: continue
+                        is_base = "Base" in nm_e
+                        bg_e = JD_V_c if is_base else ("EAF3FB" if ri_e%2==0 else "FFFFFF")
+                        fg_e = "FFFFFF" if is_base else "000000"
+                        dA = r_e["tot_A"]-r_base_exp["tot_A"] if not is_base else "—"
+                        dB = r_e["tot_B"]-r_base_exp["tot_B"] if not is_base else "—"
+                        dC = r_e["tot_C"]-r_base_exp["tot_C"] if not is_base else "—"
+                        dT = r_e["total"]-r_base_exp["total"] if not is_base else "—"
+                        dL = f'{r_e["prod_labor_tot"]-r_base_exp["prod_labor_tot"]:+.1%}' if not is_base else "—"
+                        vals_e = [nm_e, r_e["tot_A"],r_e["tot_B"],r_e["tot_C"],r_e["total"],
+                                  f'{r_e["prod_labor_tot"]:.1%}',f'{r_e["prod_ciclo_tot"]:.1%}',
+                                  f"{dA:+d}" if isinstance(dA,int) else dA,
+                                  f"{dB:+d}" if isinstance(dB,int) else dB,
+                                  f"{dC:+d}" if isinstance(dC,int) else dC,
+                                  f"{dT:+d}" if isinstance(dT,int) else dT, dL]
+                        for ci_e,v_e in enumerate(vals_e,1):
+                            _ec(ws_c.cell(ri_e,ci_e,v_e),bg_e,fg_e,is_base,ci_e>1)
+                        ws_c.row_dimensions[ri_e].height=14
+                    for ci,w in enumerate([22,8,8,8,8,10,10,6,6,6,8,10],1):
+                        ws_c.column_dimensions[get_column_letter(ci)].width=w
+                    wb_c.save(buf_c); buf_c.seek(0)
+                    return buf_c
+
+                st.download_button(
+                    f"📊 Exportar tabela de comparação ({mes_cmp})",
+                    data=_exportar_comparacao(),
+                    file_name=f"comparacao_cenarios_{mes_cmp}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="dl_cmp_cen")
+
+        with col_del:
+            if st.session_state.cenarios:
+                dn = st.selectbox("Remover cenário", list(st.session_state.cenarios.keys()), key="del_c")
+                if st.button("🗑️ Remover", type="secondary", key="btn_del_cen"):
+                    del st.session_state.cenarios[dn]; st.rerun()
+    else:
+        st.info("Nenhum cenário criado ainda. Use o formulário acima para criar o primeiro.")
 
 # ══════════════════════════════════════════
-# TAB 5 — COMPARAÇÃO
+# TAB 6 — COMPARAÇÃO
 # ══════════════════════════════════════════
 with tab_cmp:
     st.markdown('<div class="jd-section">Comparação com o seu Excel atual</div>', unsafe_allow_html=True)
@@ -4004,7 +4272,10 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                           (_COL_F+7,10),(_COL_F+8,10),(_COL_F+9,10)]:
                             ws_out.column_dimensions[get_column_letter(_ci_w)].width=_ww
 
-                gerar_aba_anual(wb_out, res_base, label="ANO")
+                try:
+                    _cp_ano_t = build_cp_data_anual(res_base, tempo, dist, aplic, pmp)
+                except: _cp_ano_t = None
+                gerar_aba_anual(wb_out, res_base, label="ANO", cp_data=_cp_ano_t)
                 tabelona_buf=BytesIO(); wb_out.save(tabelona_buf); tabelona_buf.seek(0)
                 st.session_state["tabelona_buf"] = tabelona_buf
 
