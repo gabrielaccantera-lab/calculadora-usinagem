@@ -231,7 +231,17 @@ def validar(pmp, tempo, dist, aplic, dias):
 # CÁLCULO COM RASTREABILIDADE
 # ─────────────────────────────────────────
 def calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg,
-             overrides=None, retornar_intermediarios=False):
+             horas_efetivas=None, overrides=None, retornar_intermediarios=False):
+    """
+    horas_turno   — horas ACUMULADAS do IMPUTTURNOS (ex: 7,5 / 14,25 / 19,5).
+                    Usadas para calcular minutos disponíveis e % de ocupação.
+    horas_efetivas — horas EFETIVAS de trabalho por turno (ex: 8,8 / 8,23 / 7,68).
+                    Usadas SOMENTE para calcular horas disponíveis no mês
+                    (n_pessoas × dias × horas_efetivas).
+                    Se não informado, usa os mesmos valores de horas_turno.
+    """
+    if horas_efetivas is None:
+        horas_efetivas = horas_turno
 
     # JOIN completo — rastreável
     # Cálculo 100% baseado nos inputs — IMPUTDISTRIBUIÇÃO é a fonte de verdade
@@ -249,6 +259,7 @@ def calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg
     thr_B = thresholds["B"] / 100
     thr_C = thresholds["C"] / 100
     hA, hB, hC = horas_turno["A"], horas_turno["B"], horas_turno["C"]
+    heA, heB, heC = horas_efetivas["A"], horas_efetivas["B"], horas_efetivas["C"]
 
     resultados = {}
     for mes in MESES:
@@ -278,7 +289,7 @@ def calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg
                 "min_ciclo_total":mc,"min_labor_total":ml,
                 "min_disp_A":minA,"min_disp_B":minB,"min_disp_C":minC,
                 "horas_ciclo":mc/60,"horas_labor":ml/60,
-                "horas_disp_A":d*hA*aA,"horas_disp_B":d*hB*aB,"horas_disp_C":d*hC*aC,
+                "horas_disp_A":d*heA*aA,"horas_disp_B":d*heB*aB,"horas_disp_C":d*heC*aC,
             })
 
         df_c = pd.DataFrame(centros)
@@ -310,7 +321,7 @@ def calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg
         total = tot_A+tot_B+tot_C
         h_ciclo = float(df_c.horas_ciclo.sum()); h_labor = float(df_c.horas_labor.sum())
         h_ativos = float((df_c.horas_disp_A+df_c.horas_disp_B+df_c.horas_disp_C).sum())
-        h_todos  = tot_A*d*hA+tot_B*d*hB+tot_C*d*hC
+        h_todos  = tot_A*d*heA+tot_B*d*heB+tot_C*d*heC
 
         resultados[mes] = {
             "centros":df_c,
@@ -323,6 +334,7 @@ def calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg
             "prod_labor_op":  h_labor/h_ativos if h_ativos>0 else 0,
             "prod_labor_tot": h_labor/h_todos  if h_todos>0 else 0,
             "dias":d,"hA":hA,"hB":hB,"hC":hC,
+            "heA":heA,"heB":heB,"heC":heC,
             "thr_A":thr_A,"thr_B":thr_B,"thr_C":thr_C,
             "minA":d*hA*60,"minB":d*hB*60,"minC":d*hC*60,
         }
@@ -336,6 +348,7 @@ def calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg
 # ─────────────────────────────────────────
 def show_tabela(r):
     dias=r["dias"]; hA,hB,hC=r["hA"],r["hB"],r["hC"]
+    heA,heB,heC=r.get("heA",hA),r.get("heB",hB),r.get("heC",hC)
     rows=[]
     for _,row in r["centros"].iterrows():
         rows.append({"Centro":row.centro,
@@ -369,10 +382,10 @@ def show_tabela(r):
                  ("Preset","preset"),("Coringa","coringa"),("Facilitador","facilitador")]:
         s=sup[k]
         srows.append({"Função":nm,"Qtd A":s["A"],"Qtd B":s["B"],"Qtd C":s["C"],
-            "Horas A":round(s["A"]*hA*dias,1),"Horas B":round(s["B"]*hB*dias,1),"Horas C":round(s["C"]*hC*dias,1)})
+            "Horas A":round(s["A"]*heA*dias,1),"Horas B":round(s["B"]*heB*dias,1),"Horas C":round(s["C"]*heC*dias,1)})
     srows.append({"Função":"▶ TOTAL POR TURNO",
         "Qtd A":r["tot_A"],"Qtd B":r["tot_B"],"Qtd C":r["tot_C"],
-        "Horas A":round(r["tot_A"]*hA*dias,1),"Horas B":round(r["tot_B"]*hB*dias,1),"Horas C":round(r["tot_C"]*hC*dias,1)})
+        "Horas A":round(r["tot_A"]*heA*dias,1),"Horas B":round(r["tot_B"]*heB*dias,1),"Horas C":round(r["tot_C"]*heC*dias,1)})
     df_s=pd.DataFrame(srows)
     def ss(row):
         is_t="TOTAL" in str(row["Função"])
@@ -468,6 +481,7 @@ def exportar(resultados):
         r=resultados.get(mes)
         if not r: continue
         wsm=wb.create_sheet(mes[:10]); hA,hB,hC,dias=r["hA"],r["hB"],r["hC"],r["dias"]
+        heA,heB,heC=r.get("heA",hA),r.get("heB",hB),r.get("heC",hC)
         # Linha 1 — mês + grupos
         for ci,txt in [(1,""),(2,"TURNO A"),(3,"TURNO B"),(4,"TURNO C"),
                        (5,"TURNO A"),(6,"TURNO B"),(7,"TURNO C"),
@@ -514,21 +528,21 @@ def exportar(resultados):
                 s=sup[key]
                 for ci,t in [(5,"A"),(6,"B"),(7,"C")]:
                     ec(wsm.cell(ri,ci,s[t]),"B3E5FC" if s[t] else "FFFDE7",bold=bold)
-                for ci,t,h in [(8,"A",hA),(9,"B",hB),(10,"C",hC)]:
+                for ci,t,h in [(8,"A",heA),(9,"B",heB),(10,"C",heC)]:
                     v=s[t]*h*dias; ec(wsm.cell(ri,ci,f"{v:.2f}" if v else "0"),"B3E5FC" if v else "F5F5F5",bold=bold)
             elif "TOTAL DE OPERADORES" in nome:
                 for ci,v in [(5,r["op_A"]),(6,r["op_B"]),(7,r["op_C"])]:
                     ec(wsm.cell(ri,ci,v),JD_Y,JD_V,True)
-                for ci,v,h in [(8,r["op_A"],hA),(9,r["op_B"],hB),(10,r["op_C"],hC)]:
+                for ci,v,h in [(8,r["op_A"],heA),(9,r["op_B"],heB),(10,r["op_C"],heC)]:
                     ec(wsm.cell(ri,ci,f"{v*h*dias:.2f}"),JD_Y,JD_V,True)
             elif "TOTAL POR TURNO" in nome:
                 for ci,v in [(5,r["tot_A"]),(6,r["tot_B"]),(7,r["tot_C"])]:
                     ec(wsm.cell(ri,ci,v),JD_Y,JD_V,True)
-                for ci,v,h in [(8,r["tot_A"],hA),(9,r["tot_B"],hB),(10,r["tot_C"],hC)]:
+                for ci,v,h in [(8,r["tot_A"],heA),(9,r["tot_B"],heB),(10,r["tot_C"],heC)]:
                     ec(wsm.cell(ri,ci,f"{v*h*dias:.2f}"),JD_Y,JD_V,True)
             elif "FUNCIONÁRIOS" in nome:
                 ec(wsm.cell(ri,4,r["total"]),JD_Y,JD_V,True)
-                tot_h=r["tot_A"]*hA*dias+r["tot_B"]*hB*dias+r["tot_C"]*hC*dias
+                tot_h=r["tot_A"]*heA*dias+r["tot_B"]*heB*dias+r["tot_C"]*heC*dias
                 ec(wsm.cell(ri,8,f"{tot_h:.2f}"),JD_Y,JD_V,True)
             ri+=1
         ri+=1
@@ -1803,7 +1817,17 @@ def validar(pmp, tempo, dist, aplic, dias):
 # CÁLCULO COM RASTREABILIDADE
 # ─────────────────────────────────────────
 def calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg,
-             overrides=None, retornar_intermediarios=False):
+             horas_efetivas=None, overrides=None, retornar_intermediarios=False):
+    """
+    horas_turno   — horas ACUMULADAS do IMPUTTURNOS (ex: 7,5 / 14,25 / 19,5).
+                    Usadas para calcular minutos disponíveis e % de ocupação.
+    horas_efetivas — horas EFETIVAS de trabalho por turno (ex: 8,8 / 8,23 / 7,68).
+                    Usadas SOMENTE para calcular horas disponíveis no mês
+                    (n_pessoas × dias × horas_efetivas).
+                    Se não informado, usa os mesmos valores de horas_turno.
+    """
+    if horas_efetivas is None:
+        horas_efetivas = horas_turno
 
     # JOIN completo — rastreável
     # Cálculo 100% baseado nos inputs — IMPUTDISTRIBUIÇÃO é a fonte de verdade
@@ -1821,6 +1845,8 @@ def calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg
     thr_B = thresholds["B"] / 100
     thr_C = thresholds["C"] / 100
     hA, hB, hC = horas_turno["A"], horas_turno["B"], horas_turno["C"]
+    # Horas efetivas — usadas SOMENTE para horas disponíveis no mês
+    heA, heB, heC = horas_efetivas["A"], horas_efetivas["B"], horas_efetivas["C"]
 
     resultados = {}
     for mes in MESES:
@@ -1850,7 +1876,8 @@ def calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg
                 "min_ciclo_total":mc,"min_labor_total":ml,
                 "min_disp_A":minA,"min_disp_B":minB,"min_disp_C":minC,
                 "horas_ciclo":mc/60,"horas_labor":ml/60,
-                "horas_disp_A":d*hA*aA,"horas_disp_B":d*hB*aB,"horas_disp_C":d*hC*aC,
+                # horas_disp usa horas EFETIVAS (ex: 8.8h), não as acumuladas do IMPUTTURNOS
+                "horas_disp_A":d*heA*aA,"horas_disp_B":d*heB*aB,"horas_disp_C":d*heC*aC,
             })
 
         df_c = pd.DataFrame(centros)
@@ -1876,8 +1903,10 @@ def calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg
         tot_C = op_C+lav["C"]+gra["C"]+pre["C"]+cor["C"]+fac["C"]
         total = tot_A+tot_B+tot_C
         h_ciclo = float(df_c.horas_ciclo.sum()); h_labor = float(df_c.horas_labor.sum())
+        # h_ativos: soma das horas disponíveis dos CENs ativos (usa horas efetivas)
         h_ativos = float((df_c.horas_disp_A+df_c.horas_disp_B+df_c.horas_disp_C).sum())
-        h_todos  = tot_A*d*hA+tot_B*d*hB+tot_C*d*hC
+        # h_todos: total de horas de todos os funcionários (usa horas efetivas)
+        h_todos  = tot_A*d*heA+tot_B*d*heB+tot_C*d*heC
 
         resultados[mes] = {
             "centros":df_c,
@@ -1890,6 +1919,7 @@ def calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg
             "prod_labor_op":  h_labor/h_ativos if h_ativos>0 else 0,
             "prod_labor_tot": h_labor/h_todos  if h_todos>0 else 0,
             "dias":d,"hA":hA,"hB":hB,"hC":hC,
+            "heA":heA,"heB":heB,"heC":heC,
             "thr_A":thr_A,"thr_B":thr_B,"thr_C":thr_C,
             "minA":d*hA*60,"minB":d*hB*60,"minC":d*hC*60,
         }
@@ -1903,6 +1933,7 @@ def calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg
 # ─────────────────────────────────────────
 def show_tabela(r):
     dias=r["dias"]; hA,hB,hC=r["hA"],r["hB"],r["hC"]
+    heA,heB,heC=r.get("heA",hA),r.get("heB",hB),r.get("heC",hC)
     rows=[]
     for _,row in r["centros"].iterrows():
         rows.append({"Centro":row.centro,
@@ -1936,10 +1967,10 @@ def show_tabela(r):
                  ("Preset","preset"),("Coringa","coringa"),("Facilitador","facilitador")]:
         s=sup[k]
         srows.append({"Função":nm,"Qtd A":s["A"],"Qtd B":s["B"],"Qtd C":s["C"],
-            "Horas A":round(s["A"]*hA*dias,1),"Horas B":round(s["B"]*hB*dias,1),"Horas C":round(s["C"]*hC*dias,1)})
+            "Horas A":round(s["A"]*heA*dias,1),"Horas B":round(s["B"]*heB*dias,1),"Horas C":round(s["C"]*heC*dias,1)})
     srows.append({"Função":"▶ TOTAL POR TURNO",
         "Qtd A":r["tot_A"],"Qtd B":r["tot_B"],"Qtd C":r["tot_C"],
-        "Horas A":round(r["tot_A"]*hA*dias,1),"Horas B":round(r["tot_B"]*hB*dias,1),"Horas C":round(r["tot_C"]*hC*dias,1)})
+        "Horas A":round(r["tot_A"]*heA*dias,1),"Horas B":round(r["tot_B"]*heB*dias,1),"Horas C":round(r["tot_C"]*heC*dias,1)})
     df_s=pd.DataFrame(srows)
     def ss(row):
         is_t="TOTAL" in str(row["Função"])
@@ -2034,6 +2065,7 @@ def exportar(resultados):
         r=resultados.get(mes)
         if not r: continue
         wsm=wb.create_sheet(mes[:10]); hA,hB,hC,dias=r["hA"],r["hB"],r["hC"],r["dias"]
+        heA,heB,heC=r.get("heA",hA),r.get("heB",hB),r.get("heC",hC)
         # Linha 1 — mês + grupos
         for ci,txt in [(1,""),(2,"TURNO A"),(3,"TURNO B"),(4,"TURNO C"),
                        (5,"TURNO A"),(6,"TURNO B"),(7,"TURNO C"),
@@ -2080,21 +2112,21 @@ def exportar(resultados):
                 s=sup[key]
                 for ci,t in [(5,"A"),(6,"B"),(7,"C")]:
                     ec(wsm.cell(ri,ci,s[t]),"B3E5FC" if s[t] else "FFFDE7",bold=bold)
-                for ci,t,h in [(8,"A",hA),(9,"B",hB),(10,"C",hC)]:
+                for ci,t,h in [(8,"A",heA),(9,"B",heB),(10,"C",heC)]:
                     v=s[t]*h*dias; ec(wsm.cell(ri,ci,f"{v:.2f}" if v else "0"),"B3E5FC" if v else "F5F5F5",bold=bold)
             elif "TOTAL DE OPERADORES" in nome:
                 for ci,v in [(5,r["op_A"]),(6,r["op_B"]),(7,r["op_C"])]:
                     ec(wsm.cell(ri,ci,v),JD_Y,JD_V,True)
-                for ci,v,h in [(8,r["op_A"],hA),(9,r["op_B"],hB),(10,r["op_C"],hC)]:
+                for ci,v,h in [(8,r["op_A"],heA),(9,r["op_B"],heB),(10,r["op_C"],heC)]:
                     ec(wsm.cell(ri,ci,f"{v*h*dias:.2f}"),JD_Y,JD_V,True)
             elif "TOTAL POR TURNO" in nome:
                 for ci,v in [(5,r["tot_A"]),(6,r["tot_B"]),(7,r["tot_C"])]:
                     ec(wsm.cell(ri,ci,v),JD_Y,JD_V,True)
-                for ci,v,h in [(8,r["tot_A"],hA),(9,r["tot_B"],hB),(10,r["tot_C"],hC)]:
+                for ci,v,h in [(8,r["tot_A"],heA),(9,r["tot_B"],heB),(10,r["tot_C"],heC)]:
                     ec(wsm.cell(ri,ci,f"{v*h*dias:.2f}"),JD_Y,JD_V,True)
             elif "FUNCIONÁRIOS" in nome:
                 ec(wsm.cell(ri,4,r["total"]),JD_Y,JD_V,True)
-                tot_h=r["tot_A"]*hA*dias+r["tot_B"]*hB*dias+r["tot_C"]*hC*dias
+                tot_h=r["tot_A"]*heA*dias+r["tot_B"]*heB*dias+r["tot_C"]*heC*dias
                 ec(wsm.cell(ri,8,f"{tot_h:.2f}"),JD_Y,JD_V,True)
             ri+=1
         ri+=1
@@ -2121,12 +2153,17 @@ def show_memoria(r, mes, df_intermediario, agg, horas_turno, thresholds):
     sup = r["suporte"]
     d   = r["dias"]
     hA, hB, hC = r["hA"], r["hB"], r["hC"]
+    heA, heB, heC = r.get("heA", hA), r.get("heB", hB), r.get("heC", hC)
 
     # ── PASSO 1: Inputs ─────────────────────────────────────────────────────
     st.markdown('<div class="mem-step"><span class="step-num">1</span> <b>Inputs utilizados</b></div>', unsafe_allow_html=True)
     st.markdown(
-        f"**Dias trabalhados:** {d} &nbsp;|&nbsp; Turno A: **{hA}h** &nbsp;|&nbsp; Turno B: **{hB}h** &nbsp;|&nbsp; Turno C: **{hC}h**\n\n"
-        f"Minutos disponíveis por turno (dias × horas × 60):")
+        f"**Dias trabalhados:** {d}\n\n"
+        f"**Horas acumuladas por turno** (IMPUTTURNOS — usadas para % de ocupação e minutos disponíveis):\n"
+        f"Turno A: **{hA}h** &nbsp;|&nbsp; Turno B: **{hB}h** &nbsp;|&nbsp; Turno C: **{hC}h**\n\n"
+        f"**Horas efetivas por turno** (Quadro de Lotação — usadas para horas disponíveis no mês):\n"
+        f"Turno A: **{heA}h** &nbsp;|&nbsp; Turno B: **{heB}h** &nbsp;|&nbsp; Turno C: **{heC}h**\n\n"
+        f"Minutos disponíveis por turno para cálculo de ocupação (dias × h_acumulada × 60):")
     c1,c2,c3 = st.columns(3)
     c1.metric("Turno A", f"{r['minA']:.0f} min", f"{d}×{hA}×60")
     c2.metric("Turno B", f"{r['minB']:.0f} min", f"{d}×{hB}×60")
@@ -2214,8 +2251,15 @@ def show_memoria(r, mes, df_intermediario, agg, horas_turno, thresholds):
     st.markdown(f"➡️ **Total geral: {r['total']} funcionários** (A: {r['tot_A']} + B: {r['tot_B']} + C: {r['tot_C']})")
 
     # ── PASSO 8: Horas totais ────────────────────────────────────────────────
-    st.markdown('<div class="mem-step"><span class="step-num">8</span> <b>Horas totais disponíveis</b></div>', unsafe_allow_html=True)
-    st.markdown('<div class="formula-box">Horas CEN ativos = Σ(centros_ativos_A × dias × hA) + Σ(centros_ativos_B × dias × hB) + Σ(centros_ativos_C × dias × hC)<br>Horas todos = Σ(total_A × dias × hA) + Σ(total_B × dias × hB) + Σ(total_C × dias × hC)</div>', unsafe_allow_html=True)
+    st.markdown('<div class="mem-step"><span class="step-num">8</span> <b>Horas totais disponíveis no mês</b></div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="formula-box">'
+        f'⚠️ <b>Atenção:</b> As horas disponíveis no mês usam as <b>horas efetivas por turno</b> (Quadro de Lotação), '
+        f'NÃO as horas acumuladas do IMPUTTURNOS.<br><br>'
+        f'Horas efetivas configuradas: Turno A = <b>{heA}h</b> &nbsp;|&nbsp; Turno B = <b>{heB}h</b> &nbsp;|&nbsp; Turno C = <b>{heC}h</b><br><br>'
+        f'Horas CEN ativos  = Σ(centros_ativos_A × dias × heA) + Σ(centros_ativos_B × dias × heB) + Σ(centros_ativos_C × dias × heC)<br>'
+        f'Horas todos       = Σ(total_A × dias × heA) + Σ(total_B × dias × heB) + Σ(total_C × dias × heC)'
+        f'</div>', unsafe_allow_html=True)
     h_todos = r["h_todos"]; h_ativos = r["h_ativos"]
     c1,c2 = st.columns(2)
     c1.metric("Horas CEN ativos (denominador operacional)", f"{h_ativos:.1f}h")
@@ -2364,6 +2408,14 @@ with st.sidebar:
     horas_turno = {"A":hA,"B":hB,"C":hC}
 
     st.markdown("---")
+    st.markdown("**Horas por turno de trabalho (h efetivas)**")
+    st.caption("Horas **efetivas** trabalhadas em cada turno — usadas para calcular as horas disponíveis no mês (n° pessoas × dias × h efetivas). Valores como no quadro de lotação: ex. 8,8 / 8,23 / 7,68.")
+    heA = st.number_input("Turno A (h efetivas)", value=st.session_state.get("heA_default", 8.80), step=0.01, format="%.2f", key="input_heA")
+    heB = st.number_input("Turno B (h efetivas)", value=st.session_state.get("heB_default", 8.23), step=0.01, format="%.2f", key="input_heB")
+    heC = st.number_input("Turno C (h efetivas)", value=st.session_state.get("heC_default", 7.68), step=0.01, format="%.2f", key="input_heC")
+    horas_efetivas = {"A":heA,"B":heB,"C":heC}
+
+    st.markdown("---")
     st.markdown("**Thresholds de ativação (%)**")
     st.caption("Turno abre quando ocupação ultrapassa esse valor.")
     thr_A = st.number_input("A abre quando ocup.A >", value=40, min_value=0, max_value=200, step=1)
@@ -2405,9 +2457,10 @@ tab_vis, tab_inp, tab_mem, tab_res, tab_cmp, tab_diag, tab_exp = st.tabs([
 
 # Cache do resultado base
 @st.cache_data(show_spinner=False)
-def calcular_cached(pmp_hash, _pmp, _tempo, _dist, _aplic, dias_hash, dias, hA, hB, hC, tA, tB, tC, _sup):
+def calcular_cached(pmp_hash, _pmp, _tempo, _dist, _aplic, dias_hash, dias, hA, hB, hC, heA, heB, heC, tA, tB, tC, _sup):
     return calcular(_pmp, _tempo, _dist, _aplic, dias,
                     {"A":hA,"B":hB,"C":hC}, {"A":tA,"B":tB,"C":tC}, _sup,
+                    horas_efetivas={"A":heA,"B":heB,"C":heC},
                     retornar_intermediarios=True)
 
 
@@ -2417,6 +2470,7 @@ sup_hash  = hash(str(suporte_cfg))
 res_base, df_interm, agg_interm = calcular_cached(
     pmp_hash, pmp, tempo, dist, aplic, dias_hash, dias,
     horas_turno["A"], horas_turno["B"], horas_turno["C"],
+    horas_efetivas["A"], horas_efetivas["B"], horas_efetivas["C"],
     thresholds["A"], thresholds["B"], thresholds["C"], suporte_cfg)
 
 # ══════════════════════════════════════════
@@ -2583,7 +2637,8 @@ Turno C: <b>{r['tot_C']} pessoas</b> &nbsp;|&nbsp;
                 novo_ov[cen]={"A":vA,"B":vB,"C":vC}
             if st.button("💾 Salvar cenário", type="primary"):
                 ov_c={mes_novo:novo_ov}
-                res_cen=calcular(pmp,tempo,dist,aplic,dias,horas_turno,thresholds,suporte_cfg,ov_c)
+                res_cen=calcular(pmp,tempo,dist,aplic,dias,horas_turno,thresholds,suporte_cfg,
+                                 horas_efetivas=horas_efetivas,overrides=ov_c)
                 st.session_state.cenarios[novo_nome]={"resultados":res_cen,"mes":mes_novo,"overrides":ov_c}
                 st.success(f"✅ '{novo_nome}' salvo!"); st.rerun()
 
