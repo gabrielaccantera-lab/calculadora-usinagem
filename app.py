@@ -683,12 +683,12 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
             pc_t = float(_aplic_pc.iloc[0].pc_trat) if not _aplic_pc.empty and "pc_trat" in _aplic_pc.columns else 1.0
             _ec(ws_out,ri_t,1,cen_t,_F_BRANCO,False,"000000",8,False); _ec(ws_out,ri_t,2,peca_t,_F_BRANCO,False,"000000",8,False)
             _ec(ws_out,ri_t,3,"",_F_BRANCO,False,"000000",8,False); _ec(ws_out,ri_t,4,int(pc_t),_F_BRANCO,False,"000000",8); _ec(ws_out,ri_t,5,"PC",_F_BRANCO,False,"000000",8)
-            _ec(ws_out,ri_t,6,round(tc,4),_F_PRETO,False,"FFFFFF",8); _ec(ws_out,ri_t,7,round(tl,4),_F_PRETO,False,"FFFFFF",8)
+            _ec(ws_out,ri_t,6,round(tc,2),_F_PRETO,False,"FFFFFF",8); _ec(ws_out,ri_t,7,round(tl,2),_F_PRETO,False,"FFFFFF",8)
             _fill_dc_p = _F_VERM if abs(dc-1.0)>0.001 else _F_BRANCO
             _fill_dv_p = _F_VERM if abs(dv-1.0)>0.001 else _F_BRANCO
-            _ec(ws_out,ri_t,8,round(dc,4),_fill_dc_p,False,"000000",8); _ec(ws_out,ri_t,9,round(vi,4),_F_BRANCO,False,"000000",8)
-            _ec(ws_out,ri_t,10,round(dv,4),_fill_dv_p,False,"000000",8); _ec(ws_out,ri_t,11,round(di,4),_F_CINZA2,False,"000000",8)
-            _ec(ws_out,ri_t,12,round(idx_c,4),_F_BRANCO,False,"000000",8)
+            _ec(ws_out,ri_t,8,round(dc,2),_fill_dc_p,False,"000000",8); _ec(ws_out,ri_t,9,round(vi,2),_F_BRANCO,False,"000000",8)
+            _ec(ws_out,ri_t,10,round(dv,2),_fill_dv_p,False,"000000",8); _ec(ws_out,ri_t,11,round(di,2),_F_BRANCO,False,"000000",8)
+            _ec(ws_out,ri_t,12,round(idx_c,2),_F_BRANCO,False,"000000",8)
             _ec(ws_out,ri_t,13,f"{pA_t:.1%}",_cor_pct(pA_t),False,"000000",8); _ec(ws_out,ri_t,14,f"{pB_t:.1%}",_cor_pct(pB_t),False,"000000",8); _ec(ws_out,ri_t,15,f"{pC_t:.1%}",_cor_pct(pC_t),False,"000000",8)
             _ec(ws_out,ri_t,16,round(mc_t,1),_F_BRANCO,False,"000000",8); _ec(ws_out,ri_t,17,round(ml_t,1),_F_BRANCO,False,"000000",8); _ec(ws_out,ri_t,18,tot_pecas,_F_BRANCO,False,"000000",8)
             for mi_t2,mod_t2 in enumerate(modelos_lista):
@@ -1268,7 +1268,7 @@ def show_memoria(r, mes, df_intermediario, agg, horas_turno, thresholds):
     st.markdown('<div class="mem-step"><span class="step-num">2</span> <b>Índice de ciclo</b></div>', unsafe_allow_html=True)
     st.markdown('<div class="formula-box">indice_ciclo = (t_ciclo × div_carga × div_volume × vol_interna) ÷ disponibilidade</div>', unsafe_allow_html=True)
     st.markdown('<div class="mem-step"><span class="step-num">3</span> <b>Minutos por linha</b></div>', unsafe_allow_html=True)
-    st.markdown('<div class="formula-box">min_ciclo = indice_ciclo × qtd_pecas<br>min_labor = t_labor × div_carga × pç_trat × qtd_pecas</div>', unsafe_allow_html=True)
+    st.markdown('<div class="formula-box">min_ciclo = indice_ciclo × qtd_pecas<br>min_labor = t_labor × div_carga × pç_trat × qtd_pecas<br>min_ciclo = indice_ciclo × qtd_pecas</div>', unsafe_allow_html=True)
     st.markdown('<div class="mem-step"><span class="step-num">4</span> <b>Agrupamento e ocupação por centro</b></div>', unsafe_allow_html=True)
     df_p4=r["centros"][["centro","min_ciclo_total","ocup_A","ocup_B","ocup_C"]].copy()
     df_p4.columns=["Centro","Σ Min.Ciclo","Ocup. A","Ocup. B","Ocup. C"]
@@ -1311,7 +1311,7 @@ def show_memoria_ano(res_base, df_intermediario, agg, horas_turno, thresholds):
 
     # ── Passo 2: Fórmula
     st.markdown('<div class="mem-step"><span class="step-num">2</span> <b>Índice de ciclo (igual ao mensal)</b></div>', unsafe_allow_html=True)
-    st.markdown('<div class="formula-box">indice_ciclo = (t_ciclo × div_carga × div_volume × vol_interna) ÷ disponibilidade<br>min_ciclo_ano = Σ (indice_ciclo × qtd) em todos os meses</div>', unsafe_allow_html=True)
+    st.markdown('<div class="formula-box">indice_ciclo = (t_ciclo × div_carga × div_volume × vol_interna) ÷ disponibilidade<br>min_ciclo_ano = Σ (indice_ciclo × pç_trat × qtd) em todos os meses</div>', unsafe_allow_html=True)
 
     # ── Passo 3: Acumulado por centro
     st.markdown('<div class="mem-step"><span class="step-num">3</span> <b>Minutos acumulados por centro (todos os meses)</b></div>', unsafe_allow_html=True)
@@ -2320,27 +2320,24 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                 div_dv_t = _dif_val(dv_xl_t, dv_inp)
                                 div_di_t = _dif_val(di_xl_t, di_inp)
 
-                                _fill_dc = _F_VERM if div_dc_t else _PF("solid",fgColor="FF0000")
+                                _fill_dc = _F_VERM if div_dc_t else _F_BRANCO
                                 _fill_vi = _F_VERM if div_vi_t else _F_BRANCO
-                                _fill_dv = _F_VERM if div_dv_t else _PF("solid",fgColor="FF0000")
-                                _fill_di = _F_VERM if div_di_t else _F_CINZA2
+                                _fill_dv = _F_VERM if div_dv_t else _F_BRANCO
+                                _fill_di = _F_VERM if div_di_t else _F_BRANCO
 
                                 _ec(ws_out,ri_t,1,cen_t,_F_BRANCO,False,"000000",8,False)
                                 _ec(ws_out,ri_t,2,peca_t,_F_BRANCO,False,"000000",8,False)
                                 _ec(ws_out,ri_t,3,base_row_t[2],_F_BRANCO,False,"000000",8,False)
                                 _ec(ws_out,ri_t,4,base_row_t[3],_F_BRANCO,False,"000000",8)
                                 _ec(ws_out,ri_t,5,base_row_t[4],_F_BRANCO,False,"000000",8)
-                                _ec(ws_out,ri_t,6,tc_xl_t,_F_PRETO,False,"FFFFFF",8)
-                                _ec(ws_out,ri_t,7,tl_xl_t,_F_PRETO,False,"FFFFFF",8)
-                                # Colunas 8-11: SEMPRE valor do INPUT — igual ao IMPUTDISTRIBUIÇÃO
-                                # Fundo VERMELHO = valor no arquivo mensal difere do INPUT
-                                _fill_dc_base = _PF("solid",fgColor="FF0000")  # cor padrão Div.Carga
-                                _fill_dv_base = _PF("solid",fgColor="FF0000")  # cor padrão Div.Volume
-                                _ec(ws_out,ri_t,8,dc_inp, _F_VERM if div_dc_t else _fill_dc_base, False,"FFFF00" if not div_dc_t else "FFFFFF",8)
-                                _ec(ws_out,ri_t,9,vi_inp, _F_VERM if div_vi_t else _F_BRANCO,     False,"000000",8)
-                                _ec(ws_out,ri_t,10,dv_inp,_F_VERM if div_dv_t else _fill_dv_base, False,"FFFF00" if not div_dv_t else "FFFFFF",8)
-                                _ec(ws_out,ri_t,11,di_inp,_F_VERM if div_di_t else _F_CINZA2,     False,"000000",8)
-                                _ec(ws_out,ri_t,12,round(float(idx_app_t),4),_F_VERM_S if div_idx_t else _F_BRANCO,False,"000000",8)
+                                _ec(ws_out,ri_t,6,round(float(tc_xl_t),2) if tc_xl_t else tc_xl_t,_F_PRETO,False,"FFFFFF",8)
+                                _ec(ws_out,ri_t,7,round(float(tl_xl_t),2) if tl_xl_t else tl_xl_t,_F_PRETO,False,"FFFFFF",8)
+                                # Colunas 8-11: SEMPRE valor do INPUT — branco=correto, vermelho=difere do mês
+                                _ec(ws_out,ri_t,8,round(dc_inp,2),_fill_dc,False,"000000",8)
+                                _ec(ws_out,ri_t,9,round(vi_inp,2),_fill_vi,False,"000000",8)
+                                _ec(ws_out,ri_t,10,round(dv_inp,2),_fill_dv,False,"000000",8)
+                                _ec(ws_out,ri_t,11,round(di_inp,2),_fill_di,False,"000000",8)
+                                _ec(ws_out,ri_t,12,round(float(idx_app_t),2),_F_VERM_S if div_idx_t else _F_BRANCO,False,"000000",8)
                                 _ec(ws_out,ri_t,13,f"{pA_t:.1%}",_F_VERM if div_A_t else _cor_pct(pA_t),False,"000000",8)
                                 _ec(ws_out,ri_t,14,f"{pB_t:.1%}",_F_VERM if div_B_t else _cor_pct(pB_t),False,"000000",8)
                                 _ec(ws_out,ri_t,15,f"{pC_t:.1%}",_cor_pct(pC_t),False,"000000",8)
