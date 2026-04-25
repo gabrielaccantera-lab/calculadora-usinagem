@@ -168,7 +168,10 @@ def read_dist(fb, log):
     c = {k: find_col(df, v, "IMPUTDISTRIBUIÇÃO", k) for k,v in mp.items()}
     out = df[[c["centro"],c["peca"],c["div_carga"],c["vol_int"],c["div_volume"],c["disponib"]]].copy()
     out.columns = ["centro","peca","div_carga","vol_int","div_volume","disponib"]
-    out["vol_int"] = pd.to_numeric(out["vol_int"], errors="coerce").fillna(1.0)
+    out["vol_int"]    = pd.to_numeric(out["vol_int"],    errors="coerce").fillna(1.0)
+    out["div_carga"]  = pd.to_numeric(out["div_carga"],  errors="coerce").fillna(0.0)
+    out["div_volume"] = pd.to_numeric(out["div_volume"], errors="coerce").fillna(0.0)
+    out["disponib"]   = pd.to_numeric(out["disponib"],   errors="coerce").fillna(1.0)
     out = out.dropna(subset=["centro"])
     log.append(f"   {len(out)} combinações")
     return out.copy()
@@ -299,7 +302,10 @@ def calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg
                .merge(tempo, on=["centro","peca"])
                .merge(dist,  on=["centro","peca"]))
     if "vol_int" not in df.columns: df["vol_int"] = 1.0
-    df["vol_int"] = pd.to_numeric(df["vol_int"], errors="coerce").fillna(1.0)
+    df["vol_int"]    = pd.to_numeric(df["vol_int"],    errors="coerce").fillna(1.0)
+    df["div_carga"]  = pd.to_numeric(df["div_carga"],  errors="coerce").fillna(0.0)
+    df["div_volume"] = pd.to_numeric(df["div_volume"], errors="coerce").fillna(0.0)
+    df["disponib"]   = pd.to_numeric(df["disponib"],   errors="coerce").fillna(1.0)
     df["indice_ciclo"] = (df.t_ciclo * df.div_carga * df.div_volume * df.vol_int) / df.disponib
     df["min_ciclo"]    = df.indice_ciclo * df.qtd
     df["min_labor"]    = df.t_labor * df.div_carga * df.qtd
@@ -575,7 +581,10 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
     try:
         df_all_t=(aplic.merge(pmp,on="modelo").merge(tempo,on=["centro","peca"]).merge(dist,on=["centro","peca"]))
         if "vol_int" not in df_all_t.columns: df_all_t["vol_int"] = 1.0
-        df_all_t["vol_int"] = pd.to_numeric(df_all_t["vol_int"], errors="coerce").fillna(1.0)
+        df_all_t["vol_int"]    = pd.to_numeric(df_all_t["vol_int"],    errors="coerce").fillna(1.0)
+        df_all_t["div_carga"]  = pd.to_numeric(df_all_t["div_carga"],  errors="coerce").fillna(0.0)
+        df_all_t["div_volume"] = pd.to_numeric(df_all_t["div_volume"], errors="coerce").fillna(0.0)
+        df_all_t["disponib"]   = pd.to_numeric(df_all_t["disponib"],   errors="coerce").fillna(1.0)
         df_all_t["indice_ciclo"]=(df_all_t.t_ciclo*df_all_t.div_carga*df_all_t.div_volume*df_all_t.vol_int)/df_all_t.disponib
         df_all_t["min_ciclo"]=df_all_t.indice_ciclo*df_all_t.qtd
         df_all_t["min_labor"]=df_all_t.t_labor*df_all_t.div_carga*df_all_t.qtd
@@ -721,7 +730,10 @@ def build_cp_data_anual(resultados, tempo, dist, aplic, pmp):
     try:
         df = (aplic.merge(pmp, on="modelo").merge(tempo, on=["centro","peca"]).merge(dist, on=["centro","peca"]))
         if "vol_int" not in df.columns: df["vol_int"] = 1.0
-        df["vol_int"] = pd.to_numeric(df["vol_int"], errors="coerce").fillna(1.0)
+        df["vol_int"]    = pd.to_numeric(df["vol_int"],    errors="coerce").fillna(1.0)
+        df["div_carga"]  = pd.to_numeric(df["div_carga"],  errors="coerce").fillna(0.0)
+        df["div_volume"] = pd.to_numeric(df["div_volume"], errors="coerce").fillna(0.0)
+        df["disponib"]   = pd.to_numeric(df["disponib"],   errors="coerce").fillna(1.0)
         df["indice_ciclo"] = (df.t_ciclo*df.div_carga*df.div_volume*df.vol_int)/df.disponib
         df["min_ciclo"] = df.indice_ciclo * df.qtd
         df["min_labor"] = df.t_labor * df.div_carga * df.qtd
@@ -1148,7 +1160,10 @@ def comparar_com_excel(res_app, file_bytes, tempo, dist, aplic, pmp, dias, horas
     try:
         df_all=(aplic.merge(pmp,on="modelo").merge(tempo,on=["centro","peca"]).merge(dist,on=["centro","peca"]))
         if "vol_int" not in df_all.columns: df_all["vol_int"]=1.0
-        df_all["vol_int"]=pd.to_numeric(df_all["vol_int"],errors="coerce").fillna(1.0)
+        df_all["vol_int"]    = pd.to_numeric(df_all["vol_int"],    errors="coerce").fillna(1.0)
+        df_all["div_carga"]  = pd.to_numeric(df_all["div_carga"],  errors="coerce").fillna(0.0)
+        df_all["div_volume"] = pd.to_numeric(df_all["div_volume"], errors="coerce").fillna(0.0)
+        df_all["disponib"]   = pd.to_numeric(df_all["disponib"],   errors="coerce").fillna(1.0)
         df_all["indice_ciclo"]=(df_all.t_ciclo*df_all.div_carga*df_all.div_volume*df_all.vol_int)/df_all.disponib
         df_all["min_ciclo"]=df_all.indice_ciclo*df_all.qtd
         agg_all=df_all.groupby(["centro","mes"]).agg(min_ciclo=("min_ciclo","sum"),qtd_total=("qtd","sum"),indice_medio=("indice_ciclo","mean")).reset_index()
@@ -2090,7 +2105,10 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                 try:
                     df_all_t=(aplic.merge(pmp,on="modelo").merge(tempo,on=["centro","peca"]).merge(dist,on=["centro","peca"]))
                     if "vol_int" not in df_all_t.columns: df_all_t["vol_int"] = 1.0
-                    df_all_t["vol_int"] = pd.to_numeric(df_all_t["vol_int"], errors="coerce").fillna(1.0)
+                    df_all_t["vol_int"]    = pd.to_numeric(df_all_t["vol_int"],    errors="coerce").fillna(1.0)
+                    df_all_t["div_carga"]  = pd.to_numeric(df_all_t["div_carga"],  errors="coerce").fillna(0.0)
+                    df_all_t["div_volume"] = pd.to_numeric(df_all_t["div_volume"], errors="coerce").fillna(0.0)
+                    df_all_t["disponib"]   = pd.to_numeric(df_all_t["disponib"],   errors="coerce").fillna(1.0)
                     df_all_t["indice_ciclo"]=(df_all_t.t_ciclo*df_all_t.div_carga*df_all_t.div_volume*df_all_t.vol_int)/df_all_t.disponib
                     df_all_t["min_ciclo"]=df_all_t.indice_ciclo*df_all_t.qtd
                     df_all_t["min_labor"]=df_all_t.t_labor*df_all_t.div_carga*df_all_t.qtd
