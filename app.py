@@ -89,10 +89,24 @@ ABA_FORMATOS = {
     "IMPUTTURNOS": "**IMPUTTURNOS** — Linha 1: horas acumuladas. B1=Turno A, C1=Turno B, D1=Turno C.",
 }
 
+def _norm(s):
+    """Normaliza nome de coluna: minúsculo, sem quebras de linha, sem espaços extras."""
+    return str(s).lower().replace("\n"," ").replace("\r"," ").strip()
+
 def find_col(df, candidates, aba, campo):
+    # 1) busca exata
     for c in candidates:
         if c in df.columns:
             return c
+    # 2) busca normalizada (ignora maiúsculas, quebras de linha e espaços extras)
+    norm_map = {_norm(col): col for col in df.columns}
+    for c in candidates:
+        nc = _norm(c)
+        if nc in norm_map:
+            st.session_state.setdefault("log_leitura",[]).append(
+                f"ℹ️ [{aba}] Campo '{campo}' encontrado via normalização: '{norm_map[nc]}'")
+            return norm_map[nc]
+    # 3) fallback por índice posicional
     idx_fallback = {"centro":0,"peca":1,"t_ciclo":5,"t_labor":6,"div_carga":7,"vol_int":8,"div_volume":9,"disponib":10}
     if campo in idx_fallback:
         idx = idx_fallback[campo]
@@ -100,7 +114,7 @@ def find_col(df, candidates, aba, campo):
             st.session_state.setdefault("log_leitura",[]).append(
                 f"⚠️ [{aba}] Campo '{campo}' não encontrado — usando coluna {idx} ({df.columns[idx]}) como fallback")
             return df.columns[idx]
-    raise ValueError(f"[{aba}] Campo '{campo}' não encontrado. Colunas: {list(df.columns)}")
+    raise ValueError(f"[{aba}] Campo '{campo}' não encontrado. Colunas disponíveis: {list(df.columns)}")
 
 def verificar_abas(fb):
     try:
@@ -173,6 +187,10 @@ def read_dist(fb, log):
     out["div_volume"] = pd.to_numeric(out["div_volume"], errors="coerce").fillna(0.0)
     out["disponib"]   = pd.to_numeric(out["disponib"],   errors="coerce").fillna(1.0)
     out = out.dropna(subset=["centro"])
+    # Log de diagnóstico: mostra amostra dos valores lidos para validação
+    amostra = out[["centro","peca","div_carga","vol_int","div_volume","disponib"]].head(3)
+    for _, r in amostra.iterrows():
+        log.append(f"   ✔ {r.centro}/{r.peca}: div_carga={r.div_carga}, vol_int={r.vol_int}, div_volume={r.div_volume}, disponib={r.disponib} → índice_ciclo=(t_ciclo×{r.div_carga}×{r.div_volume}×{r.vol_int})/{r.disponib}")
     log.append(f"   {len(out)} combinações")
     return out.copy()
 
