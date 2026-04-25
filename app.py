@@ -203,12 +203,23 @@ def read_aplic(fb, log):
         raise ValueError(f"Não foi possível ler IMPUTAPLICAÇÃO: {e}\n\n{ABA_FORMATOS['IMPUTAPLICAÇÃO']}")
     log.append(f"✅ IMPUTAPLICAÇÃO lido: {df.shape[0]}L")
     df = df.rename(columns={df.columns[0]:"centro", df.columns[1]:"peca"})
+    # Lê PÇ/TRAT (coluna índice 3 = "PEÇA\nTRATOR" ou similar)
+    pc_trat_candidates = ["PEÇA\nTRATOR","PÇ/TRAT","PC/TRAT","PCTRAT","Peça Trator","pc_trat"]
+    pc_trat_col = next((c for c in pc_trat_candidates if c in df.columns), None)
+    if pc_trat_col is None and len(df.columns) > 3:
+        pc_trat_col = df.columns[3]  # fallback posicional
     mcols = [c for c in df.columns if str(c).startswith("MODELO")]
     if not mcols:
         raise ValueError(f"IMPUTAPLICAÇÃO: nenhuma coluna 'MODELO...' encontrada. Colunas: {list(df.columns)}")
     log.append(f"   {len(mcols)} modelos")
-    melted = df[["centro","peca"]+mcols].melt(id_vars=["centro","peca"], var_name="modelo", value_name="ativo")
-    out = melted[melted["ativo"]==1][["centro","peca","modelo"]].reset_index(drop=True)
+    id_vars = ["centro","peca","pc_trat"] if pc_trat_col else ["centro","peca"]
+    if pc_trat_col:
+        df["pc_trat"] = pd.to_numeric(df[pc_trat_col], errors="coerce").fillna(1.0).clip(lower=1.0)
+        log.append(f"   PÇ/TRAT lido de '{pc_trat_col}'")
+    else:
+        df["pc_trat"] = 1.0
+    melted = df[id_vars+mcols].melt(id_vars=id_vars, var_name="modelo", value_name="ativo")
+    out = melted[melted["ativo"]==1][id_vars+["modelo"]].reset_index(drop=True)
     log.append(f"   {len(out)} combinações ativas")
     return out
 
@@ -328,7 +339,7 @@ def calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg
     df["disponib"]   = pd.to_numeric(df["disponib"],   errors="coerce").fillna(1.0)
     df["indice_ciclo"] = (df.t_ciclo * df.div_carga * df.div_volume * df.vol_int) / df.disponib
     df["min_ciclo"]    = df.indice_ciclo * df.qtd
-    df["min_labor"]    = df.t_labor * df.div_carga * df.qtd
+    df["min_labor"]    = df.t_labor * df.div_carga * df.qtd * df.pc_trat.fillna(1.0)
     agg = df.groupby(["centro","mes"])[["min_ciclo","min_labor"]].sum().reset_index()
     thr_A = thresholds["A"] / 100
     thr_B = thresholds["B"] / 100
@@ -607,7 +618,7 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
         df_all_t["disponib"]   = pd.to_numeric(df_all_t["disponib"],   errors="coerce").fillna(1.0)
         df_all_t["indice_ciclo"]=(df_all_t.t_ciclo*df_all_t.div_carga*df_all_t.div_volume*df_all_t.vol_int)/df_all_t.disponib
         df_all_t["min_ciclo"]=df_all_t.indice_ciclo*df_all_t.qtd
-        df_all_t["min_labor"]=df_all_t.t_labor*df_all_t.div_carga*df_all_t.qtd
+        df_all_t["min_labor"]=df_all_t.t_labor*df_all_t.div_carga*df_all_t.qtd*df_all_t.pc_trat.fillna(1.0)
         agg_cp_t=df_all_t.groupby(["centro","peca","mes"])[["min_ciclo","min_labor"]].sum()
     except: agg_cp_t=pd.DataFrame()
     pares_cp = list(dist[["centro","peca"]].drop_duplicates().itertuples(index=False, name=None))
@@ -756,7 +767,7 @@ def build_cp_data_anual(resultados, tempo, dist, aplic, pmp):
         df["disponib"]   = pd.to_numeric(df["disponib"],   errors="coerce").fillna(1.0)
         df["indice_ciclo"] = (df.t_ciclo*df.div_carga*df.div_volume*df.vol_int)/df.disponib
         df["min_ciclo"] = df.indice_ciclo * df.qtd
-        df["min_labor"] = df.t_labor * df.div_carga * df.qtd
+        df["min_labor"] = df.t_labor * df.div_carga * df.qtd * df.pc_trat.fillna(1.0)
         df_ano = df[df.mes.isin(meses_c)]
         agg = df_ano.groupby(["centro","peca"])[["min_ciclo","min_labor","qtd"]].sum().reset_index()
         attrs = df_ano.drop_duplicates(["centro","peca"])[
@@ -1252,7 +1263,7 @@ def show_memoria(r, mes, df_intermediario, agg, horas_turno, thresholds):
     st.markdown('<div class="mem-step"><span class="step-num">2</span> <b>Índice de ciclo</b></div>', unsafe_allow_html=True)
     st.markdown('<div class="formula-box">indice_ciclo = (t_ciclo × div_carga × div_volume × vol_interna) ÷ disponibilidade</div>', unsafe_allow_html=True)
     st.markdown('<div class="mem-step"><span class="step-num">3</span> <b>Minutos por linha</b></div>', unsafe_allow_html=True)
-    st.markdown('<div class="formula-box">min_ciclo = indice_ciclo × qtd_pecas<br>min_labor = t_labor × div_carga × qtd_pecas</div>', unsafe_allow_html=True)
+    st.markdown('<div class="formula-box">min_ciclo = indice_ciclo × qtd_pecas<br>min_labor = t_labor × div_carga × pç_trat × qtd_pecas</div>', unsafe_allow_html=True)
     st.markdown('<div class="mem-step"><span class="step-num">4</span> <b>Agrupamento e ocupação por centro</b></div>', unsafe_allow_html=True)
     df_p4=r["centros"][["centro","min_ciclo_total","ocup_A","ocup_B","ocup_C"]].copy()
     df_p4.columns=["Centro","Σ Min.Ciclo","Ocup. A","Ocup. B","Ocup. C"]
@@ -2131,7 +2142,7 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                     df_all_t["disponib"]   = pd.to_numeric(df_all_t["disponib"],   errors="coerce").fillna(1.0)
                     df_all_t["indice_ciclo"]=(df_all_t.t_ciclo*df_all_t.div_carga*df_all_t.div_volume*df_all_t.vol_int)/df_all_t.disponib
                     df_all_t["min_ciclo"]=df_all_t.indice_ciclo*df_all_t.qtd
-                    df_all_t["min_labor"]=df_all_t.t_labor*df_all_t.div_carga*df_all_t.qtd
+                    df_all_t["min_labor"]=df_all_t.t_labor*df_all_t.div_carga*df_all_t.qtd*df_all_t.pc_trat.fillna(1.0)
                     agg_cp_t=df_all_t.groupby(["centro","peca","mes"])[["min_ciclo","min_labor"]].sum()
                 except Exception as _e_merge:
                     st.error(f"Erro ao preparar dados: {_e_merge}"); st.stop()
