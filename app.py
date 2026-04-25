@@ -75,8 +75,8 @@ COL_MAP = {
         "centro":     ["Máquina","MÁQUINA","maquina","Centro","CENTRO"],
         "peca":       ["PEÇA","Peça","peca","PECA"],
         "div_carga":  ["Divisão\nCarga\nENTRE\nMÁQUINAS","Div Carga","DIV_CARGA","div_carga"],
-        "vol_int":    ["Vol.\nInterna","Vol. Interna","VOL_INT","vol_int","VOL. INTERNA","Volume Interna"],
-        "div_volume": ["Divisão \nde\nVolume\nENTRE\nPEÇAS","Div Volume","DIV_VOLUME","div_volume"],
+        "vol_int":    ["Vol.\nInterna","Vol. Interna","VOL_INT","vol_int","VOL. INTERNA","Volume Interna","Volume de \nProdução\nInterna","Volume de\nProdução\nInterna","Volume Produção Interna","Vol Produção Interna"],
+        "div_volume": ["Divisão \nde\nVolume\nENTRE\nPEÇAS","Divisão\nde\nVolume\nENTRE\nPEÇAS","Div Volume","DIV_VOLUME","div_volume","Divisão de Volume"],
         "disponib":   ["Disponi-\nbilidade","Disponibilidade","DISPONIB","disponib"],
     },
 }
@@ -178,8 +178,10 @@ def read_dist(fb, log):
     except Exception as e:
         raise ValueError(f"Não foi possível ler IMPUTDISTRIBUIÇÃO: {e}\n\n{ABA_FORMATOS['IMPUTDISTRIBUIÇÃO']}")
     log.append(f"✅ IMPUTDISTRIBUIÇÃO lido: {df.shape[0]}L")
+    log.append(f"   Colunas brutas: {list(df.columns)}")
     mp = COL_MAP["IMPUTDISTRIBUIÇÃO"]
     c = {k: find_col(df, v, "IMPUTDISTRIBUIÇÃO", k) for k,v in mp.items()}
+    log.append(f"   Mapeamento: { {k: v for k,v in c.items()} }")
     out = df[[c["centro"],c["peca"],c["div_carga"],c["vol_int"],c["div_volume"],c["disponib"]]].copy()
     out.columns = ["centro","peca","div_carga","vol_int","div_volume","disponib"]
     out["vol_int"]    = pd.to_numeric(out["vol_int"],    errors="coerce").fillna(1.0)
@@ -190,7 +192,7 @@ def read_dist(fb, log):
     # Log de diagnóstico: mostra amostra dos valores lidos para validação
     amostra = out[["centro","peca","div_carga","vol_int","div_volume","disponib"]].head(3)
     for _, r in amostra.iterrows():
-        log.append(f"   ✔ {r.centro}/{r.peca}: div_carga={r.div_carga}, vol_int={r.vol_int}, div_volume={r.div_volume}, disponib={r.disponib} → índice_ciclo=(t_ciclo×{r.div_carga}×{r.div_volume}×{r.vol_int})/{r.disponib}")
+        log.append(f"   ✔ {r.centro}/{r.peca}: div_carga={r.div_carga}, vol_int={r.vol_int}, div_volume={r.div_volume}, disponib={r.disponib}")
     log.append(f"   {len(out)} combinações")
     return out.copy()
 
@@ -2239,6 +2241,13 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                 xl_pB_t=mrow_t[13] if len(mrow_t)>13 else None
                                 xl_ciclo_t=mrow_t[15] if len(mrow_t)>15 else None
                                 xl_pecas_t=mrow_t[17] if len(mrow_t)>17 else None
+                                # Lê os valores de distribuição do MÊS CORRENTE (não da aba estrutural)
+                                # para comparar corretamente com o INPUT
+                                dc_xl_t = mrow_t[7] if len(mrow_t)>7 else base_row_t[7]
+                                vi_xl_t = mrow_t[8] if len(mrow_t)>8 else base_row_t[8]
+                                dv_xl_t = mrow_t[9] if len(mrow_t)>9 else base_row_t[9]
+                                di_xl_t = mrow_t[10] if len(mrow_t)>10 else base_row_t[10]
+                                idx_xl_t = mrow_t[11] if len(mrow_t)>11 else base_row_t[11]
                                 vrow_t=dm_t.get("vols",[])[ri_t_idx] if dm_t.get("vols") and ri_t_idx<len(dm_t["vols"]) else []
 
                                 try: mc_t=float(agg_cp_t.loc[(cen_t,peca_t,mes_t),"min_ciclo"])
@@ -2281,16 +2290,23 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                 div_idx_t = abs(float(idx_xl_t or 0) - float(idx_app_t or 0)) > 0.5
 
                                 # Divergências entre Excel mensal e INPUT (vermelho = mês difere do INPUT)
-                                def _dif_pct(xl_val, inp_val, tol=0.001):
-                                    """Retorna True se o valor do Excel mensal difere do INPUT."""
+                                def _dif_val(xl_val, inp_val, tol=0.001):
+                                    """Compara valor do Excel mensal com INPUT.
+                                    O Excel pode guardar como percentual (ex: 1.0 = 100%) — mesmo formato do INPUT.
+                                    Usa tolerância relativa para evitar falsos positivos de arredondamento."""
                                     if xl_val is None: return False
-                                    try: return abs(float(xl_val) - float(inp_val)) > tol
+                                    try:
+                                        xv = float(xl_val)
+                                        iv = float(inp_val)
+                                        # Tolerância relativa: 0.1% do valor do INPUT, mínimo absoluto de tol
+                                        tol_rel = max(tol, abs(iv) * 0.001)
+                                        return abs(xv - iv) > tol_rel
                                     except: return False
 
-                                div_dc_t  = _dif_pct(dc_xl_t, dc_inp)
-                                div_vi_t  = _dif_pct(vi_xl_t, vi_inp)
-                                div_dv_t  = _dif_pct(dv_xl_t, dv_inp)
-                                div_di_t  = _dif_pct(di_xl_t, di_inp)
+                                div_dc_t  = _dif_val(dc_xl_t, dc_inp)
+                                div_vi_t  = _dif_val(vi_xl_t, vi_inp)
+                                div_dv_t  = _dif_val(dv_xl_t, dv_inp)
+                                div_di_t  = _dif_val(di_xl_t, di_inp)
 
                                 # Fills: vermelho forte se difere do INPUT, cor original se igual
                                 _fill_dc = _F_VERM if div_dc_t else _PF("solid",fgColor="FF0000")
