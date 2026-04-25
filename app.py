@@ -678,11 +678,16 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
                 aplic_row=aplic[(aplic.centro==cen_t)&(aplic.peca==peca_t)&(aplic.modelo==mod_t2)]
                 flag_t=1 if len(aplic_row)>0 else 0
                 app_mod_v[mod_t2]=qtd_t*flag_t; tot_pecas+=qtd_t*flag_t
+            pc_t = float(dist_row.iloc[0].get("pc_trat", 1.0)) if hasattr(dist_row.iloc[0], "get") else 1.0
+            _aplic_pc = aplic[(aplic.centro==cen_t)&(aplic.peca==peca_t)]
+            pc_t = float(_aplic_pc.iloc[0].pc_trat) if not _aplic_pc.empty and "pc_trat" in _aplic_pc.columns else 1.0
             _ec(ws_out,ri_t,1,cen_t,_F_BRANCO,False,"000000",8,False); _ec(ws_out,ri_t,2,peca_t,_F_BRANCO,False,"000000",8,False)
-            _ec(ws_out,ri_t,3,"",_F_BRANCO,False,"000000",8,False); _ec(ws_out,ri_t,4,1,_F_BRANCO,False,"000000",8); _ec(ws_out,ri_t,5,"PC",_F_BRANCO,False,"000000",8)
+            _ec(ws_out,ri_t,3,"",_F_BRANCO,False,"000000",8,False); _ec(ws_out,ri_t,4,int(pc_t),_F_BRANCO,False,"000000",8); _ec(ws_out,ri_t,5,"PC",_F_BRANCO,False,"000000",8)
             _ec(ws_out,ri_t,6,round(tc,4),_F_PRETO,False,"FFFFFF",8); _ec(ws_out,ri_t,7,round(tl,4),_F_PRETO,False,"FFFFFF",8)
-            _ec(ws_out,ri_t,8,round(dc,4),_PF("solid",fgColor="FF0000"),False,"FFFF00",8); _ec(ws_out,ri_t,9,round(vi,4),_F_BRANCO,False,"000000",8)
-            _ec(ws_out,ri_t,10,round(dv,4),_PF("solid",fgColor="FF0000"),False,"FFFF00",8); _ec(ws_out,ri_t,11,round(di,4),_F_CINZA2,False,"000000",8)
+            _fill_dc_p = _F_VERM if abs(dc-1.0)>0.001 else _F_BRANCO
+            _fill_dv_p = _F_VERM if abs(dv-1.0)>0.001 else _F_BRANCO
+            _ec(ws_out,ri_t,8,round(dc,4),_fill_dc_p,False,"000000",8); _ec(ws_out,ri_t,9,round(vi,4),_F_BRANCO,False,"000000",8)
+            _ec(ws_out,ri_t,10,round(dv,4),_fill_dv_p,False,"000000",8); _ec(ws_out,ri_t,11,round(di,4),_F_CINZA2,False,"000000",8)
             _ec(ws_out,ri_t,12,round(idx_c,4),_F_BRANCO,False,"000000",8)
             _ec(ws_out,ri_t,13,f"{pA_t:.1%}",_cor_pct(pA_t),False,"000000",8); _ec(ws_out,ri_t,14,f"{pB_t:.1%}",_cor_pct(pB_t),False,"000000",8); _ec(ws_out,ri_t,15,f"{pC_t:.1%}",_cor_pct(pC_t),False,"000000",8)
             _ec(ws_out,ri_t,16,round(mc_t,1),_F_BRANCO,False,"000000",8); _ec(ws_out,ri_t,17,round(ml_t,1),_F_BRANCO,False,"000000",8); _ec(ws_out,ri_t,18,tot_pecas,_F_BRANCO,False,"000000",8)
@@ -1498,11 +1503,11 @@ with st.sidebar:
 tab_vis,tab_inp,tab_mem,tab_res,tab_cen,tab_cmp,tab_exp=st.tabs(["🏠 Visão Geral","📂 Dados de Input","🔬 Como foi Calculado","📊 Resultado por Mês","🎯 Cenários","🔄 Comparar com Excel","📥 Exportar"])
 
 @st.cache_data(show_spinner=False)
-def calcular_cached(pmp_hash,_pmp,_tempo,_dist,_aplic,dias_hash,dias,hA,hB,hC,heA,heB,heC,tA,tB,tC,_sup):
+def calcular_cached(pmp_hash,_pmp,_tempo,_dist,_aplic,aplic_hash,dias_hash,dias,hA,hB,hC,heA,heB,heC,tA,tB,tC,_sup):
     return calcular(_pmp,_tempo,_dist,_aplic,dias,{"A":hA,"B":hB,"C":hC},{"A":tA,"B":tB,"C":tC},_sup,horas_efetivas={"A":heA,"B":heB,"C":heC},retornar_intermediarios=True)
 
-pmp_hash=hash(pmp.to_json()); dias_hash=hash(str(dias))
-res_base,df_interm,agg_interm=calcular_cached(pmp_hash,pmp,tempo,dist,aplic,dias_hash,dias,horas_turno["A"],horas_turno["B"],horas_turno["C"],horas_efetivas["A"],horas_efetivas["B"],horas_efetivas["C"],thresholds["A"],thresholds["B"],thresholds["C"],suporte_cfg)
+pmp_hash=hash(pmp.to_json()); dias_hash=hash(str(dias)); aplic_hash=hash(aplic.to_json())
+res_base,df_interm,agg_interm=calcular_cached(pmp_hash,pmp,tempo,dist,aplic,aplic_hash,dias_hash,dias,horas_turno["A"],horas_turno["B"],horas_turno["C"],horas_efetivas["A"],horas_efetivas["B"],horas_efetivas["C"],thresholds["A"],thresholds["B"],thresholds["C"],suporte_cfg)
 
 # ── TAB 1 VISÃO GERAL
 with tab_vis:
