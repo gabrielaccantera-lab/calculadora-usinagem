@@ -2275,40 +2275,35 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                 div_A_t=_df(pA_t,xl_pA_t,0.02); div_B_t=_df(pB_t,xl_pB_t,0.02)
                                 div_c_t=_df(mc_t,xl_ciclo_t,1); div_p_t=_df(app_tot_t,xl_pecas_t,0.5)
 
-                                dc_i=dist[(dist.centro==cen_t)&(dist.peca==peca_t)]["div_carga"].values
-                                vi_i=dist[(dist.centro==cen_t)&(dist.peca==peca_t)]["vol_int"].values
-                                dv_i=dist[(dist.centro==cen_t)&(dist.peca==peca_t)]["div_volume"].values
-                                di_i=dist[(dist.centro==cen_t)&(dist.peca==peca_t)]["disponib"].values
-                                vi_val=float(vi_i[0]) if len(vi_i) else 1.0
-                                # Valores do INPUT (fonte da verdade)
-                                dc_inp = float(dc_i[0]) if len(dc_i) else float(dc_xl_t or 0)
-                                vi_inp = vi_val
-                                dv_inp = float(dv_i[0]) if len(dv_i) else float(dv_xl_t or 0)
-                                di_inp = float(di_i[0]) if len(di_i) else float(di_xl_t or 1)
-                                tc_inp = float(tc_xl_t or 0)  # t_ciclo vem do Excel de referência (mesmo valor)
+                                # Lê direto do dist (IMPUTDISTRIBUIÇÃO) — fonte única da verdade
+                                _dist_row = dist[(dist.centro==cen_t)&(dist.peca==peca_t)]
+                                if not _dist_row.empty:
+                                    dc_inp = float(_dist_row.iloc[0].div_carga)
+                                    vi_inp = float(_dist_row.iloc[0].vol_int)
+                                    dv_inp = float(_dist_row.iloc[0].div_volume)
+                                    di_inp = float(_dist_row.iloc[0].disponib)
+                                else:
+                                    dc_inp = float(dc_xl_t or 0)
+                                    vi_inp = float(vi_xl_t or 1)
+                                    dv_inp = float(dv_xl_t or 0)
+                                    di_inp = float(di_xl_t or 1)
+                                tc_inp = float(tc_xl_t or 0)
                                 idx_app_t = (tc_inp * dc_inp * dv_inp * vi_inp) / di_inp if di_inp else 0.0
                                 div_idx_t = abs(float(idx_xl_t or 0) - float(idx_app_t or 0)) > 0.5
 
-                                # Divergências entre Excel mensal e INPUT (vermelho = mês difere do INPUT)
+                                # Vermelho = valor no arquivo mensal difere do INPUT
                                 def _dif_val(xl_val, inp_val, tol=0.001):
-                                    """Compara valor do Excel mensal com INPUT.
-                                    O Excel pode guardar como percentual (ex: 1.0 = 100%) — mesmo formato do INPUT.
-                                    Usa tolerância relativa para evitar falsos positivos de arredondamento."""
                                     if xl_val is None: return False
                                     try:
-                                        xv = float(xl_val)
-                                        iv = float(inp_val)
-                                        # Tolerância relativa: 0.1% do valor do INPUT, mínimo absoluto de tol
-                                        tol_rel = max(tol, abs(iv) * 0.001)
-                                        return abs(xv - iv) > tol_rel
+                                        tol_rel = max(tol, abs(float(inp_val)) * 0.001)
+                                        return abs(float(xl_val) - float(inp_val)) > tol_rel
                                     except: return False
 
-                                div_dc_t  = _dif_val(dc_xl_t, dc_inp)
-                                div_vi_t  = _dif_val(vi_xl_t, vi_inp)
-                                div_dv_t  = _dif_val(dv_xl_t, dv_inp)
-                                div_di_t  = _dif_val(di_xl_t, di_inp)
+                                div_dc_t = _dif_val(dc_xl_t, dc_inp)
+                                div_vi_t = _dif_val(vi_xl_t, vi_inp)
+                                div_dv_t = _dif_val(dv_xl_t, dv_inp)
+                                div_di_t = _dif_val(di_xl_t, di_inp)
 
-                                # Fills: vermelho forte se difere do INPUT, cor original se igual
                                 _fill_dc = _F_VERM if div_dc_t else _PF("solid",fgColor="FF0000")
                                 _fill_vi = _F_VERM if div_vi_t else _F_BRANCO
                                 _fill_dv = _F_VERM if div_dv_t else _PF("solid",fgColor="FF0000")
@@ -2321,12 +2316,14 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                 _ec(ws_out,ri_t,5,base_row_t[4],_F_BRANCO,False,"000000",8)
                                 _ec(ws_out,ri_t,6,tc_xl_t,_F_PRETO,False,"FFFFFF",8)
                                 _ec(ws_out,ri_t,7,tl_xl_t,_F_PRETO,False,"FFFFFF",8)
-                                # Colunas 8-11: SEMPRE valor do INPUT (fonte da verdade)
-                                # Fundo VERMELHO = o arquivo mensal tinha valor diferente do INPUT
-                                _ec(ws_out,ri_t,8,dc_inp,_fill_dc,False,"FFFF00" if not div_dc_t else "FFFFFF",8)
-                                _ec(ws_out,ri_t,9,vi_inp,_fill_vi,False,"000000",8)
-                                _ec(ws_out,ri_t,10,dv_inp,_fill_dv,False,"FFFF00" if not div_dv_t else "FFFFFF",8)
-                                _ec(ws_out,ri_t,11,di_inp,_fill_di,False,"000000",8)
+                                # Colunas 8-11: SEMPRE valor do INPUT — igual ao IMPUTDISTRIBUIÇÃO
+                                # Fundo VERMELHO = valor no arquivo mensal difere do INPUT
+                                _fill_dc_base = _PF("solid",fgColor="FF0000")  # cor padrão Div.Carga
+                                _fill_dv_base = _PF("solid",fgColor="FF0000")  # cor padrão Div.Volume
+                                _ec(ws_out,ri_t,8,dc_inp, _F_VERM if div_dc_t else _fill_dc_base, False,"FFFF00" if not div_dc_t else "FFFFFF",8)
+                                _ec(ws_out,ri_t,9,vi_inp, _F_VERM if div_vi_t else _F_BRANCO,     False,"000000",8)
+                                _ec(ws_out,ri_t,10,dv_inp,_F_VERM if div_dv_t else _fill_dv_base, False,"FFFF00" if not div_dv_t else "FFFFFF",8)
+                                _ec(ws_out,ri_t,11,di_inp,_F_VERM if div_di_t else _F_CINZA2,     False,"000000",8)
                                 _ec(ws_out,ri_t,12,round(float(idx_app_t),4),_F_VERM_S if div_idx_t else _F_BRANCO,False,"000000",8)
                                 _ec(ws_out,ri_t,13,f"{pA_t:.1%}",_F_VERM if div_A_t else _cor_pct(pA_t),False,"000000",8)
                                 _ec(ws_out,ri_t,14,f"{pB_t:.1%}",_F_VERM if div_B_t else _cor_pct(pB_t),False,"000000",8)
