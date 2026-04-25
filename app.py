@@ -683,12 +683,12 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
             pc_t = float(_aplic_pc.iloc[0].pc_trat) if not _aplic_pc.empty and "pc_trat" in _aplic_pc.columns else 1.0
             _ec(ws_out,ri_t,1,cen_t,_F_BRANCO,False,"000000",8,False); _ec(ws_out,ri_t,2,peca_t,_F_BRANCO,False,"000000",8,False)
             _ec(ws_out,ri_t,3,"",_F_BRANCO,False,"000000",8,False); _ec(ws_out,ri_t,4,int(pc_t),_F_BRANCO,False,"000000",8); _ec(ws_out,ri_t,5,"PC",_F_BRANCO,False,"000000",8)
-            _ec(ws_out,ri_t,6,round(tc,2),_F_PRETO,False,"FFFFFF",8); _ec(ws_out,ri_t,7,round(tl,2),_F_PRETO,False,"FFFFFF",8)
+            _ec(ws_out,ri_t,6,tc,_F_PRETO,False,"FFFFFF",8); _ec(ws_out,ri_t,7,tl,_F_PRETO,False,"FFFFFF",8)
             _fill_dc_p = _F_VERM if abs(dc-1.0)>0.001 else _F_BRANCO
             _fill_dv_p = _F_VERM if abs(dv-1.0)>0.001 else _F_BRANCO
-            _ec(ws_out,ri_t,8,round(dc,2),_fill_dc_p,False,"000000",8); _ec(ws_out,ri_t,9,round(vi,2),_F_BRANCO,False,"000000",8)
-            _ec(ws_out,ri_t,10,round(dv,2),_fill_dv_p,False,"000000",8); _ec(ws_out,ri_t,11,round(di,2),_F_BRANCO,False,"000000",8)
-            _ec(ws_out,ri_t,12,round(idx_c,2),_F_BRANCO,False,"000000",8)
+            _ec(ws_out,ri_t,8,dc,_fill_dc_p,False,"000000",8); _ec(ws_out,ri_t,9,vi,_F_BRANCO,False,"000000",8)
+            _ec(ws_out,ri_t,10,dv,_fill_dv_p,False,"000000",8); _ec(ws_out,ri_t,11,di,_F_BRANCO,False,"000000",8)
+            _ec(ws_out,ri_t,12,idx_c,_F_BRANCO,False,"000000",8)
             _ec(ws_out,ri_t,13,f"{pA_t:.1%}",_cor_pct(pA_t),False,"000000",8); _ec(ws_out,ri_t,14,f"{pB_t:.1%}",_cor_pct(pB_t),False,"000000",8); _ec(ws_out,ri_t,15,f"{pC_t:.1%}",_cor_pct(pC_t),False,"000000",8)
             _ec(ws_out,ri_t,16,round(mc_t,1),_F_BRANCO,False,"000000",8); _ec(ws_out,ri_t,17,round(ml_t,1),_F_BRANCO,False,"000000",8); _ec(ws_out,ri_t,18,tot_pecas,_F_BRANCO,False,"000000",8)
             for mi_t2,mod_t2 in enumerate(modelos_lista):
@@ -2330,14 +2330,14 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                 _ec(ws_out,ri_t,3,base_row_t[2],_F_BRANCO,False,"000000",8,False)
                                 _ec(ws_out,ri_t,4,base_row_t[3],_F_BRANCO,False,"000000",8)
                                 _ec(ws_out,ri_t,5,base_row_t[4],_F_BRANCO,False,"000000",8)
-                                _ec(ws_out,ri_t,6,round(float(tc_xl_t),2) if tc_xl_t else tc_xl_t,_F_PRETO,False,"FFFFFF",8)
-                                _ec(ws_out,ri_t,7,round(float(tl_xl_t),2) if tl_xl_t else tl_xl_t,_F_PRETO,False,"FFFFFF",8)
+                                _ec(ws_out,ri_t,6,float(tc_xl_t) if tc_xl_t else tc_xl_t,_F_PRETO,False,"FFFFFF",8)
+                                _ec(ws_out,ri_t,7,float(tl_xl_t) if tl_xl_t else tl_xl_t,_F_PRETO,False,"FFFFFF",8)
                                 # Colunas 8-11: SEMPRE valor do INPUT — branco=correto, vermelho=difere do mês
-                                _ec(ws_out,ri_t,8,round(dc_inp,2),_fill_dc,False,"000000",8)
-                                _ec(ws_out,ri_t,9,round(vi_inp,2),_fill_vi,False,"000000",8)
-                                _ec(ws_out,ri_t,10,round(dv_inp,2),_fill_dv,False,"000000",8)
-                                _ec(ws_out,ri_t,11,round(di_inp,2),_fill_di,False,"000000",8)
-                                _ec(ws_out,ri_t,12,round(float(idx_app_t),2),_F_VERM_S if div_idx_t else _F_BRANCO,False,"000000",8)
+                                _ec(ws_out,ri_t,8,dc_inp,_fill_dc,False,"000000",8)
+                                _ec(ws_out,ri_t,9,vi_inp,_fill_vi,False,"000000",8)
+                                _ec(ws_out,ri_t,10,dv_inp,_fill_dv,False,"000000",8)
+                                _ec(ws_out,ri_t,11,di_inp,_fill_di,False,"000000",8)
+                                _ec(ws_out,ri_t,12,float(idx_app_t),_F_VERM_S if div_idx_t else _F_BRANCO,False,"000000",8)
                                 _ec(ws_out,ri_t,13,f"{pA_t:.1%}",_F_VERM if div_A_t else _cor_pct(pA_t),False,"000000",8)
                                 _ec(ws_out,ri_t,14,f"{pB_t:.1%}",_F_VERM if div_B_t else _cor_pct(pB_t),False,"000000",8)
                                 _ec(ws_out,ri_t,15,f"{pC_t:.1%}",_cor_pct(pC_t),False,"000000",8)
