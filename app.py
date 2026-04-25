@@ -2271,8 +2271,32 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                 dv_i=dist[(dist.centro==cen_t)&(dist.peca==peca_t)]["div_volume"].values
                                 di_i=dist[(dist.centro==cen_t)&(dist.peca==peca_t)]["disponib"].values
                                 vi_val=float(vi_i[0]) if len(vi_i) else 1.0
-                                idx_app_t=(float(tc_xl_t or 0)*dc_i[0]*dv_i[0]*vi_val)/di_i[0] if len(dc_i) and len(di_i) and di_i[0] else float(idx_xl_t or 0)
-                                div_idx_t=abs(float(idx_xl_t or 0)-float(idx_app_t or 0))>0.5
+                                # Valores do INPUT (fonte da verdade)
+                                dc_inp = float(dc_i[0]) if len(dc_i) else float(dc_xl_t or 0)
+                                vi_inp = vi_val
+                                dv_inp = float(dv_i[0]) if len(dv_i) else float(dv_xl_t or 0)
+                                di_inp = float(di_i[0]) if len(di_i) else float(di_xl_t or 1)
+                                tc_inp = float(tc_xl_t or 0)  # t_ciclo vem do Excel de referência (mesmo valor)
+                                idx_app_t = (tc_inp * dc_inp * dv_inp * vi_inp) / di_inp if di_inp else 0.0
+                                div_idx_t = abs(float(idx_xl_t or 0) - float(idx_app_t or 0)) > 0.5
+
+                                # Divergências entre Excel mensal e INPUT (vermelho = mês difere do INPUT)
+                                def _dif_pct(xl_val, inp_val, tol=0.001):
+                                    """Retorna True se o valor do Excel mensal difere do INPUT."""
+                                    if xl_val is None: return False
+                                    try: return abs(float(xl_val) - float(inp_val)) > tol
+                                    except: return False
+
+                                div_dc_t  = _dif_pct(dc_xl_t, dc_inp)
+                                div_vi_t  = _dif_pct(vi_xl_t, vi_inp)
+                                div_dv_t  = _dif_pct(dv_xl_t, dv_inp)
+                                div_di_t  = _dif_pct(di_xl_t, di_inp)
+
+                                # Fills: vermelho forte se difere do INPUT, cor original se igual
+                                _fill_dc = _F_VERM if div_dc_t else _PF("solid",fgColor="FF0000")
+                                _fill_vi = _F_VERM if div_vi_t else _F_BRANCO
+                                _fill_dv = _F_VERM if div_dv_t else _PF("solid",fgColor="FF0000")
+                                _fill_di = _F_VERM if div_di_t else _F_CINZA2
 
                                 _ec(ws_out,ri_t,1,cen_t,_F_BRANCO,False,"000000",8,False)
                                 _ec(ws_out,ri_t,2,peca_t,_F_BRANCO,False,"000000",8,False)
@@ -2281,10 +2305,12 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                 _ec(ws_out,ri_t,5,base_row_t[4],_F_BRANCO,False,"000000",8)
                                 _ec(ws_out,ri_t,6,tc_xl_t,_F_PRETO,False,"FFFFFF",8)
                                 _ec(ws_out,ri_t,7,tl_xl_t,_F_PRETO,False,"FFFFFF",8)
-                                _ec(ws_out,ri_t,8,dc_xl_t,_PF("solid",fgColor="FF0000"),False,"FFFF00",8)
-                                _ec(ws_out,ri_t,9,vi_xl_t,_F_BRANCO,False,"000000",8)
-                                _ec(ws_out,ri_t,10,dv_xl_t,_PF("solid",fgColor="FF0000"),False,"FFFF00",8)
-                                _ec(ws_out,ri_t,11,di_xl_t,_F_CINZA2,False,"000000",8)
+                                # Colunas 8-11: SEMPRE valor do INPUT (fonte da verdade)
+                                # Fundo VERMELHO = o arquivo mensal tinha valor diferente do INPUT
+                                _ec(ws_out,ri_t,8,dc_inp,_fill_dc,False,"FFFF00" if not div_dc_t else "FFFFFF",8)
+                                _ec(ws_out,ri_t,9,vi_inp,_fill_vi,False,"000000",8)
+                                _ec(ws_out,ri_t,10,dv_inp,_fill_dv,False,"FFFF00" if not div_dv_t else "FFFFFF",8)
+                                _ec(ws_out,ri_t,11,di_inp,_fill_di,False,"000000",8)
                                 _ec(ws_out,ri_t,12,round(float(idx_app_t),4),_F_VERM_S if div_idx_t else _F_BRANCO,False,"000000",8)
                                 _ec(ws_out,ri_t,13,f"{pA_t:.1%}",_F_VERM if div_A_t else _cor_pct(pA_t),False,"000000",8)
                                 _ec(ws_out,ri_t,14,f"{pB_t:.1%}",_F_VERM if div_B_t else _cor_pct(pB_t),False,"000000",8)
@@ -2308,7 +2334,7 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
 
                             nota_rt=7+len(base_rows_t)+1
                             ws_out.merge_cells(f"A{nota_rt}:{get_column_letter(18+len(modelos_xl_t))}{nota_rt}")
-                            nt=ws_out.cell(nota_rt,1,"🔴 JA.A/JA.B vermelho = % ocupação difere do Excel de referência  |  🔴 Rosa = total de ciclos ou total de peças difere  |  Cinza = valor presente no App")
+                            nt=ws_out.cell(nota_rt,1,"🔴 VERMELHO (células): valor no arquivo mensal difere do INPUT — cálculo usa sempre o INPUT  |  🔴 JA.A/JA.B vermelho = % ocupação difere do Excel  |  🔴 Rosa = total de ciclos ou peças difere  |  Cinza = presente no App")
                             nt.font=_Ft(name="Arial",bold=True,size=8,color="CC0000")
                             nt.fill=_PF("solid",fgColor="FFEEEE")
                             nt.alignment=_Al(horizontal="left",vertical="center")
