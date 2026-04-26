@@ -1494,14 +1494,14 @@ with st.sidebar:
     thresholds={"A":thr_A,"B":thr_B,"C":thr_C}
     st.markdown("---")
     st.markdown("**Funções de suporte**")
-    st.caption("ℹ️ Se um turno não tiver operadores ativos, o suporte é zerado automaticamente nesse turno — independente do valor configurado.")
+    st.info("ℹ️ Turnos sem operadores ativos têm suporte zerado automaticamente.", icon=None)
     # Mostra operadores por turno do último cálculo como referência
     try:
         _rb = st.session_state.get("last_res_base")
         if _rb:
             _mes_ref = list(_rb.keys())[0]
             _op_ref = _rb[_mes_ref]
-            st.caption(f"📊 Referência ({_mes_ref}): Operadores A={_op_ref['op_A']} · B={_op_ref['op_B']} · C={_op_ref['op_C']}")
+            st.caption(f"📊 Ref. ({_mes_ref}): A={_op_ref['op_A']} op · B={_op_ref['op_B']} op · C={_op_ref['op_C']} op")
     except: pass
     suporte_cfg={}
     for key,label,defs in [("lavadora","Lavadora e Inspeção",{"A":1,"B":1,"C":0}),("gravacao","Gravação e Estanqueidade",{"A":1,"B":1,"C":0}),("preset","Preset",{"A":2,"B":1,"C":1}),("coringa","Coringa",{"A":1,"B":0,"C":0}),("facilitador","Facilitador",{"A":1,"B":1,"C":0})]:
