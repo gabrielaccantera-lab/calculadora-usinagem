@@ -1474,7 +1474,7 @@ with st.expander("👋 Primeira vez aqui? Veja como usar em 3 passos", expanded=
     with col2:
         st.markdown('<div class="mem-step"><span class="step-num">2</span> <b>Confira os resultados</b><br><br>📊 <b>Resultado por Mês</b> — headcount por turno (A/B/C)<br>🔬 <b>Como foi Calculado</b> — passo a passo do cálculo, inclusive visão <b>anual</b><br>🔄 <b>Comparar com Excel</b> — valida se o app bate com seu Excel atual<br>📥 <b>Exportar</b> — baixa o resultado formatado</div>', unsafe_allow_html=True)
     with col3:
-        st.markdown('<div class="mem-step"><span class="step-num">3</span> <b>Crie cenários</b><br><br>🎯 Na aba <b>Cenários</b>: simule alterações de turno por centro<br>• Por mês: ajuste um período específico<br>• <b>ANO inteiro</b>: override em todos os meses de uma vez<br>• Compare múltiplos cenários no mesmo gráfico<br>• Baixe o cenário comparado com a base</div>', unsafe_allow_html=True)
+        st.markdown('<div class="mem-step"><span class="step-num">3</span> <b>Crie cenários</b><br><br>🎯 Na aba <b>Cenários</b>: simule alterações de turno por centro<br>• Por mês: ajuste um período específico<br>• <b>ANO FY26</b>: simula o período anual consolidado (AnoFY26) com overrides aplicados em todos os meses<br>• Compare múltiplos cenários no mesmo gráfico<br>• Baixe o cenário comparado com a base</div>', unsafe_allow_html=True)
 
 uploaded=st.file_uploader("Upload do arquivo de inputs (.xlsm ou .xlsx)",type=["xlsm","xlsx"])
 if not uploaded:
@@ -1615,7 +1615,7 @@ with tab_inp:
 # ── TAB 3 MEMÓRIA
 with tab_mem:
     st.markdown('<div class="jd-section">Como foi calculado</div>', unsafe_allow_html=True)
-    st.markdown('<div class="aviso-ok">💡 Selecione <b>📅 ANO</b> para ver a memória consolidada de todos os meses, ou escolha um mês específico para detalhar aquele período.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="aviso-ok">💡 Selecione <b>📅 ANO FY26</b> para ver a memória consolidada do período anual, ou escolha um mês específico para detalhar aquele período.</div>', unsafe_allow_html=True)
     _opcoes_mem = ["📅 ANO (visão consolidada)"] + [m for m in MESES if res_base.get(m)]
     mes_mem = st.selectbox("Período de análise", _opcoes_mem, key="mes_mem")
     if mes_mem == "📅 ANO (visão consolidada)":
@@ -1828,7 +1828,7 @@ with tab_cen:
         novo_nome = ca.text_input("Nome do cenário", placeholder="Ex: Redução B nov + Aumento A mar",
                                    key="cen_novo_nome")
 
-        escopo_opcoes = ["📅 ANO (todos os meses iguais)", "🗓️ Meses específicos (overrides por mês)"]
+        escopo_opcoes = ["📅 ANO FY26 (período anual consolidado)", "🗓️ Meses específicos (overrides por mês)"]
         escopo = cb.radio("Escopo", escopo_opcoes, key="cen_escopo", label_visibility="collapsed")
         eh_ano_novo = (escopo == escopo_opcoes[0])
 
@@ -1848,7 +1848,7 @@ with tab_cen:
             st.warning("Selecione ao menos um mês para configurar.")
         else:
             if eh_ano_novo:
-                st.markdown(f'<div class="aviso-warn">📅 <b>Modo ANO</b> — os mesmos overrides serão aplicados nos {len(meses_sel)} meses. Ocupação exibida = média anual.</div>', unsafe_allow_html=True)
+                st.markdown('<div class="aviso-warn">📅 <b>Modo ANO FY26</b> — simula o período anual consolidado (AnoFY26). A ocupação exibida é a média ponderada de todos os meses com dados. Os overrides são aplicados igualmente em cada mês para calcular o consolidado.</div>', unsafe_allow_html=True)
             else:
                 n = len(meses_sel)
                 meses_str = ", ".join(m[:3].upper() for m in meses_sel)
@@ -1900,7 +1900,7 @@ with tab_cen:
                         "eh_ano": eh_ano_novo,
                     }
                     n_meses = len(meses_sel) if not eh_ano_novo else len(_meses_disponiveis)
-                    st.success(f"✅ '{novo_nome}' salvo — {'ANO inteiro' if eh_ano_novo else str(n_meses) + ' mês(es)'} configurado(s)!")
+                    st.success(f"✅ '{novo_nome}' salvo — {'ANO FY26 (consolidado)' if eh_ano_novo else str(n_meses) + ' mês(es)'} configurado(s)!")
                     st.rerun()
 
     if st.session_state.cenarios:
@@ -1912,7 +1912,7 @@ with tab_cen:
         st.markdown('<div class="jd-sub">📋 Cenários salvos</div>',unsafe_allow_html=True)
         for nm,v in st.session_state.cenarios.items():
             _meses_conf=v.get("meses_configurados",([v.get("mes","")] if not v.get("eh_ano") else [m for m in MESES if res_base.get(m)]))
-            _tag="ANO inteiro" if v.get("eh_ano") else (", ".join(m[:3].upper() for m in _meses_conf))
+            _tag="ANO FY26" if v.get("eh_ano") else (", ".join(m[:3].upper() for m in _meses_conf))
             st.markdown(f'<div class="aviso-ok" style="margin:2px 0;padding:6px 12px;">📌 <b>{nm}</b> &nbsp;—&nbsp; meses com override: <b>{_tag}</b></div>', unsafe_allow_html=True)
 
         st.markdown('<div class="jd-sub">📊 Comparação detalhada</div>',unsafe_allow_html=True)
@@ -1925,7 +1925,7 @@ with tab_cen:
             else:
                 _meses_modificados.update(v.get("meses_configurados", [v.get("mes","")]))
         _meses_relevantes = [m for m in MESES if m in _meses_modificados and res_base.get(m)]
-        _opcoes_cmp = _meses_relevantes + (["📅 ANO (todos os meses)"] if len(_meses_relevantes) > 1 else [])
+        _opcoes_cmp = _meses_relevantes + (["📅 ANO FY26 (consolidado)"] if len(_meses_relevantes) > 1 else [])
 
         if not _opcoes_cmp:
             st.info("Nenhum mês modificado identificado nos cenários.")
@@ -1937,7 +1937,7 @@ with tab_cen:
 
             mes_cmp = st.selectbox("Mês para comparar", _opcoes_cmp, key="mes_cmp_r",
                                    help="Apenas meses com overrides em algum cenário aparecem aqui.")
-            eh_ano_cmp = mes_cmp == "📅 ANO (todos os meses)"
+            eh_ano_cmp = mes_cmp == "📅 ANO FY26 (consolidado)"
             meses_cmp_lista = [m for m in MESES if res_base.get(m)] if eh_ano_cmp else ([mes_cmp] if res_base.get(mes_cmp) else [])
 
         if _opcoes_cmp and meses_cmp_lista:
@@ -2086,7 +2086,7 @@ with tab_cen:
                 # Usa o primeiro mês com dados para a comparação base vs cenário
                 _m_exp = next((m for m in _meses_exp if res_base.get(m)), None)
                 if _m_exp:
-                    _label_meses = "ANO" if v.get("eh_ano") else ", ".join(m[:3].upper() for m in _meses_exp)
+                    _label_meses = "ANO_FY26" if v.get("eh_ano") else ", ".join(m[:3].upper() for m in _meses_exp)
                     label_dl = f"📥 {nm} ({_label_meses})"
                     fname_dl = f"cenario_{nm.replace(' ','_')}_{'ANO' if v.get('eh_ano') else '_'.join(m[:3] for m in _meses_exp)}.xlsx"
                     _cen_vs_hash = hash(nm + str(v["resultados"]) + str(_meses_exp))
