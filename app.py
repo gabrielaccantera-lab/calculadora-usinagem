@@ -379,13 +379,15 @@ def calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg
         op_A = int(df_c.ativo_A.sum()); op_B = int(df_c.ativo_B.sum()); op_C = int(df_c.ativo_C.sum())
         def get_sup(key, t, op_count):
             cfg = suporte_cfg[key]
+            # Se não há operadores no turno, não precisa de suporte nesse turno
             if op_count == 0: return 0
             if cfg["modo"] == "auto":
                 defaults = {"lavadora":{"A":1,"B":1,"C":0},"gravacao":{"A":1,"B":1,"C":0},
                             "preset":{"A":2,"B":1,"C":1},"coringa":{"A":1,"B":0,"C":0},
                             "facilitador":{"A":1,"B":1,"C":0}}
                 return defaults[key][t]
-            return cfg[t]
+            # Modo manual: respeita o valor definido, mas zera se não há operadores
+            return cfg[t] if op_count > 0 else 0
         lav={t:get_sup("lavadora",t,[op_A,op_B,op_C]["ABC".index(t)]) for t in "ABC"}
         gra={t:get_sup("gravacao",t,[op_A,op_B,op_C]["ABC".index(t)]) for t in "ABC"}
         pre={t:get_sup("preset",t,[op_A,op_B,op_C]["ABC".index(t)]) for t in "ABC"}
@@ -1492,14 +1494,24 @@ with st.sidebar:
     thresholds={"A":thr_A,"B":thr_B,"C":thr_C}
     st.markdown("---")
     st.markdown("**Funções de suporte**")
+    st.caption("ℹ️ Se um turno não tiver operadores ativos, o suporte é zerado automaticamente nesse turno — independente do valor configurado.")
+    # Mostra operadores por turno do último cálculo como referência
+    try:
+        _rb = st.session_state.get("last_res_base")
+        if _rb:
+            _mes_ref = list(_rb.keys())[0]
+            _op_ref = _rb[_mes_ref]
+            st.caption(f"📊 Referência ({_mes_ref}): Operadores A={_op_ref['op_A']} · B={_op_ref['op_B']} · C={_op_ref['op_C']}")
+    except: pass
     suporte_cfg={}
     for key,label,defs in [("lavadora","Lavadora e Inspeção",{"A":1,"B":1,"C":0}),("gravacao","Gravação e Estanqueidade",{"A":1,"B":1,"C":0}),("preset","Preset",{"A":2,"B":1,"C":1}),("coringa","Coringa",{"A":1,"B":0,"C":0}),("facilitador","Facilitador",{"A":1,"B":1,"C":0})]:
         with st.expander(f"🔧 {label}"):
             modo=st.radio("Modo",["Automático","Manual"],key=f"m_{key}",horizontal=True,label_visibility="collapsed")
             if modo=="Automático":
-                st.caption(f"Padrão: A={defs['A']} · B={defs['B']} · C={defs['C']}")
+                st.caption(f"Padrão: A={defs['A']} · B={defs['B']} · C={defs['C']} · Zerado automaticamente em turnos sem operadores")
                 suporte_cfg[key]={"modo":"auto",**defs}
             else:
+                st.caption("Os valores abaixo são zerados automaticamente se o turno não tiver operadores.")
                 c1,c2,c3=st.columns(3)
                 vA=c1.number_input("A",0,10,defs["A"],key=f"s_{key}_A"); vB=c2.number_input("B",0,10,defs["B"],key=f"s_{key}_B"); vC=c3.number_input("C",0,10,defs["C"],key=f"s_{key}_C")
                 suporte_cfg[key]={"modo":"manual","A":vA,"B":vB,"C":vC}
@@ -1512,6 +1524,7 @@ def calcular_cached(pmp_hash,_pmp,_tempo,_dist,_aplic,aplic_hash,dias_hash,dias,
 
 pmp_hash=hash(pmp.to_json()); dias_hash=hash(str(dias)); aplic_hash=hash(aplic.to_json())
 res_base,df_interm,agg_interm=calcular_cached(pmp_hash,pmp,tempo,dist,aplic,aplic_hash,dias_hash,dias,horas_turno["A"],horas_turno["B"],horas_turno["C"],horas_efetivas["A"],horas_efetivas["B"],horas_efetivas["C"],thresholds["A"],thresholds["B"],thresholds["C"],suporte_cfg)
+st.session_state["last_res_base"]=res_base
 
 # ── TAB 1 VISÃO GERAL
 with tab_vis:
