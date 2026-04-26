@@ -590,7 +590,7 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
     _F_VERDE=_PF("solid",fgColor="92D050"); _F_AMAR=_PF("solid",fgColor="FFDE00")
     _F_AZUL=_PF("solid",fgColor="00B0F0"); _F_PRETO=_PF("solid",fgColor="000000")
     _F_CINZA=_PF("solid",fgColor="D9D9D9"); _F_CINZA2=_PF("solid",fgColor="BFBFBF")
-    _F_BRANCO=_PF("solid",fgColor="FFFFFF"); _F_VERDE_JD=_PF("solid",fgColor="1F4D19")
+    _F_BRANCO=_PF("solid",fgColor="FFFFFF"); _F_VERDE_JD=_PF("solid",fgColor="1F4D19"); _F_VERM=_PF("solid",fgColor="FF0000"); _F_VERM_S=_PF("solid",fgColor="FF9999")
     _F_AMAR_JD=_PF("solid",fgColor="FFDE00")
     _BRD=_Bd(left=_Sd(style="thin",color="AAAAAA"),right=_Sd(style="thin",color="AAAAAA"),
              top=_Sd(style="thin",color="AAAAAA"),bottom=_Sd(style="thin",color="AAAAAA"))
@@ -767,7 +767,10 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
     return buf_out
 
 def build_cp_data_anual(resultados, tempo, dist, aplic, pmp):
-    meses_c = [m for m in MESES if resultados.get(m)]
+    # Inclui meses com resultados OU meses com qtd>0 no PMP (ex: Janeiro com dias=0 mas produção)
+    meses_com_resultado = [m for m in MESES if resultados.get(m)]
+    meses_com_pmp = [m for m in MESES if not pmp[pmp.mes==m].empty and pmp[pmp.mes==m]["qtd"].sum()>0]
+    meses_c = list(dict.fromkeys([m for m in MESES if m in meses_com_resultado or m in meses_com_pmp]))
     if not meses_c: return None
     try:
         df = (aplic.merge(pmp, on="modelo").merge(tempo, on=["centro","peca"]).merge(dist, on=["centro","peca"]))
