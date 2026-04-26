@@ -975,6 +975,59 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None):
     for _ci,_ww in [(_CF,14),(_CF+1,8),(_CF+2,8),(_CF+3,8),(_CF+4,8),(_CF+5,8),(_CF+6,8),(_CF+7,10),(_CF+8,10),(_CF+9,10)]:
         ws.column_dimensions[get_column_letter(_ci)].width=_ww
 
+    # ── NOTA EXPLICATIVA ─────────────────────────────────────────────────────
+    _nota_row = _ri + 2
+    F_NOTA = PatternFill("solid", fgColor="FFF2CC")   # amarelo suave
+    F_NOTA_H = PatternFill("solid", fgColor="FFD966")  # amarelo cabeçalho
+    _brd_n = Border(left=Side(style="thin",color="C9A700"),right=Side(style="thin",color="C9A700"),
+                    top=Side(style="thin",color="C9A700"),bottom=Side(style="thin",color="C9A700"))
+    def _nota_cell(r, c, val, bold=False, size=8, fill=None, merge_end=None):
+        cell = ws.cell(row=r, column=c, value=val)
+        cell.font = Font(name="Arial", bold=bold, size=size, color="7D4E00")
+        cell.fill = fill or F_NOTA
+        cell.border = _brd_n
+        cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+        if merge_end:
+            ws.merge_cells(start_row=r, start_column=c, end_row=r, end_column=merge_end)
+        return cell
+
+    ws.merge_cells(start_row=_nota_row, start_column=1, end_row=_nota_row, end_column=18)
+    _nh = ws.cell(row=_nota_row, column=1, value="⚠️  NOTA SOBRE O TOTAL LABOR E TOTAL CICLOS — ANO")
+    _nh.font = Font(name="Arial", bold=True, size=9, color="7D4E00")
+    _nh.fill = F_NOTA_H
+    _nh.border = _brd_n
+    _nh.alignment = Alignment(horizontal="left", vertical="center", wrap_text=False)
+    ws.row_dimensions[_nota_row].height = 16
+
+    _linhas_nota = [
+        ("Por que alguns valores do TOTAL LABOR (MIN) ou TOTAL CICLOS (MIN) podem diferir do Excel de referência (AnoFY26)?", True),
+        ("O App calcula os totais anuais a partir do INPUT_PMP × IMPUTAPLICAÇÃO × IMPUTTEMPO × IMPUTDISTRIBUIÇÃO.",           False),
+        ("O Excel de referência calcula via fórmulas próprias em cada aba mensal, que podem incorporar ajustes manuais,",    False),
+        ("   células editadas diretamente ou lógicas de arredondamento diferentes das fórmulas do App.",                     False),
+        ("",                                                                                                                  False),
+        ("Exemplo identificado: PEÇA 7 (CEN015) — modelos MODELO 30, MODELO 37 e MODELO 65.",                               True),
+        ("   • App (INPUT_PMP): MODELO 30=42, MODELO 37=35, MODELO 65=8 → Total Abril = 85 peças",                          False),
+        ("   • Excel de referência (AbrFY26): MODELO 65=10 e existe uma segunda ocorrência de MODELO 30=1 → Total = 87 peças", False),
+        ("   • Diferença: 2 peças a mais no Excel → TOTAL LABOR Excel > App em alguns meses.",                               False),
+        ("",                                                                                                                  False),
+        ("Exemplo identificado: PEÇA 23 (CEN009) — 7 modelos mapeados (MODELO 43 a 48, MODELO 67).",                        True),
+        ("   • As quantidades mensais no Excel de referência diferem do INPUT_PMP para vários meses.",                       False),
+        ("   • Isso indica edição manual ou fórmulas com referências externas nas abas mensais do Excel.",                   False),
+        ("",                                                                                                                  False),
+        ("✅  Os valores calculados pelo App são fiéis ao INPUT_PMP e às regras definidas nos inputs.",                       True),
+        ("   Se desejar que o anual bata com o Excel de referência, alinhe o INPUT_PMP com as quantidades reais de cada aba mensal.", False),
+    ]
+
+    for i, (txt, bold) in enumerate(_linhas_nota):
+        r = _nota_row + 1 + i
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=18)
+        cell = ws.cell(row=r, column=1, value=txt)
+        cell.font = Font(name="Arial", bold=bold, size=8, color="7D4E00")
+        cell.fill = F_NOTA
+        cell.border = _brd_n
+        cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+        ws.row_dimensions[r].height = 14 if txt else 6
+
 @st.cache_data(show_spinner=False)
 def exportar_cenario_vs_base_cached(hash_key, _res_base, _res_cenario, meses_lista, nome_cenario):
     return exportar_cenario_vs_base(_res_base, _res_cenario, meses_lista, nome_cenario)
