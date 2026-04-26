@@ -640,10 +640,10 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
             _ec(ws_out,1,ci_h,txt_h,f_h,True,"000000",8,True)
         ws_out.row_dimensions[1].height=14
         ws_out.merge_cells("A2:O2"); _ec(ws_out,2,1,"TOTAL DE MINUTOS",_F_CINZA_H,True,"000000",8,False)
-        _ec(ws_out,2,16,round(minA_t,1),_F_VERDE,True,"000000",8); _ec(ws_out,2,17,round(minB_t,1),_F_AMAR,True,"000000",8); _ec(ws_out,2,18,round(minC_t,1),_F_AZUL,True,"000000",8)
+        _ec(ws_out,2,16,minA_t,_F_VERDE,True,"000000",8); _ec(ws_out,2,17,minB_t,_F_AMAR,True,"000000",8); _ec(ws_out,2,18,minC_t,_F_AZUL,True,"000000",8)
         ws_out.row_dimensions[2].height=13
         ws_out.merge_cells("A3:O3"); _ec(ws_out,3,1,"TOTAL DE HORAS",_F_CINZA_H,True,"000000",8,False)
-        _ec(ws_out,3,16,round(minA_t/60,2),_F_VERDE,True,"000000",8); _ec(ws_out,3,17,round(minB_t/60,2),_F_AMAR,True,"000000",8); _ec(ws_out,3,18,round(minC_t/60,2),_F_AZUL,True,"000000",8)
+        _ec(ws_out,3,16,minA_t/60,_F_VERDE,True,"000000",8); _ec(ws_out,3,17,minB_t/60,_F_AMAR,True,"000000",8); _ec(ws_out,3,18,minC_t/60,_F_AZUL,True,"000000",8)
         ws_out.row_dimensions[3].height=13
         ws_out.merge_cells("A4:O4"); _ec(ws_out,4,1,"Nº DIAS TRABALHADOS",_F_CINZA_H,True,"000000",8,False)
         _ec(ws_out,4,16,d_t,_F_VERDE,True,"FF0000",9); _ec(ws_out,4,17,d_t,_F_AMAR,True,"FF0000",9); _ec(ws_out,4,18,d_t,_F_AZUL,True,"FF0000",9)
@@ -690,7 +690,7 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
             _ec(ws_out,ri_t,10,dv,_fill_dv_p,False,"000000",8); _ec(ws_out,ri_t,11,di,_F_BRANCO,False,"000000",8)
             _ec(ws_out,ri_t,12,idx_c,_F_BRANCO,False,"000000",8)
             _ec(ws_out,ri_t,13,f"{pA_t:.1%}",_cor_pct(pA_t),False,"000000",8); _ec(ws_out,ri_t,14,f"{pB_t:.1%}",_cor_pct(pB_t),False,"000000",8); _ec(ws_out,ri_t,15,f"{pC_t:.1%}",_cor_pct(pC_t),False,"000000",8)
-            _ec(ws_out,ri_t,16,round(mc_t,1),_F_BRANCO,False,"000000",8); _ec(ws_out,ri_t,17,round(ml_t,1),_F_BRANCO,False,"000000",8); _ec(ws_out,ri_t,18,tot_pecas,_F_BRANCO,False,"000000",8)
+            _ec(ws_out,ri_t,16,mc_t,_F_BRANCO,False,"000000",8); _ec(ws_out,ri_t,17,ml_t,_F_BRANCO,False,"000000",8); _ec(ws_out,ri_t,18,tot_pecas,_F_BRANCO,False,"000000",8)
             for mi_t2,mod_t2 in enumerate(modelos_lista):
                 ci_t2=19+mi_t2; v_app_t=app_mod_v.get(mod_t2,0)
                 _ec(ws_out,ri_t,ci_t2,v_app_t if v_app_t else None,_F_CINZA if v_app_t else _F_BRANCO,False,"000000",7)
@@ -723,9 +723,9 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
                 _ec(ws_out,_ri_c,_COL_F,_crow.centro,_F_BRANCO,False,"000000",8,False)
                 _ec(ws_out,_ri_c,_COL_F+1,f"{_crow.ocup_A:.1%}",_cbg_t(_crow.ocup_A),False,"000000",8); _ec(ws_out,_ri_c,_COL_F+2,f"{_crow.ocup_B:.1%}",_cbg_t(_crow.ocup_B),False,"000000",8); _ec(ws_out,_ri_c,_COL_F+3,f"{_crow.ocup_C:.1%}",_cbg_t(_crow.ocup_C),False,"000000",8)
                 _ec(ws_out,_ri_c,_COL_F+4,int(_crow.ativo_A),_F_VERDE if _crow.ativo_A else _F_AMAR,True,"000000",8); _ec(ws_out,_ri_c,_COL_F+5,int(_crow.ativo_B),_F_VERDE if _crow.ativo_B else _F_AMAR,True,"000000",8); _ec(ws_out,_ri_c,_COL_F+6,int(_crow.ativo_C),_F_AZUL if _crow.ativo_C else _F_CINZA,True,"000000",8)
-                _ec(ws_out,_ri_c,_COL_F+7,round(_crow.horas_disp_A,2) if _crow.ativo_A else 0,_F_VERDE if _crow.ativo_A else _F_BRANCO,True,"000000",8)
-                _ec(ws_out,_ri_c,_COL_F+8,round(_crow.horas_disp_B,2) if _crow.ativo_B else 0,_F_AMAR if _crow.ativo_B else _F_BRANCO,True,"000000",8)
-                _ec(ws_out,_ri_c,_COL_F+9,round(_crow.horas_disp_C,2) if _crow.ativo_C else 0,_F_AZUL if _crow.ativo_C else _F_BRANCO,True,"000000",8)
+                _ec(ws_out,_ri_c,_COL_F+7,_crow.horas_disp_A if _crow.ativo_A else 0,_F_VERDE if _crow.ativo_A else _F_BRANCO,True,"000000",8)
+                _ec(ws_out,_ri_c,_COL_F+8,_crow.horas_disp_B if _crow.ativo_B else 0,_F_AMAR if _crow.ativo_B else _F_BRANCO,True,"000000",8)
+                _ec(ws_out,_ri_c,_COL_F+9,_crow.horas_disp_C if _crow.ativo_C else 0,_F_AZUL if _crow.ativo_C else _F_BRANCO,True,"000000",8)
                 ws_out.row_dimensions[_ri_c].height=13; _ri_c+=1
             _sup_a=r_auto["suporte"]
             for _snm,_skey in [("TOTAL DE OPERADORES",None),("LAVADORA E INSPEÇÃO","lavadora"),("GRAVAÇÃO E ESTANQUEIDADE","gravacao"),("PRESET","preset"),("CORINGA","coringa"),("FACILITADOR","facilitador"),("TOTAL POR TURNO",None),("TOTAL FUNCIONÁRIOS",None)]:
@@ -735,17 +735,17 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
                     _sv=_sup_a[_skey]
                     for _ci_sv,_tk in [(_COL_F+4,"A"),(_COL_F+5,"B"),(_COL_F+6,"C")]: _ec(ws_out,_ri_c,_ci_sv,_sv[_tk],_F_VERDE if _tk=="A" else (_F_AMAR if _tk=="B" else _F_AZUL),True,"000000",8)
                     for _ci_hv,_tk,_hef in [(_COL_F+7,"A",heA_t),(_COL_F+8,"B",heB_t),(_COL_F+9,"C",heC_t)]:
-                        _hv=_sv[_tk]*_hef*d_t; _ec(ws_out,_ri_c,_ci_hv,round(_hv,2) if _hv else 0,_F_VERDE if _tk=="A" else (_F_AMAR if _tk=="B" else _F_AZUL),True,"000000",8)
+                        _hv=_sv[_tk]*_hef*d_t; _ec(ws_out,_ri_c,_ci_hv,_hv if _hv else 0,_F_VERDE if _tk=="A" else (_F_AMAR if _tk=="B" else _F_AZUL),True,"000000",8)
                 elif "TOTAL DE OPERADORES" in _snm:
                     for _ci_sv,_vv in [(_COL_F+4,r_auto["op_A"]),(_COL_F+5,r_auto["op_B"]),(_COL_F+6,r_auto["op_C"])]: _ec(ws_out,_ri_c,_ci_sv,_vv,_F_AMAR_JD,True,"1F4D19",8)
-                    for _ci_hv,_vv,_hef in [(_COL_F+7,r_auto["op_A"],heA_t),(_COL_F+8,r_auto["op_B"],heB_t),(_COL_F+9,r_auto["op_C"],heC_t)]: _ec(ws_out,_ri_c,_ci_hv,round(_vv*_hef*d_t,2),_F_AMAR_JD,True,"1F4D19",8)
+                    for _ci_hv,_vv,_hef in [(_COL_F+7,r_auto["op_A"],heA_t),(_COL_F+8,r_auto["op_B"],heB_t),(_COL_F+9,r_auto["op_C"],heC_t)]: _ec(ws_out,_ri_c,_ci_hv,_vv*_hef*d_t,_F_AMAR_JD,True,"1F4D19",8)
                 elif "TOTAL POR TURNO" in _snm:
                     for _ci_sv,_vv in [(_COL_F+4,r_auto["tot_A"]),(_COL_F+5,r_auto["tot_B"]),(_COL_F+6,r_auto["tot_C"])]: _ec(ws_out,_ri_c,_ci_sv,_vv,_F_AMAR_JD,True,"1F4D19",8)
-                    for _ci_hv,_vv,_hef in [(_COL_F+7,r_auto["tot_A"],heA_t),(_COL_F+8,r_auto["tot_B"],heB_t),(_COL_F+9,r_auto["tot_C"],heC_t)]: _ec(ws_out,_ri_c,_ci_hv,round(_vv*_hef*d_t,2),_F_AMAR_JD,True,"1F4D19",8)
+                    for _ci_hv,_vv,_hef in [(_COL_F+7,r_auto["tot_A"],heA_t),(_COL_F+8,r_auto["tot_B"],heB_t),(_COL_F+9,r_auto["tot_C"],heC_t)]: _ec(ws_out,_ri_c,_ci_hv,_vv*_hef*d_t,_F_AMAR_JD,True,"1F4D19",8)
                 elif "FUNCIONÁRIOS" in _snm:
                     _ec(ws_out,_ri_c,_COL_F+4,r_auto["total"],_F_AMAR_JD,True,"1F4D19",9)
                     _th=r_auto["tot_A"]*heA_t*d_t+r_auto["tot_B"]*heB_t*d_t+r_auto["tot_C"]*heC_t*d_t
-                    _ec(ws_out,_ri_c,_COL_F+7,round(_th,2),_F_AMAR_JD,True,"1F4D19",9)
+                    _ec(ws_out,_ri_c,_COL_F+7,_th,_F_AMAR_JD,True,"1F4D19",9)
                 ws_out.row_dimensions[_ri_c].height=13; _ri_c+=1
             _ri_c+=1
             for _pnm,_pv,_dest in [("PROD. CICLO OPERACIONAL",r_auto["prod_ciclo_op"],False),("PROD. CICLO TOTAL",r_auto["prod_ciclo_tot"],False),("PROD. LABOR OPERACIONAL",r_auto["prod_labor_op"],False),("PROD. LABOR TOTAL ★",r_auto["prod_labor_tot"],True)]:
@@ -1018,7 +1018,7 @@ def exportar(resultados, _tempo=None, _dist=None, _aplic=None, _pmp=None):
             return "E8F5E9"
         ri2=3
         for _,row in r["centros"].iterrows():
-            for ci,(val,bg,ctr) in enumerate([(row.centro,"FFFFFF",False),(f"{row.ocup_A:.1%}",cbg(row.ocup_A),True),(f"{row.ocup_B:.1%}",cbg(row.ocup_B),True),(f"{row.ocup_C:.1%}",cbg(row.ocup_C),True),(row.ativo_A,"B3E5FC" if row.ativo_A else "FFFDE7",True),(row.ativo_B,"B3E5FC" if row.ativo_B else "FFFDE7",True),(row.ativo_C,"B3E5FC" if row.ativo_C else "FFFDE7",True),(f"{row.horas_disp_A:.2f}" if row.ativo_A else "0","B3E5FC" if row.ativo_A else "F5F5F5",True),(f"{row.horas_disp_B:.2f}" if row.ativo_B else "0","B3E5FC" if row.ativo_B else "F5F5F5",True),(f"{row.horas_disp_C:.2f}" if row.ativo_C else "0","B3E5FC" if row.ativo_C else "F5F5F5",True)],1):
+            for ci,(val,bg,ctr) in enumerate([(row.centro,"FFFFFF",False),(f"{row.ocup_A:.1%}",cbg(row.ocup_A),True),(f"{row.ocup_B:.1%}",cbg(row.ocup_B),True),(f"{row.ocup_C:.1%}",cbg(row.ocup_C),True),(row.ativo_A,"B3E5FC" if row.ativo_A else "FFFDE7",True),(row.ativo_B,"B3E5FC" if row.ativo_B else "FFFDE7",True),(row.ativo_C,"B3E5FC" if row.ativo_C else "FFFDE7",True),(row.horas_disp_A if row.ativo_A else "0","B3E5FC" if row.ativo_A else "F5F5F5",True),(row.horas_disp_B if row.ativo_B else "0","B3E5FC" if row.ativo_B else "F5F5F5",True),(row.horas_disp_C if row.ativo_C else "0","B3E5FC" if row.ativo_C else "F5F5F5",True)],1):
                 ec_l(wsm.cell(ri2,ci,val),bg,center=ctr)
             ri2+=1
         sup=r["suporte"]
@@ -1029,16 +1029,16 @@ def exportar(resultados, _tempo=None, _dist=None, _aplic=None, _pmp=None):
                 s=sup[key]
                 for ci,t in [(5,"A"),(6,"B"),(7,"C")]: ec_l(wsm.cell(ri2,ci,s[t]),"B3E5FC" if s[t] else "FFFDE7",bold=bold)
                 for ci,t,h in [(8,"A",heA),(9,"B",heB),(10,"C",heC)]:
-                    v=s[t]*h*dias; ec_l(wsm.cell(ri2,ci,f"{v:.2f}" if v else "0"),"B3E5FC" if v else "F5F5F5",bold=bold)
+                    v=s[t]*h*dias; ec_l(wsm.cell(ri2,ci,v if v else 0),"B3E5FC" if v else "F5F5F5",bold=bold)
             elif "TOTAL DE OPERADORES" in nome:
                 for ci,v in [(5,r["op_A"]),(6,r["op_B"]),(7,r["op_C"])]: ec_l(wsm.cell(ri2,ci,v),JD_Y,JD_V,True)
-                for ci,v,h in [(8,r["op_A"],heA),(9,r["op_B"],heB),(10,r["op_C"],heC)]: ec_l(wsm.cell(ri2,ci,f"{v*h*dias:.2f}"),JD_Y,JD_V,True)
+                for ci,v,h in [(8,r["op_A"],heA),(9,r["op_B"],heB),(10,r["op_C"],heC)]: ec_l(wsm.cell(ri2,ci,v*h*dias),JD_Y,JD_V,True)
             elif "TOTAL POR TURNO" in nome:
                 for ci,v in [(5,r["tot_A"]),(6,r["tot_B"]),(7,r["tot_C"])]: ec_l(wsm.cell(ri2,ci,v),JD_Y,JD_V,True)
-                for ci,v,h in [(8,r["tot_A"],heA),(9,r["tot_B"],heB),(10,r["tot_C"],heC)]: ec_l(wsm.cell(ri2,ci,f"{v*h*dias:.2f}"),JD_Y,JD_V,True)
+                for ci,v,h in [(8,r["tot_A"],heA),(9,r["tot_B"],heB),(10,r["tot_C"],heC)]: ec_l(wsm.cell(ri2,ci,v*h*dias),JD_Y,JD_V,True)
             elif "FUNCIONÁRIOS" in nome:
                 ec_l(wsm.cell(ri2,4,r["total"]),JD_Y,JD_V,True)
-                ec_l(wsm.cell(ri2,8,f"{r['tot_A']*heA*dias+r['tot_B']*heB*dias+r['tot_C']*heC*dias:.2f}"),JD_Y,JD_V,True)
+                ec_l(wsm.cell(ri2,8,r['tot_A']*heA*dias+r['tot_B']*heB*dias+r['tot_C']*heC*dias),JD_Y,JD_V,True)
             ri2+=1
         ri2+=1
         for nm,v,dest in [("PROD. CICLO OPERACIONAL",r["prod_ciclo_op"],False),("PROD. CICLO TOTAL",r["prod_ciclo_tot"],False),("PROD. LABOR OPERACIONAL",r["prod_labor_op"],False),("PROD. LABOR TOTAL ★",r["prod_labor_tot"],True)]:
@@ -1084,7 +1084,7 @@ def exportar_cenario_vs_base(res_base, res_cenario, meses_lista, nome_cenario):
             return "E8F5E9"
         ri=3
         for _,row in r["centros"].iterrows():
-            for ci,(val,bg,ctr) in enumerate([(row.centro,"FFFFFF",False),(f"{row.ocup_A:.1%}",cbg(row.ocup_A),True),(f"{row.ocup_B:.1%}",cbg(row.ocup_B),True),(f"{row.ocup_C:.1%}",cbg(row.ocup_C),True),(row.ativo_A,"B3E5FC" if row.ativo_A else "FFFDE7",True),(row.ativo_B,"B3E5FC" if row.ativo_B else "FFFDE7",True),(row.ativo_C,"B3E5FC" if row.ativo_C else "FFFDE7",True),(f"{row.horas_disp_A:.2f}" if row.ativo_A else "0","B3E5FC" if row.ativo_A else "F5F5F5",True),(f"{row.horas_disp_B:.2f}" if row.ativo_B else "0","B3E5FC" if row.ativo_B else "F5F5F5",True),(f"{row.horas_disp_C:.2f}" if row.ativo_C else "0","B3E5FC" if row.ativo_C else "F5F5F5",True)],1):
+            for ci,(val,bg,ctr) in enumerate([(row.centro,"FFFFFF",False),(f"{row.ocup_A:.1%}",cbg(row.ocup_A),True),(f"{row.ocup_B:.1%}",cbg(row.ocup_B),True),(f"{row.ocup_C:.1%}",cbg(row.ocup_C),True),(row.ativo_A,"B3E5FC" if row.ativo_A else "FFFDE7",True),(row.ativo_B,"B3E5FC" if row.ativo_B else "FFFDE7",True),(row.ativo_C,"B3E5FC" if row.ativo_C else "FFFDE7",True),(row.horas_disp_A if row.ativo_A else "0","B3E5FC" if row.ativo_A else "F5F5F5",True),(row.horas_disp_B if row.ativo_B else "0","B3E5FC" if row.ativo_B else "F5F5F5",True),(row.horas_disp_C if row.ativo_C else "0","B3E5FC" if row.ativo_C else "F5F5F5",True)],1):
                 ec_c(ws.cell(ri,ci,val),bg,center=ctr)
             ri+=1
         sup=r["suporte"]
@@ -1095,16 +1095,16 @@ def exportar_cenario_vs_base(res_base, res_cenario, meses_lista, nome_cenario):
                 s=sup[key]
                 for ci,t in [(5,"A"),(6,"B"),(7,"C")]: ec_c(ws.cell(ri,ci,s[t]),"B3E5FC" if s[t] else "FFFDE7",bold=bold)
                 for ci,t,h in [(8,"A",heA),(9,"B",heB),(10,"C",heC)]:
-                    v2=s[t]*h*dias; ec_c(ws.cell(ri,ci,f"{v2:.2f}" if v2 else "0"),"B3E5FC" if v2 else "F5F5F5",bold=bold)
+                    v2=s[t]*h*dias; ec_c(ws.cell(ri,ci,v2 if v2 else 0),"B3E5FC" if v2 else "F5F5F5",bold=bold)
             elif "TOTAL DE OPERADORES" in nome:
                 for ci,v2 in [(5,r["op_A"]),(6,r["op_B"]),(7,r["op_C"])]: ec_c(ws.cell(ri,ci,v2),JD_Y,JD_V,True)
-                for ci,v2,h in [(8,r["op_A"],heA),(9,r["op_B"],heB),(10,r["op_C"],heC)]: ec_c(ws.cell(ri,ci,f"{v2*h*dias:.2f}"),JD_Y,JD_V,True)
+                for ci,v2,h in [(8,r["op_A"],heA),(9,r["op_B"],heB),(10,r["op_C"],heC)]: ec_c(ws.cell(ri,ci,v2*h*dias),JD_Y,JD_V,True)
             elif "TOTAL POR TURNO" in nome:
                 for ci,v2 in [(5,r["tot_A"]),(6,r["tot_B"]),(7,r["tot_C"])]: ec_c(ws.cell(ri,ci,v2),JD_Y,JD_V,True)
-                for ci,v2,h in [(8,r["tot_A"],heA),(9,r["tot_B"],heB),(10,r["tot_C"],heC)]: ec_c(ws.cell(ri,ci,f"{v2*h*dias:.2f}"),JD_Y,JD_V,True)
+                for ci,v2,h in [(8,r["tot_A"],heA),(9,r["tot_B"],heB),(10,r["tot_C"],heC)]: ec_c(ws.cell(ri,ci,v2*h*dias),JD_Y,JD_V,True)
             elif "FUNCIONÁRIOS" in nome:
                 ec_c(ws.cell(ri,4,r["total"]),JD_Y,JD_V,True)
-                ec_c(ws.cell(ri,8,f"{r['tot_A']*heA*dias+r['tot_B']*heB*dias+r['tot_C']*heC*dias:.2f}"),JD_Y,JD_V,True)
+                ec_c(ws.cell(ri,8,r['tot_A']*heA*dias+r['tot_B']*heB*dias+r['tot_C']*heC*dias),JD_Y,JD_V,True)
             ri+=1
         ri+=1
         for nm2,v2,dest in [("PROD. CICLO OPERACIONAL",r["prod_ciclo_op"],False),("PROD. CICLO TOTAL",r["prod_ciclo_tot"],False),("PROD. LABOR OPERACIONAL",r["prod_labor_op"],False),("PROD. LABOR TOTAL ★",r["prod_labor_tot"],True)]:
@@ -2204,15 +2204,15 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                             ws_out.row_dimensions[1].height=14
                             ws_out.merge_cells("A2:O2")
                             _ec(ws_out,2,1,"TOTAL DE MINUTOS",_F_CINZA_H,True,"000000",8,False)
-                            _ec(ws_out,2,16,round(minA_t,1),_F_VERDE,True,"000000",8)
-                            _ec(ws_out,2,17,round(minB_t,1),_F_AMAR,True,"000000",8)
-                            _ec(ws_out,2,18,round(minC_t,1),_F_AZUL,True,"000000",8)
+                            _ec(ws_out,2,16,minA_t,_F_VERDE,True,"000000",8)
+                            _ec(ws_out,2,17,minB_t,_F_AMAR,True,"000000",8)
+                            _ec(ws_out,2,18,minC_t,_F_AZUL,True,"000000",8)
                             ws_out.row_dimensions[2].height=13
                             ws_out.merge_cells("A3:O3")
                             _ec(ws_out,3,1,"TOTAL DE HORAS",_F_CINZA_H,True,"000000",8,False)
-                            _ec(ws_out,3,16,round(minA_t/60,2),_F_VERDE,True,"000000",8)
-                            _ec(ws_out,3,17,round(minB_t/60,2),_F_AMAR,True,"000000",8)
-                            _ec(ws_out,3,18,round(minC_t/60,2),_F_AZUL,True,"000000",8)
+                            _ec(ws_out,3,16,minA_t/60,_F_VERDE,True,"000000",8)
+                            _ec(ws_out,3,17,minB_t/60,_F_AMAR,True,"000000",8)
+                            _ec(ws_out,3,18,minC_t/60,_F_AZUL,True,"000000",8)
                             ws_out.row_dimensions[3].height=13
                             ws_out.merge_cells("A4:O4")
                             _ec(ws_out,4,1,"Nº DIAS TRABALHADOS",_F_CINZA_H,True,"000000",8,False)
@@ -2341,8 +2341,8 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                 _ec(ws_out,ri_t,13,f"{pA_t:.1%}",_F_VERM if div_A_t else _cor_pct(pA_t),False,"000000",8)
                                 _ec(ws_out,ri_t,14,f"{pB_t:.1%}",_F_VERM if div_B_t else _cor_pct(pB_t),False,"000000",8)
                                 _ec(ws_out,ri_t,15,f"{pC_t:.1%}",_cor_pct(pC_t),False,"000000",8)
-                                _ec(ws_out,ri_t,16,round(mc_t,1),_F_VERM_S if div_c_t else _F_BRANCO,False,"000000",8)
-                                _ec(ws_out,ri_t,17,round(ml_t,1),_F_BRANCO,False,"000000",8)
+                                _ec(ws_out,ri_t,16,mc_t,_F_VERM_S if div_c_t else _F_BRANCO,False,"000000",8)
+                                _ec(ws_out,ri_t,17,ml_t,_F_BRANCO,False,"000000",8)
                                 _ec(ws_out,ri_t,18,app_tot_t,_F_VERM_S if div_p_t else _F_BRANCO,False,"000000",8)
                                 for mi_t2,mod_t2 in enumerate(modelos_xl_t):
                                     ci_t2=19+mi_t2
@@ -2409,9 +2409,9 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                     _ec(ws_out,_ri_c,_COL_F+4,int(_crow.ativo_A),_F_VERDE if _crow.ativo_A else _F_AMAR,True,"000000",8)
                                     _ec(ws_out,_ri_c,_COL_F+5,int(_crow.ativo_B),_F_VERDE if _crow.ativo_B else _F_AMAR,True,"000000",8)
                                     _ec(ws_out,_ri_c,_COL_F+6,int(_crow.ativo_C),_F_AZUL if _crow.ativo_C else _F_CINZA,True,"000000",8)
-                                    _ec(ws_out,_ri_c,_COL_F+7,round(_crow.horas_disp_A,2) if _crow.ativo_A else 0,_F_VERDE if _crow.ativo_A else _F_BRANCO,True,"000000",8)
-                                    _ec(ws_out,_ri_c,_COL_F+8,round(_crow.horas_disp_B,2) if _crow.ativo_B else 0,_F_AMAR if _crow.ativo_B else _F_BRANCO,True,"000000",8)
-                                    _ec(ws_out,_ri_c,_COL_F+9,round(_crow.horas_disp_C,2) if _crow.ativo_C else 0,_F_AZUL if _crow.ativo_C else _F_BRANCO,True,"000000",8)
+                                    _ec(ws_out,_ri_c,_COL_F+7,_crow.horas_disp_A if _crow.ativo_A else 0,_F_VERDE if _crow.ativo_A else _F_BRANCO,True,"000000",8)
+                                    _ec(ws_out,_ri_c,_COL_F+8,_crow.horas_disp_B if _crow.ativo_B else 0,_F_AMAR if _crow.ativo_B else _F_BRANCO,True,"000000",8)
+                                    _ec(ws_out,_ri_c,_COL_F+9,_crow.horas_disp_C if _crow.ativo_C else 0,_F_AZUL if _crow.ativo_C else _F_BRANCO,True,"000000",8)
                                     ws_out.row_dimensions[_ri_c].height=13; _ri_c+=1
                                 _sup_a=r_auto["suporte"]
                                 for _snm,_skey in [("TOTAL DE OPERADORES",None),("LAVADORA E INSPEÇÃO","lavadora"),("GRAVAÇÃO E ESTANQUEIDADE","gravacao"),("PRESET","preset"),("CORINGA","coringa"),("FACILITADOR","facilitador"),("TOTAL POR TURNO",None),("TOTAL FUNCIONÁRIOS",None)]:
@@ -2423,21 +2423,21 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                             _ec(ws_out,_ri_c,_ci_sv,_sv[_tk],_F_VERDE if _tk=="A" else (_F_AMAR if _tk=="B" else _F_AZUL),True,"000000",8)
                                         for _ci_hv,_tk,_hef in [(_COL_F+7,"A",heA_t),(_COL_F+8,"B",heB_t),(_COL_F+9,"C",heC_t)]:
                                             _hv=_sv[_tk]*_hef*d_t
-                                            _ec(ws_out,_ri_c,_ci_hv,round(_hv,2) if _hv else 0,_F_VERDE if _tk=="A" else (_F_AMAR if _tk=="B" else _F_AZUL),True,"000000",8)
+                                            _ec(ws_out,_ri_c,_ci_hv,_hv if _hv else 0,_F_VERDE if _tk=="A" else (_F_AMAR if _tk=="B" else _F_AZUL),True,"000000",8)
                                     elif "TOTAL DE OPERADORES" in _snm:
                                         for _ci_sv,_vv in [(_COL_F+4,r_auto["op_A"]),(_COL_F+5,r_auto["op_B"]),(_COL_F+6,r_auto["op_C"])]:
                                             _ec(ws_out,_ri_c,_ci_sv,_vv,_F_AMAR_JD,True,"1F4D19",8)
                                         for _ci_hv,_vv,_hef in [(_COL_F+7,r_auto["op_A"],heA_t),(_COL_F+8,r_auto["op_B"],heB_t),(_COL_F+9,r_auto["op_C"],heC_t)]:
-                                            _ec(ws_out,_ri_c,_ci_hv,round(_vv*_hef*d_t,2),_F_AMAR_JD,True,"1F4D19",8)
+                                            _ec(ws_out,_ri_c,_ci_hv,_vv*_hef*d_t,_F_AMAR_JD,True,"1F4D19",8)
                                     elif "TOTAL POR TURNO" in _snm:
                                         for _ci_sv,_vv in [(_COL_F+4,r_auto["tot_A"]),(_COL_F+5,r_auto["tot_B"]),(_COL_F+6,r_auto["tot_C"])]:
                                             _ec(ws_out,_ri_c,_ci_sv,_vv,_F_AMAR_JD,True,"1F4D19",8)
                                         for _ci_hv,_vv,_hef in [(_COL_F+7,r_auto["tot_A"],heA_t),(_COL_F+8,r_auto["tot_B"],heB_t),(_COL_F+9,r_auto["tot_C"],heC_t)]:
-                                            _ec(ws_out,_ri_c,_ci_hv,round(_vv*_hef*d_t,2),_F_AMAR_JD,True,"1F4D19",8)
+                                            _ec(ws_out,_ri_c,_ci_hv,_vv*_hef*d_t,_F_AMAR_JD,True,"1F4D19",8)
                                     elif "FUNCIONÁRIOS" in _snm:
                                         _ec(ws_out,_ri_c,_COL_F+4,r_auto["total"],_F_AMAR_JD,True,"1F4D19",9)
                                         _th=r_auto["tot_A"]*heA_t*d_t+r_auto["tot_B"]*heB_t*d_t+r_auto["tot_C"]*heC_t*d_t
-                                        _ec(ws_out,_ri_c,_COL_F+7,round(_th,2),_F_AMAR_JD,True,"1F4D19",9)
+                                        _ec(ws_out,_ri_c,_COL_F+7,_th,_F_AMAR_JD,True,"1F4D19",9)
                                     ws_out.row_dimensions[_ri_c].height=13; _ri_c+=1
                                 _ri_c+=1
                                 for _pnm,_pv,_dest in [("PRODUTIVIDADE POR TEMPO DE CICLO OPERACIONAL",r_auto["prod_ciclo_op"],False),("PRODUTIVIDADE POR TEMPO DE CICLO TOTAL",r_auto["prod_ciclo_tot"],False),("PRODUTIVIDADE POR TEMPO DE LABOR OPERACIONAL",r_auto["prod_labor_op"],False),("PRODUTIVIDADE POR TEMPO DE LABOR TOTAL ★",r_auto["prod_labor_tot"],True)]:
