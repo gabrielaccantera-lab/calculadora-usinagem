@@ -942,7 +942,9 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None):
             if v>=0.40: return F_VERDE_a
             return F_BRANCO_a
         _e(ws,_ri,_CF,cen,F_BRANCO_a,False,"000000",8,False)
-        _e(ws,_ri,_CF+1,f"{oA:.1%}",_cbg_a(oA),False,"000000",8); _e(ws,_ri,_CF+2,f"{oB:.1%}",_cbg_a(oB),False,"000000",8); _e(ws,_ri,_CF+3,f"{oC:.1%}",_cbg_a(oC),False,"000000",8)
+        for _pci,_pv,_pbg in [(_CF+1,oA,_cbg_a(oA)),(_CF+2,oB,_cbg_a(oB)),(_CF+3,oC,_cbg_a(oC))]:
+            _pc=_e(ws,_ri,_pci,_pv,_pbg,False,"000000",8)
+            _pc.number_format="0.0000000000%"
         _e(ws,_ri,_CF+4,aA,F_VERDE_a if aA else F_AMAR_a,True,"000000",8); _e(ws,_ri,_CF+5,aB,F_VERDE_a if aB else F_AMAR_a,True,"000000",8); _e(ws,_ri,_CF+6,aC,F_AZUL_a if aC else F_CINZA_a,True,"000000",8)
         _e(ws,_ri,_CF+7,round(dias_ano*heA*aA,2) if aA else 0,F_VERDE_a if aA else F_BRANCO_a,True,"000000",8)
         _e(ws,_ri,_CF+8,round(dias_ano*heB*aB,2) if aB else 0,F_AMAR_a if aB else F_BRANCO_a,True,"000000",8)
@@ -969,7 +971,8 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None):
     for _pnm,_pv,_dest in [("PRODUTIVIDADE POR TEMPO DE CICLO OPERACIONAL",prod_co,False),("PRODUTIVIDADE POR TEMPO DE CICLO TOTAL",prod_ct,False),("PRODUTIVIDADE POR TEMPO DE LABOR OPERACIONAL",prod_lo,False),("PRODUTIVIDADE POR TEMPO DE LABOR TOTAL ★",prod_lt,True)]:
         ws.merge_cells(start_row=_ri,start_column=_CF,end_row=_ri,end_column=_CF+8)
         _e(ws,_ri,_CF,_pnm,F_AM_JD_a if _dest else F_BRANCO_a,_dest,"1F4D19" if _dest else "000000",8,False)
-        _e(ws,_ri,_CF+9,_pv,F_AM_JD_a if _dest else F_BRANCO_a,_dest,"1F4D19" if _dest else "000000",8)
+        _pv_cell=_e(ws,_ri,_CF+9,_pv,F_AM_JD_a if _dest else F_BRANCO_a,_dest,"1F4D19" if _dest else "000000",8)
+        _pv_cell.number_format="0.0000000000%"
         ws.row_dimensions[_ri].height=14; _ri+=1
     for ci,w in enumerate([9,8,16,6,5,9,9,8,8,8,8,9,8,8,8,12,12,8],1): ws.column_dimensions[get_column_letter(ci)].width=w
     for _ci,_ww in [(_CF,14),(_CF+1,8),(_CF+2,8),(_CF+3,8),(_CF+4,8),(_CF+5,8),(_CF+6,8),(_CF+7,10),(_CF+8,10),(_CF+9,10)]:
@@ -1237,6 +1240,139 @@ def exportar_cenario_vs_base(res_base, res_cenario, meses_lista, nome_cenario):
             ec_c(ws3.cell(ri3,5,f"{delta3:+d}"),bg_d,cor_d,is_total); ws3.row_dimensions[ri3].height=14; ri3+=1
         ri3+=1  # linha em branco entre meses
     for ci,w in enumerate([8,18,9,9,9],1): ws3.column_dimensions[get_column_letter(ci)].width=w
+
+    # ── aba ANO CONSOLIDADO (apenas quando há múltiplos meses) ───────────────
+    meses_com_dados = [(m, res_base.get(m), res_cenario.get(m)) for m in meses_lista if res_base.get(m) and res_cenario.get(m)]
+    if len(meses_com_dados) > 1:
+        ws_ano = wb.create_sheet("ANO Consolidado")
+        # Cabeçalho
+        _titulo_ano = f"ANO CONSOLIDADO | Base vs {nome_cenario} | {len(meses_com_dados)} meses"
+        ws_ano.merge_cells("A1:J1")
+        _ca = ws_ano.cell(1,1,_titulo_ano)
+        _ca.font=Font(name="Arial",bold=True,color="FFFFFF",size=11); _ca.fill=PatternFill("solid",fgColor=JD_V)
+        _ca.alignment=Alignment(horizontal="center",vertical="center"); _ca.border=brd
+        ws_ano.row_dimensions[1].height=24
+
+        # Sub-cabeçalho: meses incluídos
+        ws_ano.merge_cells("A2:J2")
+        _cm = ws_ano.cell(2,1,f"Meses: {', '.join(m[:3].upper() for m,_,__ in meses_com_dados)}")
+        _cm.font=Font(name="Arial",bold=False,color="1F4D19",size=9); _cm.fill=PatternFill("solid",fgColor="E8F5E9")
+        _cm.alignment=Alignment(horizontal="left",vertical="center"); _cm.border=brd
+        ws_ano.row_dimensions[2].height=14
+
+        # Header colunas
+        for _ci,_txt,_bg,_fg in [(1,"Métrica",JD_V,"FFFFFF"),(2,"Base",JD_V,"FFFFFF"),(3,"Cenário",JD_V,"FFFFFF"),
+                                   (4,"Δ absoluto",JD_V,"FFFFFF"),(5,"Δ %",JD_V,"FFFFFF")]:
+            _ch = ws_ano.cell(3,_ci,_txt)
+            _ch.font=Font(name="Arial",bold=True,color=_fg,size=9); _ch.fill=PatternFill("solid",fgColor=_bg)
+            _ch.alignment=Alignment(horizontal="center",vertical="center"); _ch.border=brd
+        ws_ano.row_dimensions[3].height=16
+
+        # Agrega valores anuais
+        _sum = lambda key: (
+            sum(rb.get(key,0) for _,rb,__ in meses_com_dados),
+            sum(rc.get(key,0) for _,__,rc in meses_com_dados)
+        )
+        _avg = lambda key: (
+            sum(rb.get(key,0) for _,rb,__ in meses_com_dados) / len(meses_com_dados),
+            sum(rc.get(key,0) for _,__,rc in meses_com_dados) / len(meses_com_dados)
+        )
+        _sum_dias = sum(rb.get("dias",0) for _,rb,__ in meses_com_dados)
+
+        # Horas efetivas (usa o primeiro mês como referência)
+        _heA = meses_com_dados[0][1].get("heA", meses_com_dados[0][1].get("hA",0))
+        _heB = meses_com_dados[0][1].get("heB", meses_com_dados[0][1].get("hB",0))
+        _heC = meses_com_dados[0][1].get("heC", meses_com_dados[0][1].get("hC",0))
+
+        # Suporte anual: soma os valores de cada mês por função
+        _sup_keys = ["lavadora","gravacao","preset","coringa","facilitador"]
+        _sup_b_ano = {k: {"A": sum(rb["suporte"][k]["A"] for _,rb,__ in meses_com_dados),
+                          "B": sum(rb["suporte"][k]["B"] for _,rb,__ in meses_com_dados),
+                          "C": sum(rb["suporte"][k]["C"] for _,rb,__ in meses_com_dados)} for k in _sup_keys}
+        _sup_c_ano = {k: {"A": sum(rc["suporte"][k]["A"] for _,__,rc in meses_com_dados),
+                          "B": sum(rc["suporte"][k]["B"] for _,__,rc in meses_com_dados),
+                          "C": sum(rc["suporte"][k]["C"] for _,__,rc in meses_com_dados)} for k in _sup_keys}
+
+        metricas_ano = [
+            ("─── OPERADORES POR TURNO ───", None, None, True, "section"),
+            ("Turno A — Operadores",         *_sum("op_A"),    False, "int"),
+            ("Turno B — Operadores",         *_sum("op_B"),    False, "int"),
+            ("Turno C — Operadores",         *_sum("op_C"),    False, "int"),
+            ("─── TOTAL FUNCIONÁRIOS ───",   None, None, True, "section"),
+            ("Total Turno A (c/ suporte)",   *_sum("tot_A"),   True, "int"),
+            ("Total Turno B (c/ suporte)",   *_sum("tot_B"),   True, "int"),
+            ("Total Turno C (c/ suporte)",   *_sum("tot_C"),   True, "int"),
+            ("TOTAL FUNCIONÁRIOS (ano)",      *_sum("total"),   True, "int"),
+            ("─── HORAS DISPONÍVEIS ───",    None, None, True, "section"),
+            ("Horas totais Turno A",
+                sum(rb.get("tot_A",0)*_heA*rb.get("dias",0) for _,rb,__ in meses_com_dados),
+                sum(rc.get("tot_A",0)*_heA*rc.get("dias",0) for _,__,rc in meses_com_dados),
+                False, "float"),
+            ("Horas totais Turno B",
+                sum(rb.get("tot_B",0)*_heB*rb.get("dias",0) for _,rb,__ in meses_com_dados),
+                sum(rc.get("tot_B",0)*_heB*rc.get("dias",0) for _,__,rc in meses_com_dados),
+                False, "float"),
+            ("Horas totais Turno C",
+                sum(rb.get("tot_C",0)*_heC*rb.get("dias",0) for _,rb,__ in meses_com_dados),
+                sum(rc.get("tot_C",0)*_heC*rc.get("dias",0) for _,__,rc in meses_com_dados),
+                False, "float"),
+            ("─── PRODUTIVIDADE (média) ───", None, None, True, "section"),
+            ("Prod. Ciclo Operacional (méd.)", *_avg("prod_ciclo_op"), False, "pct"),
+            ("Prod. Ciclo Total (méd.)",       *_avg("prod_ciclo_tot"), False, "pct"),
+            ("Prod. Labor Operacional (méd.)", *_avg("prod_labor_op"), False, "pct"),
+            ("Prod. Labor Total ★ (méd.)",     *_avg("prod_labor_tot"), True, "pct"),
+        ]
+
+        _ri_ano = 4
+        for item in metricas_ano:
+            nome_m, vb_m, vc_m, bold_m, tipo_m = item
+            if tipo_m == "section":
+                ws_ano.merge_cells(start_row=_ri_ano,start_column=1,end_row=_ri_ano,end_column=5)
+                _cs = ws_ano.cell(_ri_ano,1,nome_m)
+                _cs.font=Font(name="Arial",bold=True,color="FFFFFF",size=8)
+                _cs.fill=PatternFill("solid",fgColor="1F4D19")
+                _cs.alignment=Alignment(horizontal="left",vertical="center"); _cs.border=brd
+                ws_ano.row_dimensions[_ri_ano].height=13; _ri_ano+=1; continue
+
+            # Formata valores
+            if tipo_m == "pct":
+                vb_str = f"{vb_m:.2%}"; vc_str = f"{vc_m:.2%}"
+                delta_str = f"{vc_m-vb_m:+.2%}" if vb_m is not None else "—"
+                delta_pct_str = "—"
+            elif tipo_m == "float":
+                vb_str = f"{vb_m:.1f}"; vc_str = f"{vc_m:.1f}"
+                delta_str = f"{vc_m-vb_m:+.1f}" if vb_m is not None else "—"
+                delta_pct_str = f"{(vc_m-vb_m)/vb_m*100:+.1f}%" if vb_m and vb_m!=0 else "—"
+            else:
+                vb_str = str(int(vb_m)) if vb_m is not None else "—"
+                vc_str = str(int(vc_m)) if vc_m is not None else "—"
+                delta_v = int(vc_m-vb_m) if vb_m is not None else 0
+                delta_str = f"{delta_v:+d}"
+                delta_pct_str = f"{delta_v/vb_m*100:+.1f}%" if vb_m and vb_m!=0 else "—"
+
+            delta_num = (vc_m - vb_m) if vb_m is not None else 0
+            _bg_nome = JD_Y if bold_m else "F9F9F9"
+            _fg_nome = JD_V if bold_m else "000000"
+            _bg_delta = "B9F6CA" if delta_num < 0 else ("FFCDD2" if delta_num > 0 else "F5F5F5")
+            _fg_delta = "003D10" if delta_num < 0 else ("3D0000" if delta_num > 0 else "555555")
+
+            for _ci,_val,_bg,_fg,_ctr in [
+                (1, nome_m, _bg_nome, _fg_nome, False),
+                (2, vb_str, "EAF3FB", "000000", True),
+                (3, vc_str, "EAF3FB", "000000", True),
+                (4, delta_str, _bg_delta, _fg_delta, True),
+                (5, delta_pct_str, _bg_delta, _fg_delta, True),
+            ]:
+                _cell = ws_ano.cell(_ri_ano, _ci, _val)
+                _cell.font=Font(name="Arial",bold=bold_m,color=_fg,size=9)
+                _cell.fill=PatternFill("solid",fgColor=_bg)
+                _cell.alignment=Alignment(horizontal="center" if _ctr else "left",vertical="center")
+                _cell.border=brd
+            ws_ano.row_dimensions[_ri_ano].height=14; _ri_ano+=1
+
+        for _ci,_ww in enumerate([28,10,10,12,10],1):
+            ws_ano.column_dimensions[get_column_letter(_ci)].width=_ww
+
     wb.save(out); out.seek(0); return out
 
 @st.cache_data(show_spinner=False)
