@@ -599,6 +599,10 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
         cell.alignment=_Al(horizontal="center" if center else "left",vertical="center",wrap_text=wrap)
         cell.border=_BRD
         return cell
+    def _ec_pct(ws,r,c,val,fill=None,bold=False,color="000000",size=8):
+        cell=_ec(ws,r,c,val,fill,bold,color,size)
+        cell.number_format="0.0000000000%"
+        return cell
     def _cor_pct(v):
         try:
             f=float(v)
@@ -689,7 +693,7 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
             _ec(ws_out,ri_t,8,dc,_fill_dc_p,False,"000000",8); _ec(ws_out,ri_t,9,vi,_F_BRANCO,False,"000000",8)
             _ec(ws_out,ri_t,10,dv,_fill_dv_p,False,"000000",8); _ec(ws_out,ri_t,11,di,_F_BRANCO,False,"000000",8)
             _ec(ws_out,ri_t,12,idx_c,_F_BRANCO,False,"000000",8)
-            _ec(ws_out,ri_t,13,f"{pA_t:.1%}",_cor_pct(pA_t),False,"000000",8); _ec(ws_out,ri_t,14,f"{pB_t:.1%}",_cor_pct(pB_t),False,"000000",8); _ec(ws_out,ri_t,15,f"{pC_t:.1%}",_cor_pct(pC_t),False,"000000",8)
+            _ec_pct(ws_out,ri_t,13,pA_t,_cor_pct(pA_t)); _ec_pct(ws_out,ri_t,14,pB_t,_cor_pct(pB_t)); _ec_pct(ws_out,ri_t,15,pC_t,_cor_pct(pC_t))
             _ec(ws_out,ri_t,16,mc_t,_F_BRANCO,False,"000000",8); _ec(ws_out,ri_t,17,ml_t,_F_BRANCO,False,"000000",8); _ec(ws_out,ri_t,18,tot_pecas,_F_BRANCO,False,"000000",8)
             for mi_t2,mod_t2 in enumerate(modelos_lista):
                 ci_t2=19+mi_t2; v_app_t=app_mod_v.get(mod_t2,0)
@@ -721,7 +725,7 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
                     if v>=0.40: return _PF("solid",fgColor="92D050")
                     return _F_BRANCO
                 _ec(ws_out,_ri_c,_COL_F,_crow.centro,_F_BRANCO,False,"000000",8,False)
-                _ec(ws_out,_ri_c,_COL_F+1,f"{_crow.ocup_A:.1%}",_cbg_t(_crow.ocup_A),False,"000000",8); _ec(ws_out,_ri_c,_COL_F+2,f"{_crow.ocup_B:.1%}",_cbg_t(_crow.ocup_B),False,"000000",8); _ec(ws_out,_ri_c,_COL_F+3,f"{_crow.ocup_C:.1%}",_cbg_t(_crow.ocup_C),False,"000000",8)
+                _ec_pct(ws_out,_ri_c,_COL_F+1,_crow.ocup_A,_cbg_t(_crow.ocup_A)); _ec_pct(ws_out,_ri_c,_COL_F+2,_crow.ocup_B,_cbg_t(_crow.ocup_B)); _ec_pct(ws_out,_ri_c,_COL_F+3,_crow.ocup_C,_cbg_t(_crow.ocup_C))
                 _ec(ws_out,_ri_c,_COL_F+4,int(_crow.ativo_A),_F_VERDE if _crow.ativo_A else _F_AMAR,True,"000000",8); _ec(ws_out,_ri_c,_COL_F+5,int(_crow.ativo_B),_F_VERDE if _crow.ativo_B else _F_AMAR,True,"000000",8); _ec(ws_out,_ri_c,_COL_F+6,int(_crow.ativo_C),_F_AZUL if _crow.ativo_C else _F_CINZA,True,"000000",8)
                 _ec(ws_out,_ri_c,_COL_F+7,_crow.horas_disp_A if _crow.ativo_A else 0,_F_VERDE if _crow.ativo_A else _F_BRANCO,True,"000000",8)
                 _ec(ws_out,_ri_c,_COL_F+8,_crow.horas_disp_B if _crow.ativo_B else 0,_F_AMAR if _crow.ativo_B else _F_BRANCO,True,"000000",8)
@@ -751,7 +755,7 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
             for _pnm,_pv,_dest in [("PROD. CICLO OPERACIONAL",r_auto["prod_ciclo_op"],False),("PROD. CICLO TOTAL",r_auto["prod_ciclo_tot"],False),("PROD. LABOR OPERACIONAL",r_auto["prod_labor_op"],False),("PROD. LABOR TOTAL ★",r_auto["prod_labor_tot"],True)]:
                 ws_out.merge_cells(start_row=_ri_c,start_column=_COL_F,end_row=_ri_c,end_column=_COL_F+8)
                 _ec(ws_out,_ri_c,_COL_F,_pnm,_F_AMAR_JD if _dest else _F_BRANCO,_dest,"1F4D19" if _dest else "000000",8,False)
-                _ec(ws_out,_ri_c,_COL_F+9,f"{_pv:.1%}",_F_AMAR_JD if _dest else _F_BRANCO,_dest,"1F4D19" if _dest else "000000",8)
+                _ec_pct(ws_out,_ri_c,_COL_F+9,_pv,_F_AMAR_JD if _dest else _F_BRANCO)
                 ws_out.row_dimensions[_ri_c].height=14; _ri_c+=1
         for _ci_w,_ww in [(_COL_F,14),(_COL_F+1,8),(_COL_F+2,8),(_COL_F+3,8),(_COL_F+4,8),(_COL_F+5,8),(_COL_F+6,8),(_COL_F+7,10),(_COL_F+8,10),(_COL_F+9,10)]:
             ws_out.column_dimensions[get_column_letter(_ci_w)].width=_ww
@@ -960,7 +964,7 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None):
     for _pnm,_pv,_dest in [("PRODUTIVIDADE POR TEMPO DE CICLO OPERACIONAL",prod_co,False),("PRODUTIVIDADE POR TEMPO DE CICLO TOTAL",prod_ct,False),("PRODUTIVIDADE POR TEMPO DE LABOR OPERACIONAL",prod_lo,False),("PRODUTIVIDADE POR TEMPO DE LABOR TOTAL ★",prod_lt,True)]:
         ws.merge_cells(start_row=_ri,start_column=_CF,end_row=_ri,end_column=_CF+8)
         _e(ws,_ri,_CF,_pnm,F_AM_JD_a if _dest else F_BRANCO_a,_dest,"1F4D19" if _dest else "000000",8,False)
-        _e(ws,_ri,_CF+9,f"{_pv:.1%}",F_AM_JD_a if _dest else F_BRANCO_a,_dest,"1F4D19" if _dest else "000000",8)
+        _e(ws,_ri,_CF+9,_pv,F_AM_JD_a if _dest else F_BRANCO_a,_dest,"1F4D19" if _dest else "000000",8)
         ws.row_dimensions[_ri].height=14; _ri+=1
     for ci,w in enumerate([9,8,16,6,5,9,9,8,8,8,8,9,8,8,8,12,12,8],1): ws.column_dimensions[get_column_letter(ci)].width=w
     for _ci,_ww in [(_CF,14),(_CF+1,8),(_CF+2,8),(_CF+3,8),(_CF+4,8),(_CF+5,8),(_CF+6,8),(_CF+7,10),(_CF+8,10),(_CF+9,10)]:
@@ -2120,6 +2124,10 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                     cell.alignment=_Al(horizontal="center" if center else "left",vertical="center",wrap_text=wrap)
                     cell.border=_BRD
                     return cell
+                def _ec_pct(ws,r,c,val,fill=None,bold=False,color="000000",size=8):
+                    cell=_ec(ws,r,c,val,fill,bold,color,size)
+                    cell.number_format="0.0000000000%"
+                    return cell
 
                 def _cor_pct(v):
                     try:
@@ -2338,9 +2346,9 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                 _ec(ws_out,ri_t,10,dv_inp,_fill_dv,False,"000000",8)
                                 _ec(ws_out,ri_t,11,di_inp,_fill_di,False,"000000",8)
                                 _ec(ws_out,ri_t,12,float(idx_app_t),_F_VERM_S if div_idx_t else _F_BRANCO,False,"000000",8)
-                                _ec(ws_out,ri_t,13,f"{pA_t:.1%}",_F_VERM if div_A_t else _cor_pct(pA_t),False,"000000",8)
-                                _ec(ws_out,ri_t,14,f"{pB_t:.1%}",_F_VERM if div_B_t else _cor_pct(pB_t),False,"000000",8)
-                                _ec(ws_out,ri_t,15,f"{pC_t:.1%}",_cor_pct(pC_t),False,"000000",8)
+                                _ec_pct(ws_out,ri_t,13,pA_t,_F_VERM if div_A_t else _cor_pct(pA_t))
+                                _ec_pct(ws_out,ri_t,14,pB_t,_F_VERM if div_B_t else _cor_pct(pB_t))
+                                _ec_pct(ws_out,ri_t,15,pC_t,_cor_pct(pC_t))
                                 _ec(ws_out,ri_t,16,mc_t,_F_VERM_S if div_c_t else _F_BRANCO,False,"000000",8)
                                 _ec(ws_out,ri_t,17,ml_t,_F_BRANCO,False,"000000",8)
                                 _ec(ws_out,ri_t,18,app_tot_t,_F_VERM_S if div_p_t else _F_BRANCO,False,"000000",8)
@@ -2403,9 +2411,9 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                         if v>=0.40: return _PF("solid",fgColor="92D050")
                                         return _F_BRANCO
                                     _ec(ws_out,_ri_c,_COL_F,_crow.centro,_F_BRANCO,False,"000000",8,False)
-                                    _ec(ws_out,_ri_c,_COL_F+1,f"{_crow.ocup_A:.1%}",_cbg_t(_crow.ocup_A),False,"000000",8)
-                                    _ec(ws_out,_ri_c,_COL_F+2,f"{_crow.ocup_B:.1%}",_cbg_t(_crow.ocup_B),False,"000000",8)
-                                    _ec(ws_out,_ri_c,_COL_F+3,f"{_crow.ocup_C:.1%}",_cbg_t(_crow.ocup_C),False,"000000",8)
+                                    _ec_pct(ws_out,_ri_c,_COL_F+1,_crow.ocup_A,_cbg_t(_crow.ocup_A))
+                                    _ec_pct(ws_out,_ri_c,_COL_F+2,_crow.ocup_B,_cbg_t(_crow.ocup_B))
+                                    _ec_pct(ws_out,_ri_c,_COL_F+3,_crow.ocup_C,_cbg_t(_crow.ocup_C))
                                     _ec(ws_out,_ri_c,_COL_F+4,int(_crow.ativo_A),_F_VERDE if _crow.ativo_A else _F_AMAR,True,"000000",8)
                                     _ec(ws_out,_ri_c,_COL_F+5,int(_crow.ativo_B),_F_VERDE if _crow.ativo_B else _F_AMAR,True,"000000",8)
                                     _ec(ws_out,_ri_c,_COL_F+6,int(_crow.ativo_C),_F_AZUL if _crow.ativo_C else _F_CINZA,True,"000000",8)
@@ -2443,7 +2451,7 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                 for _pnm,_pv,_dest in [("PRODUTIVIDADE POR TEMPO DE CICLO OPERACIONAL",r_auto["prod_ciclo_op"],False),("PRODUTIVIDADE POR TEMPO DE CICLO TOTAL",r_auto["prod_ciclo_tot"],False),("PRODUTIVIDADE POR TEMPO DE LABOR OPERACIONAL",r_auto["prod_labor_op"],False),("PRODUTIVIDADE POR TEMPO DE LABOR TOTAL ★",r_auto["prod_labor_tot"],True)]:
                                     ws_out.merge_cells(start_row=_ri_c,start_column=_COL_F,end_row=_ri_c,end_column=_COL_F+8)
                                     _ec(ws_out,_ri_c,_COL_F,_pnm,_F_AMAR_JD if _dest else _F_BRANCO,_dest,"1F4D19" if _dest else "000000",8,False)
-                                    _ec(ws_out,_ri_c,_COL_F+9,f"{_pv:.1%}",_F_AMAR_JD if _dest else _F_BRANCO,_dest,"1F4D19" if _dest else "000000",8)
+                                    _ec_pct(ws_out,_ri_c,_COL_F+9,_pv,_F_AMAR_JD if _dest else _F_BRANCO)
                                     ws_out.row_dimensions[_ri_c].height=14; _ri_c+=1
                                 for _ci_w,_ww in [(_COL_F,14),(_COL_F+1,8),(_COL_F+2,8),(_COL_F+3,8),(_COL_F+4,8),(_COL_F+5,8),(_COL_F+6,8),(_COL_F+7,10),(_COL_F+8,10),(_COL_F+9,10)]:
                                     ws_out.column_dimensions[get_column_letter(_ci_w)].width=_ww
