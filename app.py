@@ -761,13 +761,42 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
                 ws_out.row_dimensions[_ri_c].height=14; _ri_c+=1
         for _ci_w,_ww in [(_COL_F,14),(_COL_F+1,8),(_COL_F+2,8),(_COL_F+3,8),(_COL_F+4,8),(_COL_F+5,8),(_COL_F+6,8),(_COL_F+7,10),(_COL_F+8,10),(_COL_F+9,10)]:
             ws_out.column_dimensions[get_column_letter(_ci_w)].width=_ww
-    _cp_data_ano = build_cp_data_anual(resultados, tempo, dist, aplic, pmp)
+    _fb_ano = st.session_state.get("_fb_anual")
+    _cp_data_ano = build_cp_data_anual(resultados, tempo, dist, aplic, pmp, file_bytes=_fb_ano)
     gerar_aba_anual(wb_out, resultados, label="ANO", cp_data=_cp_data_ano)
     buf_out = BytesIO(); wb_out.save(buf_out); buf_out.seek(0)
     return buf_out
 
-def build_cp_data_anual(resultados, tempo, dist, aplic, pmp):
-    # Inclui meses com resultados OU meses com qtd>0 no PMP (ex: Janeiro com dias=0 mas produção)
+def build_cp_data_anual(resultados, tempo, dist, aplic, pmp, file_bytes=None):
+    # Prioridade: ler diretamente da aba AnoFY26 do Excel de referência,
+    # pois ela possui parâmetros próprios (div_carga, div_volume, etc.) que
+    # diferem dos inputs e são os valores corretos para o consolidado anual.
+    if file_bytes is not None:
+        try:
+            wb_ref = openpyxl.load_workbook(BytesIO(file_bytes), read_only=True, data_only=True)
+            if "AnoFY26" in wb_ref.sheetnames:
+                ws_ref = wb_ref["AnoFY26"]
+                rows_ref = list(ws_ref.rows)
+                result = []
+                for row in rows_ref[6:]:
+                    vals = [c.value for c in row[:18]]
+                    if not vals[0] or not str(vals[0]).startswith("CEN"): continue
+                    try:
+                        cen  = str(vals[0]); peca = str(vals[1])
+                        pc_t = float(vals[3] or 1)
+                        tc   = float(vals[5] or 0); tl = float(vals[6] or 0)
+                        dc   = float(vals[7] or 0); vi = float(vals[8] or 1)
+                        dv   = float(vals[9] or 0); di = float(vals[10] or 1)
+                        idx  = float(vals[11] or 0)
+                        mc   = float(vals[15] or 0); ml = float(vals[16] or 0)
+                        qt   = int(vals[17] or 0)
+                        result.append((cen, peca, tc, tl, dc, vi, dv, di, idx, mc, ml, qt))
+                    except: pass
+                wb_ref.close()
+                if result: return result
+            wb_ref.close()
+        except: pass
+    # Fallback: recalcular a partir dos inputs quando AnoFY26 não está disponível
     meses_com_resultado = [m for m in MESES if resultados.get(m)]
     meses_com_pmp = [m for m in MESES if not pmp[pmp.mes==m].empty and pmp[pmp.mes==m]["qtd"].sum()>0]
     meses_c = list(dict.fromkeys([m for m in MESES if m in meses_com_resultado or m in meses_com_pmp]))
@@ -781,8 +810,6 @@ def build_cp_data_anual(resultados, tempo, dist, aplic, pmp):
         df["disponib"]   = pd.to_numeric(df["disponib"],   errors="coerce").fillna(1.0)
         df["indice_ciclo"] = (df.t_ciclo*df.div_carga*df.div_volume*df.vol_int)/df.disponib
         df["min_ciclo"] = df.indice_ciclo * df.qtd
-        # min_labor SEM pc_trat: o PMP já tem qtd em PEÇAS (não tratores),
-        # então pc_trat não entra no cálculo de labor do ANO
         df["min_labor"] = df.t_labor * df.div_carga * df.qtd
         df_ano = df[df.mes.isin(meses_c)]
         agg = df_ano.groupby(["centro","peca"])[["min_ciclo","min_labor","qtd"]].sum().reset_index()
@@ -1122,7 +1149,8 @@ def exportar(resultados, _tempo=None, _dist=None, _aplic=None, _pmp=None):
             ri2+=1
         for ci,w in enumerate([14,8,8,8,8,8,8,24,10,10],1): wsm.column_dimensions[get_column_letter(ci)].width=w
     if _tempo is not None and _dist is not None and _aplic is not None and _pmp is not None:
-        _cp_ano=build_cp_data_anual(resultados,_tempo,_dist,_aplic,_pmp)
+        _fb_ano = st.session_state.get("_fb_anual")
+        _cp_ano=build_cp_data_anual(resultados,_tempo,_dist,_aplic,_pmp,file_bytes=_fb_ano)
     else:
         _cp_ano=None
     gerar_aba_anual(wb,resultados,cp_data=_cp_ano)
@@ -1628,6 +1656,7 @@ if not uploaded:
 
 file_bytes=uploaded.read()
 _file_id=hash(file_bytes)
+st.session_state["_fb_anual"]=file_bytes
 if st.session_state.get("_file_id")!=_file_id:
     for _k in ["diag_mensal_buf","diag_inp_buf","layout_buf","tabelona_buf","tab_pura_buf",
                "cmp_cache_key","cmp_cache_resumo","cmp_cache_detalhe","cmp_cache_err",
@@ -2684,7 +2713,7 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                     ws_out.column_dimensions[get_column_letter(_ci_w)].width=_ww
 
                         try:
-                            _cp_ano_t = build_cp_data_anual(res_base, tempo, dist, aplic, pmp)
+                            _cp_ano_t = build_cp_data_anual(res_base, tempo, dist, aplic, pmp, file_bytes=file_bytes)
                         except: _cp_ano_t = None
                         gerar_aba_anual(wb_out, res_base, label="ANO", cp_data=_cp_ano_t)
                         tabelona_buf=BytesIO(); wb_out.save(tabelona_buf); tabelona_buf.seek(0)
