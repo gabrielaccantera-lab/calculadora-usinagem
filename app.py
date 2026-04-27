@@ -846,6 +846,13 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None):
         tot_A_ano+=r["tot_A"]; tot_B_ano+=r["tot_B"]; tot_C_ano+=r["tot_C"]; tot_func_ano+=r["total"]
         for k in sup_somas:
             sup_somas[k]["A"]+=r["suporte"][k]["A"]; sup_somas[k]["B"]+=r["suporte"][k]["B"]; sup_somas[k]["C"]+=r["suporte"][k]["C"]
+    # Quando cp_data disponivel, reconstruir cen_mc a partir dele para consistencia com
+    # a tabela de pecas: cp_data inclui meses com PMP mas dias=0, o loop acima nao.
+    if cp_data:
+        _cmc=defaultdict(float); _cml=defaultdict(float)
+        for (_cen,_peca,_tc,_tl,_dc,_vi,_dv,_di,_idx,_mc,_ml,_qt) in cp_data:
+            _cmc[_cen]+=_mc; _cml[_cen]+=_ml
+        cen_mc=_cmc; cen_ml=_cml
     prod_lt=sum_hlabor/sum_htodos if sum_htodos>0 else 0
     prod_ct=sum_hciclo/sum_htodos if sum_htodos>0 else 0
     prod_lo=sum_hlabor/sum_hativos if sum_hativos>0 else 0
