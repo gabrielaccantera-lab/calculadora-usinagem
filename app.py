@@ -781,7 +781,9 @@ def build_cp_data_anual(resultados, tempo, dist, aplic, pmp):
         df["disponib"]   = pd.to_numeric(df["disponib"],   errors="coerce").fillna(1.0)
         df["indice_ciclo"] = (df.t_ciclo*df.div_carga*df.div_volume*df.vol_int)/df.disponib
         df["min_ciclo"] = df.indice_ciclo * df.qtd
-        df["min_labor"] = df.t_labor * df.div_carga * df.qtd * df.pc_trat.fillna(1.0)
+        # min_labor SEM pc_trat: o PMP já tem qtd em PEÇAS (não tratores),
+        # então pc_trat não entra no cálculo de labor do ANO
+        df["min_labor"] = df.t_labor * df.div_carga * df.qtd
         df_ano = df[df.mes.isin(meses_c)]
         agg = df_ano.groupby(["centro","peca"])[["min_ciclo","min_labor","qtd"]].sum().reset_index()
         attrs = df_ano.drop_duplicates(["centro","peca"])[
@@ -908,7 +910,7 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None):
             _e(ws,ri,10,round(dv,4) if dv else "",PatternFill("solid",fgColor="FF0000"),False,"FFFF00",8)
             _e(ws,ri,11,round(di,4) if di else "",F_CINZA2_a,False,"000000",8); _e(ws,ri,12,round(idx_c,4),F_BRANCO_a,False,"000000",8)
             _e(ws,ri,13,f"{pA:.1%}",_cor_pct_a(pA),False,"000000",8); _e(ws,ri,14,f"{pB:.1%}",_cor_pct_a(pB),False,"000000",8); _e(ws,ri,15,f"{pC:.1%}",_cor_pct_a(pC),False,"000000",8)
-            _e(ws,ri,16,round(mc,1),F_BRANCO_a,False,"000000",8); _e(ws,ri,17,round(ml,1),F_BRANCO_a,False,"000000",8); _e(ws,ri,18,_qtd,F_BRANCO_a,False,"000000",8)
+            _e(ws,ri,16,round(mc,4),F_BRANCO_a,False,"000000",8); _e(ws,ri,17,round(ml,4),F_BRANCO_a,False,"000000",8); _e(ws,ri,18,_qtd,F_BRANCO_a,False,"000000",8)
             ws.row_dimensions[ri].height=13; ri+=1
     else:
         for cen in centros_ord:
@@ -917,7 +919,7 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None):
             _e(ws,ri,1,cen,F_BRANCO_a,False,"000000",8,False); _e(ws,ri,2,"—",F_BRANCO_a,False,"000000",8)
             for ci_z in range(3,13): _e(ws,ri,ci_z,"",F_BRANCO_a,False,"000000",8)
             _e(ws,ri,13,f"{pA:.1%}",_cor_pct_a(pA),False,"000000",8); _e(ws,ri,14,f"{pB:.1%}",_cor_pct_a(pB),False,"000000",8); _e(ws,ri,15,f"{pC:.1%}",_cor_pct_a(pC),False,"000000",8)
-            _e(ws,ri,16,round(mc,1),F_BRANCO_a,False,"000000",8); _e(ws,ri,17,round(ml,1),F_BRANCO_a,False,"000000",8)
+            _e(ws,ri,16,round(mc,4),F_BRANCO_a,False,"000000",8); _e(ws,ri,17,round(ml,4),F_BRANCO_a,False,"000000",8)
             ws.row_dimensions[ri].height=13; ri+=1
     _CF=6; _RS=66
     ws.merge_cells(start_row=_RS-1,start_column=_CF,end_row=_RS-1,end_column=_CF+9)
