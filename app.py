@@ -763,7 +763,8 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
             ws_out.column_dimensions[get_column_letter(_ci_w)].width=_ww
     _fb_ano = st.session_state.get("_fb_anual")
     _cp_data_ano = build_cp_data_anual(resultados, tempo, dist, aplic, pmp, file_bytes=_fb_ano)
-    gerar_aba_anual(wb_out, resultados, label="ANO", cp_data=_cp_data_ano)
+    _horas_ano = read_horas_anual(_fb_ano)
+    gerar_aba_anual(wb_out, resultados, label="ANO", cp_data=_cp_data_ano, horas_anual=_horas_ano)
     buf_out = BytesIO(); wb_out.save(buf_out); buf_out.seek(0)
     return buf_out
 
@@ -790,7 +791,7 @@ def build_cp_data_anual(resultados, tempo, dist, aplic, pmp, file_bytes=None):
                         idx  = float(vals[11] or 0)
                         mc   = float(vals[15] or 0); ml = float(vals[16] or 0)
                         qt   = int(vals[17] or 0)
-                        result.append((cen, peca, tc, tl, dc, vi, dv, di, idx, mc, ml, qt))
+                        result.append((cen, peca, pc_t, tc, tl, dc, vi, dv, di, idx, mc, ml, qt))
                     except: pass
                 wb_ref.close()
                 if result: return result
@@ -826,12 +827,47 @@ def build_cp_data_anual(resultados, tempo, dist, aplic, pmp, file_bytes=None):
                 dv=float(at.div_volume); di=float(at.disponib)
                 idx=float(at.indice_ciclo)
             except: tc=tl=dc=vi=dv=di=idx=0.0
-            result.append((cen, peca, tc, tl, dc, vi, dv, di, idx,
+            result.append((cen, peca, 1.0, tc, tl, dc, vi, dv, di, idx,
                            float(row.min_ciclo), float(row.min_labor), int(row.qtd)))
         return result
     except: return None
 
-def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None):
+def read_horas_anual(file_bytes):
+    """Lê h_ciclo, h_labor, h_ativos, h_todos direto da aba AnoFY26.
+    Retorna dict ou None se não disponível."""
+    if file_bytes is None: return None
+    try:
+        wb = openpyxl.load_workbook(BytesIO(file_bytes), read_only=True, data_only=True)
+        if "AnoFY26" not in wb.sheetnames:
+            wb.close(); return None
+        ws = wb["AnoFY26"]
+        rows = list(ws.rows)
+        # Linha 4 (idx 3): col 15 = total horas ciclo, col 16 = total horas labor
+        l4 = [c.value for c in rows[3]]
+        h_ciclo = float(l4[15]) if len(l4) > 15 and l4[15] else 0
+        h_labor = float(l4[16]) if len(l4) > 16 and l4[16] else 0
+        # Procurar TOTAL DE OPERADORES e TOTAL FUNCIONÁRIOS no bloco do resumo
+        h_ativos = 0; h_todos = 0
+        for row in rows:
+            vals = [c.value for c in row]
+            txt = str(vals[11]) if len(vals) > 11 and vals[11] else ""
+            if "TOTAL DE OPERADORES" in txt:
+                # horas nas colunas 18, 19, 20 (A, B, C)
+                hA = float(vals[18]) if len(vals) > 18 and vals[18] else 0
+                hB = float(vals[19]) if len(vals) > 19 and vals[19] else 0
+                hC = float(vals[20]) if len(vals) > 20 and vals[20] else 0
+                h_ativos = hA + hB + hC
+            if "TOTAL FUNCION" in txt:
+                h_todos = float(vals[18]) if len(vals) > 18 and vals[18] else 0
+        wb.close()
+        if h_ciclo > 0 and h_todos > 0:
+            return {"h_ciclo": h_ciclo, "h_labor": h_labor,
+                    "h_ativos": h_ativos, "h_todos": h_todos}
+        return None
+    except: return None
+
+
+def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None):
     meses_com_dados = [(m, resultados[m]) for m in MESES if resultados.get(m)]
     if not meses_com_dados: return
     brd = Border(left=Side(style='thin',color='CCCCCC'),right=Side(style='thin',color='CCCCCC'),
@@ -877,13 +913,20 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None):
     # a tabela de pecas: cp_data inclui meses com PMP mas dias=0, o loop acima nao.
     if cp_data:
         _cmc=defaultdict(float); _cml=defaultdict(float)
-        for (_cen,_peca,_tc,_tl,_dc,_vi,_dv,_di,_idx,_mc,_ml,_qt) in cp_data:
+        for (_cen,_peca,_pct,_tc,_tl,_dc,_vi,_dv,_di,_idx,_mc,_ml,_qt) in cp_data:
             _cmc[_cen]+=_mc; _cml[_cen]+=_ml
         cen_mc=_cmc; cen_ml=_cml
-    prod_lt=sum_hlabor/sum_htodos if sum_htodos>0 else 0
-    prod_ct=sum_hciclo/sum_htodos if sum_htodos>0 else 0
-    prod_lo=sum_hlabor/sum_hativos if sum_hativos>0 else 0
-    prod_co=sum_hciclo/sum_hativos if sum_hativos>0 else 0
+    # Se horas_anual disponível (lido do AnoFY26), usar para produtividades consistentes
+    if horas_anual:
+        _hc=horas_anual["h_ciclo"]; _hl=horas_anual["h_labor"]
+        _ha=horas_anual["h_ativos"]; _ht=horas_anual["h_todos"]
+        prod_co=_hc/_ha if _ha>0 else 0; prod_ct=_hc/_ht if _ht>0 else 0
+        prod_lo=_hl/_ha if _ha>0 else 0; prod_lt=_hl/_ht if _ht>0 else 0
+    else:
+        prod_lt=sum_hlabor/sum_htodos if sum_htodos>0 else 0
+        prod_ct=sum_hciclo/sum_htodos if sum_htodos>0 else 0
+        prod_lo=sum_hlabor/sum_hativos if sum_hativos>0 else 0
+        prod_co=sum_hciclo/sum_hativos if sum_hativos>0 else 0
     centros_ord=list(cen_mc.keys())
     thr_A=meses_com_dados[0][1]["thr_A"]; thr_B=meses_com_dados[0][1]["thr_B"]; thr_C=meses_com_dados[0][1]["thr_C"]
     def ocup_ano(cen,t):
@@ -934,10 +977,10 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None):
     ws.row_dimensions[6].height=42
     ri=7
     if cp_data:
-        for (cen,peca,tc,tl,dc,vi,dv,di,idx_c,mc,ml,_qtd) in cp_data:
+        for (cen,peca,_pc_t,tc,tl,dc,vi,dv,di,idx_c,mc,ml,_qtd) in cp_data:
             pA=mc/minA_ano if minA_ano>0 else 0; pB=mc/minB_ano if minB_ano>0 else 0; pC=mc/minC_ano if minC_ano>0 else 0
             _e(ws,ri,1,cen,F_BRANCO_a,False,"000000",8,False); _e(ws,ri,2,peca,F_BRANCO_a,False,"000000",8,False)
-            _e(ws,ri,3,"ANO",F_BRANCO_a,False,"000000",8,False); _e(ws,ri,4,1,F_BRANCO_a,False,"000000",8); _e(ws,ri,5,"PC",F_BRANCO_a,False,"000000",8)
+            _e(ws,ri,3,"ANO",F_BRANCO_a,False,"000000",8,False); _e(ws,ri,4,int(_pc_t),F_BRANCO_a,False,"000000",8); _e(ws,ri,5,"PC",F_BRANCO_a,False,"000000",8)
             _e(ws,ri,6,round(tc,4) if tc else "",F_PRETO_a,False,"FFFFFF",8); _e(ws,ri,7,round(tl,4) if tl else "",F_PRETO_a,False,"FFFFFF",8)
             _e(ws,ri,8,round(dc,4) if dc else "",PatternFill("solid",fgColor="FF0000"),False,"FFFF00",8)
             _e(ws,ri,9,round(vi,4) if vi else "",F_BRANCO_a,False,"000000",8)
@@ -1152,8 +1195,9 @@ def exportar(resultados, _tempo=None, _dist=None, _aplic=None, _pmp=None):
         _fb_ano = st.session_state.get("_fb_anual")
         _cp_ano=build_cp_data_anual(resultados,_tempo,_dist,_aplic,_pmp,file_bytes=_fb_ano)
     else:
-        _cp_ano=None
-    gerar_aba_anual(wb,resultados,cp_data=_cp_ano)
+        _fb_ano=None; _cp_ano=None
+    _horas_ano=read_horas_anual(_fb_ano if "_fb_ano" in dir() else st.session_state.get("_fb_anual"))
+    gerar_aba_anual(wb,resultados,cp_data=_cp_ano,horas_anual=_horas_ano)
     wb.save(out); out.seek(0); return out
 
 def exportar_cenario_vs_base(res_base, res_cenario, meses_lista, nome_cenario):
@@ -2715,7 +2759,8 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                         try:
                             _cp_ano_t = build_cp_data_anual(res_base, tempo, dist, aplic, pmp, file_bytes=file_bytes)
                         except: _cp_ano_t = None
-                        gerar_aba_anual(wb_out, res_base, label="ANO", cp_data=_cp_ano_t)
+                        _horas_ano_t = read_horas_anual(file_bytes)
+                        gerar_aba_anual(wb_out, res_base, label="ANO", cp_data=_cp_ano_t, horas_anual=_horas_ano_t)
                         tabelona_buf=BytesIO(); wb_out.save(tabelona_buf); tabelona_buf.seek(0)
                         st.session_state["tabelona_buf"] = tabelona_buf
 
