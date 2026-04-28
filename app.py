@@ -1250,8 +1250,8 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None,
         ws.row_dimensions[r].height = 14 if txt else 6
 
 @st.cache_data(show_spinner=False)
-def exportar_cenario_vs_base_cached(hash_key, _res_base, _res_cenario, meses_lista, nome_cenario, _res_ano_fy26_b=None, _res_ano_fy26_c=None):
-    return exportar_cenario_vs_base(_res_base, _res_cenario, meses_lista, nome_cenario, _res_ano_fy26_b, _res_ano_fy26_c)
+def exportar_cenario_vs_base_cached(hash_key, _res_base, _res_cenario, meses_lista, nome_cenario, _res_ano_fy26_b=None, _res_ano_fy26_c=None, _file_bytes_ano=None):
+    return exportar_cenario_vs_base(_res_base, _res_cenario, meses_lista, nome_cenario, _res_ano_fy26_b, _res_ano_fy26_c, _file_bytes_ano)
 
 @st.cache_data(show_spinner=False)
 def exportar_cached(res_hash, _resultados, _tempo=None, _dist=None, _aplic=None, _pmp=None, _file_bytes=None, _eh_cenario=False):
@@ -1339,7 +1339,7 @@ def exportar(resultados, _tempo=None, _dist=None, _aplic=None, _pmp=None, _file_
     gerar_aba_anual(wb,resultados,cp_data=_cp_ano,horas_anual=_horas_ano,eh_cenario=_eh_cenario)
     wb.save(out); out.seek(0); return out
 
-def exportar_cenario_vs_base(res_base, res_cenario, meses_lista, nome_cenario, res_ano_fy26_b=None, res_ano_fy26_c=None):
+def exportar_cenario_vs_base(res_base, res_cenario, meses_lista, nome_cenario, res_ano_fy26_b=None, res_ano_fy26_c=None, _file_bytes_ano=None):
     """Exporta base vs cenário para todos os meses em meses_lista.
     Gera: uma aba BASE por mês, uma aba CENÁRIO por mês, e uma aba Comparação consolidada.
     """
@@ -1468,15 +1468,14 @@ def exportar_cenario_vs_base(res_base, res_cenario, meses_lista, nome_cenario, r
 
     # ── aba ANO FY26: gerar aba ANO base + ANO cenário (igual ao exportar normal) ──
     if _usar_ano_fy26:
-        _fb = st.session_state.get("_fb_anual")
-        _cp_ano = build_cp_data_anual({}, None, None, None, None, file_bytes=_fb)
-        _ha = read_horas_anual(_fb)
+        # _file_bytes_ano passado explicitamente (não usa st.session_state dentro do cache)
+        _cp_ano = build_cp_data_anual({}, None, None, None, None, file_bytes=_file_bytes_ano)
+        _ha = read_horas_anual(_file_bytes_ano)
         # Aba BASE: usa res_base (todos os meses) com cp_data do AnoFY26
-        _wb_default_sheet.title = "ANO Base"
+        _ws_base = wb.active; _ws_base.title = "ANO Base"
         gerar_aba_anual(wb, res_base, label="ANO Base", cp_data=_cp_ano,
-                        horas_anual=_ha, eh_cenario=False, ws_existente=_wb_default_sheet)
+                        horas_anual=_ha, eh_cenario=False, ws_existente=_ws_base)
         # Aba CENÁRIO: usa res_cenario (todos os meses com overrides) com cp_data do AnoFY26
-        # Para o RESUMO DA LOTAÇÃO, usa res_ano_fy26_c (overrides aplicados)
         _ws_cen = wb.create_sheet("ANO Cenário")
         gerar_aba_anual(wb, res_cenario, label="ANO Cenário", cp_data=_cp_ano,
                         horas_anual=None, eh_cenario=True, ws_existente=_ws_cen,
@@ -1638,8 +1637,7 @@ def exportar_cenario_vs_base(res_base, res_cenario, meses_lista, nome_cenario, r
             ws_ano.column_dimensions[get_column_letter(_ci)].width=_ww
 
     # Remover aba "Sheet" padrão vazia (criada pelo openpyxl) quando ANO FY26
-    if _usar_ano_fy26 and _wb_default_sheet.title == "Sheet" and "Sheet" in wb.sheetnames and len(wb.sheetnames) > 1:
-        del wb[_wb_default_sheet.title]
+    # Sheet padrão já foi renomeada para "ANO Base" — nada a remover
     wb.save(out); out.seek(0); return out
 
 @st.cache_data(show_spinner=False)
@@ -2643,12 +2641,13 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
                     label_dl = f"📥 {nm} ({_label_meses})"
                     fname_dl = f"cenario_{nm.replace(' ','_')}_{'ANO' if v.get('eh_ano') else '_'.join(m[:3] for m in _meses_exp)}.xlsx"
                     _cen_vs_hash = hash(nm + str(v["resultados"]) + str(_meses_exp))
-                    _r_ano_b = read_horas_anual(st.session_state.get("_fb_anual")) if v.get("eh_ano") else None
+                    _fb_ano = st.session_state.get("_fb_anual")
                     # Para base ANO FY26: criar res_ano_fy26 base (sem overrides)
-                    _r_ano_base_calc = calcular_ano_fy26(st.session_state.get("_fb_anual"), {}, horas_efetivas, suporte_cfg, horas_turno) if v.get("eh_ano") else None
+                    _r_ano_base_calc = calcular_ano_fy26(_fb_ano, {}, horas_efetivas, suporte_cfg, horas_turno) if v.get("eh_ano") else None
                     _r_ano_cen = v.get("res_ano_fy26") if v.get("eh_ano") else None
                     st.download_button(label_dl, data=exportar_cenario_vs_base_cached(_cen_vs_hash, res_base, v["resultados"], _meses_exp, nm,
-                                           _res_ano_fy26_b=_r_ano_base_calc, _res_ano_fy26_c=_r_ano_cen),
+                                           _res_ano_fy26_b=_r_ano_base_calc, _res_ano_fy26_c=_r_ano_cen,
+                                           _file_bytes_ano=_fb_ano),
                                        file_name=fname_dl, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                        key=f"dl_cen_{nm}")
         with col_del:
