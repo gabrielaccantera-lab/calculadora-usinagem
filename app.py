@@ -994,7 +994,7 @@ def calcular_ano_fy26(file_bytes, overrides_ano, horas_efetivas, suporte_cfg, ho
         return None
 
 
-def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None, eh_cenario=False):
+def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None, eh_cenario=False, ws_existente=None, res_ano_override=None):
     meses_com_dados = [(m, resultados[m]) for m in MESES if resultados.get(m)]
     if not meses_com_dados: return
     brd = Border(left=Side(style='thin',color='CCCCCC'),right=Side(style='thin',color='CCCCCC'),
@@ -1043,6 +1043,14 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None,
         for (_cen,_peca,_pct,_tc,_tl,_dc,_vi,_dv,_di,_idx,_mc,_ml,_qt) in cp_data:
             _cmc[_cen]+=_mc; _cml[_cen]+=_ml
         cen_mc=_cmc; cen_ml=_cml
+    # Se res_ano_override fornecido (cenário ANO FY26), usar seus totais para o RESUMO DA LOTAÇÃO
+    if res_ano_override:
+        _ro = res_ano_override
+        tot_A_ano=_ro.get("tot_A",tot_A_ano); tot_B_ano=_ro.get("tot_B",tot_B_ano)
+        tot_C_ano=_ro.get("tot_C",tot_C_ano); tot_func_ano=_ro.get("total",tot_func_ano)
+        sum_hciclo=_ro.get("h_ciclo",sum_hciclo); sum_hlabor=_ro.get("h_labor",sum_hlabor)
+        sum_hativos=_ro.get("h_ativos",sum_hativos); sum_htodos=_ro.get("h_todos",sum_htodos)
+        sup_somas={k:{"A":_ro["suporte"][k]["A"],"B":_ro["suporte"][k]["B"],"C":_ro["suporte"][k]["C"]} for k in sup_somas} if _ro.get("suporte") else sup_somas
     # Para a BASE: usa horas do AnoFY26 (consistente com tabela de peças)
     # Para CENÁRIOS: usa soma dos meses do próprio cenário (reflete overrides)
     if horas_anual and not eh_cenario:
@@ -1077,7 +1085,10 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None,
     tot_suporte_C=sum(sup_ano(k,"C") for k in sup_somas)
     tot_A_calc=op_A_ano+tot_suporte_A; tot_B_calc=op_B_ano+tot_suporte_B; tot_C_calc=op_C_ano+tot_suporte_C
     tot_func_calc=tot_A_calc+tot_B_calc+tot_C_calc
-    ws=wb.create_sheet(label); ws.freeze_panes="F7"
+    if ws_existente is not None:
+        ws=ws_existente; ws.title=label; ws.freeze_panes="F7"
+    else:
+        ws=wb.create_sheet(label); ws.freeze_panes="F7"
     ws.merge_cells("A1:O1"); _e(ws,1,1,"TOTAIS — ANO",F_VD_JD_a,True,"FFFFFF",9,True)
     for ci,txt,f in [(16,"TURNO A",F_VERDE_a),(17,"TURNO B",F_AMAR_a),(18,"TURNO C",F_AZUL_a)]:
         _e(ws,1,ci,txt,f,True,"000000",8)
@@ -1248,6 +1259,8 @@ def exportar_cached(res_hash, _resultados, _tempo=None, _dist=None, _aplic=None,
 
 def exportar(resultados, _tempo=None, _dist=None, _aplic=None, _pmp=None, _file_bytes=None, _eh_cenario=False):
     out=BytesIO(); wb=openpyxl.Workbook()
+    # No modo ANO FY26, a aba padrão "Sheet" será removida depois de criar "ANO Consolidado"
+    _wb_default_sheet = wb.active
     brd=Border(left=Side(style='thin',color='CCCCCC'),right=Side(style='thin',color='CCCCCC'),top=Side(style='thin',color='CCCCCC'),bottom=Side(style='thin',color='CCCCCC'))
     def ec_l(c,bg="FFFFFF",fg="000000",bold=False,fmt=None,center=True):
         c.font=Font(name="Arial",bold=bold,color=fg,size=9); c.fill=PatternFill("solid",fgColor=bg)
@@ -1388,7 +1401,11 @@ def exportar_cenario_vs_base(res_base, res_cenario, meses_lista, nome_cenario, r
             ri+=1
         for ci,w in enumerate([14,8,8,8,8,8,8,24,10,10],1): ws.column_dimensions[get_column_letter(ci)].width=w
 
+    # Detecta modo ANO FY26 antes de criar abas
+    _usar_ano_fy26 = res_ano_fy26_b is not None and res_ano_fy26_c is not None
+
     # ── gera uma aba BASE e uma aba CENÁRIO para cada mês ─────────────
+    # Modo ANO FY26: não gera abas mensais, só a aba ANO Consolidado
     first_sheet_used = False
     _used_titles = set()
     def _unique_title(base_title):
@@ -1401,60 +1418,76 @@ def exportar_cenario_vs_base(res_base, res_cenario, meses_lista, nome_cenario, r
                 _used_titles.add(tt); return tt
         return base_title[:31]
 
-    for mes in meses_lista:
-        r_b = res_base.get(mes); r_c = res_cenario.get(mes)
-        abrev = mes[:3].upper()
-        # Aba BASE
-        title_base = _unique_title(f"{abrev} Base")
-        if not first_sheet_used:
-            ws1 = wb.active; ws1.title = title_base; first_sheet_used = True
-        else:
-            ws1 = wb.create_sheet(title_base)
-        if r_b: escrever_mes(ws1, r_b, f"{mes.upper()} — BASE")
-        else: ws1.cell(1,1,"Sem dados para este mês no cenário base")
-        # Aba CENÁRIO
-        title_cen = _unique_title(f"{abrev} {nome_cenario[:10]}")
-        ws2 = wb.create_sheet(title_cen)
-        if r_c: escrever_mes(ws2, r_c, f"{mes.upper()} — {nome_cenario.upper()}")
-        else: ws2.cell(1,1,"Sem dados para este mês no cenário")
+    if not _usar_ano_fy26:
+        for mes in meses_lista:
+            r_b = res_base.get(mes); r_c = res_cenario.get(mes)
+            abrev = mes[:3].upper()
+            # Aba BASE
+            title_base = _unique_title(f"{abrev} Base")
+            if not first_sheet_used:
+                ws1 = wb.active; ws1.title = title_base; first_sheet_used = True
+            else:
+                ws1 = wb.create_sheet(title_base)
+            if r_b: escrever_mes(ws1, r_b, f"{mes.upper()} — BASE")
+            else: ws1.cell(1,1,"Sem dados para este mês no cenário base")
+            # Aba CENÁRIO
+            title_cen = _unique_title(f"{abrev} {nome_cenario[:10]}")
+            ws2 = wb.create_sheet(title_cen)
+            if r_c: escrever_mes(ws2, r_c, f"{mes.upper()} — {nome_cenario.upper()}")
+            else: ws2.cell(1,1,"Sem dados para este mês no cenário")
 
-    # ── aba Comparação consolidada (todos os meses) ───────────────────
-    ws3 = wb.create_sheet("Comparação")
-    header_title = f"COMPARAÇÃO | Base vs {nome_cenario} | {' / '.join(m[:3].upper() for m in meses_lista)}"
-    ws3.merge_cells("A1:N1")
-    ct = ws3.cell(1,1,header_title)
-    ct.font=Font(name="Arial",bold=True,color="FFFFFF",size=11); ct.fill=PatternFill("solid",fgColor=JD_V)
-    ct.alignment=Alignment(horizontal="center",vertical="center"); ct.border=brd
-    ws3.row_dimensions[1].height=24
-    for i,h in enumerate(["Mês","","Base","Cenário","Δ"],1): ec_c(ws3.cell(2,i,h),JD_V,"FFFFFF",True)
-    ws3.row_dimensions[2].height=15
-    ri3 = 3
-    for mes in meses_lista:
-        r_b = res_base.get(mes); r_c = res_cenario.get(mes)
-        if not r_b or not r_c: continue
-        metricas=[("Turno A (total)",r_b["tot_A"],r_c["tot_A"]),("Turno B (total)",r_b["tot_B"],r_c["tot_B"]),("Turno C (total)",r_b["tot_C"],r_c["tot_C"]),("TOTAL FUNCIONÁRIOS",r_b["total"],r_c["total"]),("Operadores CEN A",r_b["op_A"],r_c["op_A"]),("Operadores CEN B",r_b["op_B"],r_c["op_B"]),("Operadores CEN C",r_b["op_C"],r_c["op_C"])]
-        # Cabeçalho do mês
-        ws3.merge_cells(start_row=ri3,start_column=1,end_row=ri3,end_column=5)
-        mc = ws3.cell(ri3,1,mes.upper())
-        mc.font=Font(name="Arial",bold=True,color="FFFFFF",size=9); mc.fill=PatternFill("solid",fgColor="1F4D19")
-        mc.alignment=Alignment(horizontal="left",vertical="center"); mc.border=brd
-        ws3.row_dimensions[ri3].height=14; ri3+=1
-        for nome3,vb3,vc3 in metricas:
-            is_total="TOTAL" in nome3; delta3=vc3-vb3
-            ec_c(ws3.cell(ri3,1,mes[:3].upper()),"F0F0F0","888888",False,True)
-            ec_c(ws3.cell(ri3,2,nome3),JD_Y if is_total else "F5F5F5",JD_V if is_total else "000000",is_total,False)
-            ec_c(ws3.cell(ri3,3,vb3),"EAF3FB","000000",is_total); ec_c(ws3.cell(ri3,4,vc3),"EAF3FB","000000",is_total)
-            cor_d="003D10" if delta3<0 else ("3D0000" if delta3>0 else "555555")
-            bg_d="B9F6CA" if delta3<0 else ("FFCDD2" if delta3>0 else "F5F5F5")
-            ec_c(ws3.cell(ri3,5,f"{delta3:+d}"),bg_d,cor_d,is_total); ws3.row_dimensions[ri3].height=14; ri3+=1
-        ri3+=1  # linha em branco entre meses
-    for ci,w in enumerate([8,18,9,9,9],1): ws3.column_dimensions[get_column_letter(ci)].width=w
+    # ── aba Comparação consolidada (apenas no modo meses, não ANO FY26) ─
+    if not _usar_ano_fy26:
+        ws3 = wb.create_sheet("Comparação")
+        header_title = f"COMPARAÇÃO | Base vs {nome_cenario} | {' / '.join(m[:3].upper() for m in meses_lista)}"
+        ws3.merge_cells("A1:N1")
+        ct = ws3.cell(1,1,header_title)
+        ct.font=Font(name="Arial",bold=True,color="FFFFFF",size=11); ct.fill=PatternFill("solid",fgColor=JD_V)
+        ct.alignment=Alignment(horizontal="center",vertical="center"); ct.border=brd
+        ws3.row_dimensions[1].height=24
+        for i,h in enumerate(["Mês","","Base","Cenário","Δ"],1): ec_c(ws3.cell(2,i,h),JD_V,"FFFFFF",True)
+        ws3.row_dimensions[2].height=15
+        ri3 = 3
+        for mes in meses_lista:
+            r_b = res_base.get(mes); r_c = res_cenario.get(mes)
+            if not r_b or not r_c: continue
+            metricas=[("Turno A (total)",r_b["tot_A"],r_c["tot_A"]),("Turno B (total)",r_b["tot_B"],r_c["tot_B"]),("Turno C (total)",r_b["tot_C"],r_c["tot_C"]),("TOTAL FUNCIONÁRIOS",r_b["total"],r_c["total"]),("Operadores CEN A",r_b["op_A"],r_c["op_A"]),("Operadores CEN B",r_b["op_B"],r_c["op_B"]),("Operadores CEN C",r_b["op_C"],r_c["op_C"])]
+            # Cabeçalho do mês
+            ws3.merge_cells(start_row=ri3,start_column=1,end_row=ri3,end_column=5)
+            mc = ws3.cell(ri3,1,mes.upper())
+            mc.font=Font(name="Arial",bold=True,color="FFFFFF",size=9); mc.fill=PatternFill("solid",fgColor="1F4D19")
+            mc.alignment=Alignment(horizontal="left",vertical="center"); mc.border=brd
+            ws3.row_dimensions[ri3].height=14; ri3+=1
+            for nome3,vb3,vc3 in metricas:
+                is_total="TOTAL" in nome3; delta3=vc3-vb3
+                ec_c(ws3.cell(ri3,1,mes[:3].upper()),"F0F0F0","888888",False,True)
+                ec_c(ws3.cell(ri3,2,nome3),JD_Y if is_total else "F5F5F5",JD_V if is_total else "000000",is_total,False)
+                ec_c(ws3.cell(ri3,3,vb3),"EAF3FB","000000",is_total); ec_c(ws3.cell(ri3,4,vc3),"EAF3FB","000000",is_total)
+                cor_d="003D10" if delta3<0 else ("3D0000" if delta3>0 else "555555")
+                bg_d="B9F6CA" if delta3<0 else ("FFCDD2" if delta3>0 else "F5F5F5")
+                ec_c(ws3.cell(ri3,5,f"{delta3:+d}"),bg_d,cor_d,is_total); ws3.row_dimensions[ri3].height=14; ri3+=1
+            ri3+=1  # linha em branco entre meses
+        for ci,w in enumerate([8,18,9,9,9],1): ws3.column_dimensions[get_column_letter(ci)].width=w
 
-    # ── aba ANO CONSOLIDADO (apenas quando há múltiplos meses) ───────────────
+    # ── aba ANO FY26: gerar aba ANO base + ANO cenário (igual ao exportar normal) ──
+    if _usar_ano_fy26:
+        _fb = st.session_state.get("_fb_anual")
+        _cp_ano = build_cp_data_anual({}, None, None, None, None, file_bytes=_fb)
+        _ha = read_horas_anual(_fb)
+        # Aba BASE: usa res_base (todos os meses) com cp_data do AnoFY26
+        _wb_default_sheet.title = "ANO Base"
+        gerar_aba_anual(wb, res_base, label="ANO Base", cp_data=_cp_ano,
+                        horas_anual=_ha, eh_cenario=False, ws_existente=_wb_default_sheet)
+        # Aba CENÁRIO: usa res_cenario (todos os meses com overrides) com cp_data do AnoFY26
+        # Para o RESUMO DA LOTAÇÃO, usa res_ano_fy26_c (overrides aplicados)
+        _ws_cen = wb.create_sheet("ANO Cenário")
+        gerar_aba_anual(wb, res_cenario, label="ANO Cenário", cp_data=_cp_ano,
+                        horas_anual=None, eh_cenario=True, ws_existente=_ws_cen,
+                        res_ano_override=res_ano_fy26_c)
+
+    # ── aba ANO CONSOLIDADO (soma de meses, quando há múltiplos meses) ──────────
     meses_com_dados = [(m, res_base.get(m), res_cenario.get(m)) for m in meses_lista if res_base.get(m) and res_cenario.get(m)]
-    # Se res_ano_fy26 disponível: usar como período único (não soma dos meses)
-    _usar_ano_fy26 = res_ano_fy26_b is not None and res_ano_fy26_c is not None
-    if _usar_ano_fy26 or len(meses_com_dados) > 1:
+    if not _usar_ano_fy26 and len(meses_com_dados) > 1:
         ws_ano = wb.create_sheet("ANO Consolidado")
         # Cabeçalho
         if _usar_ano_fy26:
@@ -1607,6 +1640,9 @@ def exportar_cenario_vs_base(res_base, res_cenario, meses_lista, nome_cenario, r
         for _ci,_ww in enumerate([28,10,10,12,10],1):
             ws_ano.column_dimensions[get_column_letter(_ci)].width=_ww
 
+    # Remover aba "Sheet" padrão vazia (criada pelo openpyxl) quando ANO FY26
+    if _usar_ano_fy26 and _wb_default_sheet.title == "Sheet" and "Sheet" in wb.sheetnames and len(wb.sheetnames) > 1:
+        del wb[_wb_default_sheet.title]
     wb.save(out); out.seek(0); return out
 
 @st.cache_data(show_spinner=False)
