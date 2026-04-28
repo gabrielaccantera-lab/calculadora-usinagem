@@ -798,6 +798,7 @@ def build_cp_data_anual(resultados, tempo, dist, aplic, pmp, file_bytes=None):
             wb_ref.close()
         except: pass
     # Fallback: recalcular a partir dos inputs quando AnoFY26 não está disponível
+    if pmp is None or tempo is None or dist is None or aplic is None: return None
     meses_com_resultado = [m for m in MESES if resultados.get(m)]
     meses_com_pmp = [m for m in MESES if not pmp[pmp.mes==m].empty and pmp[pmp.mes==m]["qtd"].sum()>0]
     meses_c = list(dict.fromkeys([m for m in MESES if m in meses_com_resultado or m in meses_com_pmp]))
