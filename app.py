@@ -1259,8 +1259,6 @@ def exportar_cached(res_hash, _resultados, _tempo=None, _dist=None, _aplic=None,
 
 def exportar(resultados, _tempo=None, _dist=None, _aplic=None, _pmp=None, _file_bytes=None, _eh_cenario=False):
     out=BytesIO(); wb=openpyxl.Workbook()
-    # No modo ANO FY26, a aba padrão "Sheet" será removida depois de criar "ANO Consolidado"
-    _wb_default_sheet = wb.active
     brd=Border(left=Side(style='thin',color='CCCCCC'),right=Side(style='thin',color='CCCCCC'),top=Side(style='thin',color='CCCCCC'),bottom=Side(style='thin',color='CCCCCC'))
     def ec_l(c,bg="FFFFFF",fg="000000",bold=False,fmt=None,center=True):
         c.font=Font(name="Arial",bold=bold,color=fg,size=9); c.fill=PatternFill("solid",fgColor=bg)
@@ -1350,6 +1348,8 @@ def exportar_cenario_vs_base(res_base, res_cenario, meses_lista, nome_cenario, r
         meses_lista = [meses_lista]
 
     out=BytesIO(); wb=openpyxl.Workbook()
+    _wb_default_sheet=wb.active  # aba padrão "Sheet" criada pelo openpyxl
+    _usar_ano_fy26 = res_ano_fy26_b is not None and res_ano_fy26_c is not None
     brd=Border(left=Side(style='thin',color='CCCCCC'),right=Side(style='thin',color='CCCCCC'),top=Side(style='thin',color='CCCCCC'),bottom=Side(style='thin',color='CCCCCC'))
     JD_V=JD_VERDE_ESC.replace("#",""); JD_Y=JD_AMARELO.replace("#","")
     def ec_c(c,bg="FFFFFF",fg="000000",bold=False,center=True):
@@ -1400,9 +1400,6 @@ def exportar_cenario_vs_base(res_base, res_cenario, meses_lista, nome_cenario, r
             ec_c(ws.cell(ri,10,f"{v2:.1%}"),JD_Y if dest else "FFFFFF",JD_V if dest else "000000",dest)
             ri+=1
         for ci,w in enumerate([14,8,8,8,8,8,8,24,10,10],1): ws.column_dimensions[get_column_letter(ci)].width=w
-
-    # Detecta modo ANO FY26 antes de criar abas
-    _usar_ano_fy26 = res_ano_fy26_b is not None and res_ano_fy26_c is not None
 
     # ── gera uma aba BASE e uma aba CENÁRIO para cada mês ─────────────
     # Modo ANO FY26: não gera abas mensais, só a aba ANO Consolidado
@@ -2324,8 +2321,12 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
     _meses_disponiveis = [m for m in MESES if res_base.get(m)]
 
     with st.expander("➕ Criar novo cenário", expanded=len(st.session_state.cenarios) == 0):
-        novo_nome = st.text_input("Nome do cenário", placeholder="Ex: Redução B nov + Aumento A mar",
-                                   key="cen_novo_nome")
+        col_nome, col_btn = st.columns([4, 1])
+        novo_nome = col_nome.text_input("Nome do cenário", placeholder="Ex: Redução B nov + Aumento A mar",
+                                         key="cen_novo_nome")
+        _btn_criar = col_btn.button("✅ Criar", type="primary", use_container_width=True,
+                                    key="btn_criar_cenario",
+                                    help="Clique para criar o cenário com o nome digitado")
 
         # "ANO FY26" aparece como opção junto com os meses — igual a selecionar um mês
         _opcoes_periodo = ["📅 ANO FY26"] + _meses_disponiveis
@@ -2341,7 +2342,7 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
         meses_calc   = meses_sel if meses_sel else (_meses_disponiveis if eh_ano_novo else [])
 
         if not novo_nome.strip():
-            st.info("👆 Digite o nome do cenário para continuar.")
+            st.info("👆 Digite o nome do cenário e clique em 'Criar' para continuar.")
         elif not meses_sel_raw:
             st.warning("Selecione ao menos um período para configurar.")
         else:
@@ -2355,10 +2356,13 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
                 meses_str = ", ".join(m[:3].upper() for m in meses_sel)
                 st.markdown(f'<div class="aviso-ok">🗓️ <b>{n} mês(es)</b>: {meses_str}. Cada período tem overrides independentes.</div>', unsafe_allow_html=True)
 
-            # Botão de abertura em vez de aviso colapsável
+            # Botão de abertura: tanto o botão "Criar" do topo quanto o botão "Configurar" abrem a grade
             _btn_key = f"btn_abrir_grade_{novo_nome}_{'_'.join(meses_sel_raw)}"
             if _btn_key not in st.session_state:
                 st.session_state[_btn_key] = False
+            # Botão "Criar" do topo também abre a grade
+            if _btn_criar and novo_nome.strip():
+                st.session_state[_btn_key] = True; st.rerun()
             if not st.session_state[_btn_key]:
                 if st.button("✏️ Configurar funcionários por turno →", type="primary", key=f"open_{_btn_key}", use_container_width=True):
                     st.session_state[_btn_key] = True; st.rerun()
