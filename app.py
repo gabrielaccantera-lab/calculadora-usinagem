@@ -846,19 +846,21 @@ def read_horas_anual(file_bytes):
         l4 = [c.value for c in rows[3]]
         h_ciclo = float(l4[15]) if len(l4) > 15 and l4[15] else 0
         h_labor = float(l4[16]) if len(l4) > 16 and l4[16] else 0
-        # Procurar TOTAL DE OPERADORES e TOTAL FUNCIONÁRIOS no bloco do resumo
+        # Procurar TOTAL DE OPERADORES e TOTAL FUNCIONÁRIOS no 2° bloco do resumo
+        # O AnoFY26 tem dois blocos lado a lado; o 2° bloco (col30-32) é o consolidado completo
         h_ativos = 0; h_todos = 0
         for row in rows:
             vals = [c.value for c in row]
             txt = str(vals[11]) if len(vals) > 11 and vals[11] else ""
             if "TOTAL DE OPERADORES" in txt:
-                # horas nas colunas 18, 19, 20 (A, B, C)
-                hA = float(vals[18]) if len(vals) > 18 and vals[18] else 0
-                hB = float(vals[19]) if len(vals) > 19 and vals[19] else 0
-                hC = float(vals[20]) if len(vals) > 20 and vals[20] else 0
+                # 2° bloco: horas em idx29, 30, 31 (col30, 31, 32)
+                hA = float(vals[29]) if len(vals) > 29 and vals[29] else 0
+                hB = float(vals[30]) if len(vals) > 30 and vals[30] else 0
+                hC = float(vals[31]) if len(vals) > 31 and vals[31] else 0
                 h_ativos = hA + hB + hC
             if "TOTAL FUNCION" in txt:
-                h_todos = float(vals[18]) if len(vals) > 18 and vals[18] else 0
+                # 2° bloco: horas em idx29 (col30)
+                h_todos = float(vals[29]) if len(vals) > 29 and vals[29] else 0
         wb.close()
         if h_ciclo > 0 and h_todos > 0:
             return {"h_ciclo": h_ciclo, "h_labor": h_labor,
@@ -1115,10 +1117,10 @@ def exportar_cenario_vs_base_cached(hash_key, _res_base, _res_cenario, meses_lis
     return exportar_cenario_vs_base(_res_base, _res_cenario, meses_lista, nome_cenario)
 
 @st.cache_data(show_spinner=False)
-def exportar_cached(res_hash, _resultados, _tempo=None, _dist=None, _aplic=None, _pmp=None):
-    return exportar(_resultados, _tempo, _dist, _aplic, _pmp)
+def exportar_cached(res_hash, _resultados, _tempo=None, _dist=None, _aplic=None, _pmp=None, _file_bytes=None):
+    return exportar(_resultados, _tempo, _dist, _aplic, _pmp, _file_bytes)
 
-def exportar(resultados, _tempo=None, _dist=None, _aplic=None, _pmp=None):
+def exportar(resultados, _tempo=None, _dist=None, _aplic=None, _pmp=None, _file_bytes=None):
     out=BytesIO(); wb=openpyxl.Workbook()
     brd=Border(left=Side(style='thin',color='CCCCCC'),right=Side(style='thin',color='CCCCCC'),top=Side(style='thin',color='CCCCCC'),bottom=Side(style='thin',color='CCCCCC'))
     def ec_l(c,bg="FFFFFF",fg="000000",bold=False,fmt=None,center=True):
@@ -1191,12 +1193,12 @@ def exportar(resultados, _tempo=None, _dist=None, _aplic=None, _pmp=None):
             ec_l(wsm.cell(ri2,10,f"{v:.1%}" if isinstance(v,float) else v),JD_Y if dest else "FFFFFF",JD_V if dest else "000000",dest)
             ri2+=1
         for ci,w in enumerate([14,8,8,8,8,8,8,24,10,10],1): wsm.column_dimensions[get_column_letter(ci)].width=w
+    _fb_ano = _file_bytes or st.session_state.get("_fb_anual")
     if _tempo is not None and _dist is not None and _aplic is not None and _pmp is not None:
-        _fb_ano = st.session_state.get("_fb_anual")
         _cp_ano=build_cp_data_anual(resultados,_tempo,_dist,_aplic,_pmp,file_bytes=_fb_ano)
     else:
-        _fb_ano=None; _cp_ano=None
-    _horas_ano=read_horas_anual(_fb_ano if "_fb_ano" in dir() else st.session_state.get("_fb_anual"))
+        _cp_ano=None
+    _horas_ano=read_horas_anual(_fb_ano)
     gerar_aba_anual(wb,resultados,cp_data=_cp_ano,horas_anual=_horas_ano)
     wb.save(out); out.seek(0); return out
 
@@ -2801,8 +2803,8 @@ Inclui totais de minutos/horas/dias, bloco de DADOS AUTOMÁTICOS e aba ANO.
         c1,c2=st.columns(2)
         with c1:
             st.markdown("**Resultado completo (todas as abas)**")
-            _exp_hash = hash(str(res_base) + str(horas_turno) + str(thresholds))
-            st.download_button("📥 Baixar resultado base",data=exportar_cached(_exp_hash, res_base, tempo, dist, aplic, pmp),file_name="resultado_usinagem.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_res_base")
+            _exp_hash = hash(str(res_base) + str(horas_turno) + str(thresholds) + str(hash(file_bytes)))
+            st.download_button("📥 Baixar resultado base",data=exportar_cached(_exp_hash, res_base, tempo, dist, aplic, pmp, _file_bytes=file_bytes),file_name="resultado_usinagem.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_res_base")
         with c2:
             st.markdown("**Base tratada (pós-JOIN)**")
             _base_cache_key = f"base_tratada_{_file_id}"
