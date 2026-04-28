@@ -2750,11 +2750,12 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
                     _cen_vs_hash = hash(nm + str(v["resultados"]) + str(_meses_exp))
                     _fb_ano = st.session_state.get("_fb_anual")
                     if v.get("eh_ano"):
-                        # Tentar AnoFY26; se não existir, construir dos meses
+                        # cp_data: preferir AnoFY26; fallback = inputs reais (correto por peça)
+                        _cp_ano_exp = build_cp_data_anual(res_base, tempo, dist, aplic, pmp, file_bytes=_fb_ano)
                         _r_ano_base_calc = calcular_ano_fy26(_fb_ano, {}, horas_efetivas, suporte_cfg, horas_turno)
                         _r_ano_cen = v.get("res_ano_fy26")
                         if _r_ano_base_calc is None or _r_ano_cen is None:
-                            _cp_fb, _r_ano_base_calc = build_cp_data_from_meses(
+                            _, _r_ano_base_calc = build_cp_data_from_meses(
                                 res_base, tempo, dist, aplic, pmp,
                                 {m: res_base[m]["dias"] for m in MESES if res_base.get(m)},
                                 horas_turno, horas_efetivas)
@@ -2763,11 +2764,10 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
                                 {m: res_base[m]["dias"] for m in MESES if res_base.get(m)},
                                 horas_turno, horas_efetivas)
                     else:
-                        _r_ano_base_calc = None; _r_ano_cen = None
-                    _cp_fallback = _cp_fb if "_cp_fb" in dir() else None
+                        _cp_ano_exp = None; _r_ano_base_calc = None; _r_ano_cen = None
                     st.download_button(label_dl, data=exportar_cenario_vs_base_cached(_cen_vs_hash, res_base, v["resultados"], _meses_exp, nm,
                                            _res_ano_fy26_b=_r_ano_base_calc, _res_ano_fy26_c=_r_ano_cen,
-                                           _file_bytes_ano=_fb_ano, _cp_data_fallback=_cp_fallback),
+                                           _file_bytes_ano=_fb_ano, _cp_data_fallback=_cp_ano_exp),
                                        file_name=fname_dl, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                        key=f"dl_cen_{nm}")
         with col_del:
