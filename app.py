@@ -869,6 +869,131 @@ def read_horas_anual(file_bytes):
     except: return None
 
 
+def calcular_ano_fy26(file_bytes, overrides_ano, horas_efetivas, suporte_cfg, horas_turno):
+    """Calcula o cenário anual tratando AnoFY26 como um período único (como se fosse um mês).
+    Lê min_ciclo/min_labor por centro do AnoFY26, aplica overrides de turno e devolve
+    um dict no mesmo formato de resultados[mes] usado pelos meses individuais."""
+    if file_bytes is None: return None
+    try:
+        wb = openpyxl.load_workbook(BytesIO(file_bytes), read_only=True, data_only=True)
+        if "AnoFY26" not in wb.sheetnames:
+            wb.close(); return None
+        ws = wb["AnoFY26"]
+        rows = list(ws.rows)
+
+        # Horas brutas e minutos disponíveis do AnoFY26
+        l2  = [c.value for c in rows[1]]   # linha 2: minutos totais
+        l5  = [c.value for c in rows[4]]   # linha 5: horas por turno
+        l4d = [c.value for c in rows[3]]   # linha 4: dias
+        minA_ano = float(l2[12]) if l2[12] else 96300.0
+        minB_ano = float(l2[13]) if l2[13] else 182970.0
+        minC_ano = float(l2[14]) if l2[14] else 250380.0
+        hA = float(l5[12]) if l5[12] else 7.5
+        hB = float(l5[13]) if l5[13] else 14.25
+        hC = float(l5[14]) if l5[14] else 19.5
+        dias_ano = int(l4d[11]) if l4d[11] else 214
+        heA = horas_efetivas.get("A", hA)
+        heB = horas_efetivas.get("B", hB)
+        heC = horas_efetivas.get("C", hC)
+        thr_A = 0.0; thr_B = 0.0; thr_C = 0.0  # thresholds irrelevantes aqui (override manual)
+
+        # Somar min_ciclo e min_labor por centro do AnoFY26
+        from collections import defaultdict
+        cen_mc = defaultdict(float); cen_ml = defaultdict(float)
+        for row in rows[6:]:
+            vals = [c.value for c in row[:18]]
+            if not vals[0] or not str(vals[0]).startswith("CEN"): continue
+            cen = str(vals[0])
+            cen_mc[cen] += float(vals[15] or 0)
+            cen_ml[cen] += float(vals[16] or 0)
+
+        # Ler ocupação base e ativo base do 1° bloco do RESUMO DA LOTAÇÃO
+        cen_base = {}
+        for row in rows:
+            vals = [c.value for c in row[:22]]
+            cen = vals[11] if len(vals) > 11 else None
+            if cen and str(cen).startswith("CEN"):
+                try:
+                    oA = float(vals[12] or 0); oB = float(vals[13] or 0); oC = float(vals[14] or 0)
+                    aA = int(vals[15] or 0);   aB = int(vals[16] or 0);   aC = int(vals[17] or 0)
+                    cen_base[str(cen)] = {"oA":oA,"oB":oB,"oC":oC,"aA":aA,"aB":aB,"aC":aC}
+                except: pass
+        wb.close()
+
+        # Montar centros com overrides aplicados
+        centros = []
+        for cen in sorted(cen_mc.keys()):
+            mc = cen_mc[cen]; ml = cen_ml[cen]
+            base = cen_base.get(cen, {})
+            oA = mc / minA_ano if minA_ano > 0 else 0
+            oB = mc / minB_ano if minB_ano > 0 else 0
+            oC = mc / minC_ano if minC_ano > 0 else 0
+            # Ativo base vem do AnoFY26; override sobrescreve
+            aA = base.get("aA", 1 if oA > 0.40 else 0)
+            aB = base.get("aB", 1 if oA > 0.75 else 0)
+            aC = base.get("aC", 1 if oB > 0.75 else 0)
+            if overrides_ano and cen in overrides_ano:
+                ov = overrides_ano[cen]
+                if "A" in ov: aA = int(ov["A"])
+                if "B" in ov: aB = int(ov["B"])
+                if "C" in ov: aC = int(ov["C"])
+            centros.append({
+                "centro": cen, "ocup_A": oA, "ocup_B": oB, "ocup_C": oC,
+                "ativo_A": aA, "ativo_B": aB, "ativo_C": aC,
+                "min_ciclo_total": mc, "min_labor_total": ml,
+                "min_disp_A": minA_ano, "min_disp_B": minB_ano, "min_disp_C": minC_ano,
+                "horas_ciclo": mc / 60, "horas_labor": ml / 60,
+                "horas_disp_A": dias_ano * heA * aA,
+                "horas_disp_B": dias_ano * heB * aB,
+                "horas_disp_C": dias_ano * heC * aC,
+            })
+
+        df_c = pd.DataFrame(centros)
+        op_A = int(df_c.ativo_A.sum()); op_B = int(df_c.ativo_B.sum()); op_C = int(df_c.ativo_C.sum())
+
+        def _sup(key, t, op_count):
+            cfg = suporte_cfg[key]
+            if op_count == 0: return 0
+            if cfg["modo"] == "auto":
+                defaults = {"lavadora":{"A":1,"B":1,"C":0},"gravacao":{"A":1,"B":1,"C":0},
+                            "preset":{"A":2,"B":1,"C":1},"coringa":{"A":1,"B":0,"C":0},
+                            "facilitador":{"A":1,"B":1,"C":0}}
+                return defaults[key][t]
+            return cfg[t] if op_count > 0 else 0
+
+        lav={t:_sup("lavadora",t,[op_A,op_B,op_C]["ABC".index(t)]) for t in "ABC"}
+        gra={t:_sup("gravacao",t,[op_A,op_B,op_C]["ABC".index(t)]) for t in "ABC"}
+        pre={t:_sup("preset",t,[op_A,op_B,op_C]["ABC".index(t)]) for t in "ABC"}
+        cor={t:_sup("coringa",t,[op_A,op_B,op_C]["ABC".index(t)]) for t in "ABC"}
+        fac={t:_sup("facilitador",t,[op_A,op_B,op_C]["ABC".index(t)]) for t in "ABC"}
+        tot_A = op_A+lav["A"]+gra["A"]+pre["A"]+cor["A"]+fac["A"]
+        tot_B = op_B+lav["B"]+gra["B"]+pre["B"]+cor["B"]+fac["B"]
+        tot_C = op_C+lav["C"]+gra["C"]+pre["C"]+cor["C"]+fac["C"]
+
+        h_ciclo  = float(df_c.horas_ciclo.sum())
+        h_labor  = float(df_c.horas_labor.sum())
+        h_ativos = float((df_c.horas_disp_A + df_c.horas_disp_B + df_c.horas_disp_C).sum())
+        h_todos  = tot_A * dias_ano * heA + tot_B * dias_ano * heB + tot_C * dias_ano * heC
+
+        return {
+            "centros": df_c,
+            "op_A": op_A, "op_B": op_B, "op_C": op_C,
+            "tot_A": tot_A, "tot_B": tot_B, "tot_C": tot_C, "total": tot_A + tot_B + tot_C,
+            "suporte": {"lavadora":lav,"gravacao":gra,"preset":pre,"coringa":cor,"facilitador":fac},
+            "h_ciclo": h_ciclo, "h_labor": h_labor, "h_ativos": h_ativos, "h_todos": h_todos,
+            "prod_ciclo_op":  h_ciclo / h_ativos if h_ativos > 0 else 0,
+            "prod_ciclo_tot": h_ciclo / h_todos  if h_todos  > 0 else 0,
+            "prod_labor_op":  h_labor / h_ativos if h_ativos > 0 else 0,
+            "prod_labor_tot": h_labor / h_todos  if h_todos  > 0 else 0,
+            "dias": dias_ano, "hA": hA, "hB": hB, "hC": hC,
+            "heA": heA, "heB": heB, "heC": heC,
+            "thr_A": thr_A, "thr_B": thr_B, "thr_C": thr_C,
+            "minA": minA_ano, "minB": minB_ano, "minC": minC_ano,
+        }
+    except Exception as _e:
+        return None
+
+
 def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None, eh_cenario=False):
     meses_com_dados = [(m, resultados[m]) for m in MESES if resultados.get(m)]
     if not meses_com_dados: return
@@ -2005,6 +2130,55 @@ with tab_cen:
         return ref
 
     def _build_ocup_ref_ano(meses_lista):
+        """Lê ocupação e ativos base diretamente do AnoFY26 (1° bloco RESUMO DA LOTAÇÃO)."""
+        _fb = st.session_state.get("_fb_anual")
+        if _fb:
+            try:
+                _wb = openpyxl.load_workbook(BytesIO(_fb), read_only=True, data_only=True)
+                if "AnoFY26" in _wb.sheetnames:
+                    _ws = _wb["AnoFY26"]
+                    _rows = list(_ws.rows)
+                    # Total min disponíveis
+                    _l2 = [c.value for c in _rows[1]]
+                    _minA = float(_l2[12]) if _l2[12] else 96300.0
+                    _minB = float(_l2[13]) if _l2[13] else 182970.0
+                    _minC = float(_l2[14]) if _l2[14] else 250380.0
+                    # Somar min_ciclo por centro
+                    from collections import defaultdict as _dd
+                    _cen_mc = _dd(float)
+                    for _row in _rows[6:]:
+                        _vals = [c.value for c in _row[:18]]
+                        if _vals[0] and str(_vals[0]).startswith("CEN"):
+                            _cen_mc[str(_vals[0])] += float(_vals[15] or 0)
+                    # Ler ativo base do 1° bloco do resumo
+                    _cen_base = {}
+                    for _row in _rows:
+                        _vals = [c.value for c in _row[:22]]
+                        _cen = _vals[11] if len(_vals) > 11 else None
+                        if _cen and str(_cen).startswith("CEN"):
+                            try:
+                                _cen_base[str(_cen)] = {
+                                    "aA": int(_vals[15] or 0),
+                                    "aB": int(_vals[16] or 0),
+                                    "aC": int(_vals[17] or 0),
+                                }
+                            except: pass
+                    _wb.close()
+                    ref = {}
+                    for cen in sorted(_cen_mc.keys()):
+                        _mc = _cen_mc[cen]
+                        _oA = _mc / _minA if _minA > 0 else 0
+                        _oB = _mc / _minB if _minB > 0 else 0
+                        _oC = _mc / _minC if _minC > 0 else 0
+                        _b = _cen_base.get(cen, {})
+                        ref[cen] = {"oA": _oA, "oB": _oB, "oC": _oC,
+                                    "aA": _b.get("aA", 1 if _oA > 0.40 else 0),
+                                    "aB": _b.get("aB", 1 if _oA > 0.75 else 0),
+                                    "aC": _b.get("aC", 1 if _oB > 0.75 else 0)}
+                    if ref: return ref
+                _wb.close()
+            except: pass
+        # Fallback: média dos meses
         centros_set = set()
         for _m in meses_lista:
             if res_base.get(_m):
@@ -2167,11 +2341,25 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
                     with st.spinner(f"Calculando '{novo_nome}'..."):
                         res_cen = calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg,
                                            horas_efetivas=horas_efetivas, overrides=novo_ov_por_mes)
+                        # ANO FY26: calcular como período único a partir da aba AnoFY26
+                        _res_ano_fy26 = None
+                        if eh_ano_novo and not meses_sel:
+                            _ov_ano_direto = novo_ov_por_mes.get(_meses_disponiveis[0], {}) if novo_ov_por_mes else {}
+                            # O override do ANO é o mesmo para todos os meses - pegar do primeiro
+                            # Mas _render_grade_form retorna {cen:{A,B,C}} diretamente para o ANO
+                            # Recuperar o override do ANO FY26 (foi salvo igual para todos os meses)
+                            _ov_ano_direto = novo_ov_por_mes.get(_meses_disponiveis[0]) if _meses_disponiveis else {}
+                            _res_ano_fy26 = calcular_ano_fy26(
+                                st.session_state.get("_fb_anual"),
+                                _ov_ano_direto,
+                                horas_efetivas, suporte_cfg, horas_turno
+                            )
                     _label_periodo = ("ANO FY26" if eh_ano_novo and not meses_sel else
                                       f"ANO FY26 + {','.join(m[:3].upper() for m in meses_sel)}" if eh_ano_novo else
                                       f"{len(meses_sel)} mês(es)")
                     st.session_state.cenarios[novo_nome] = {
                         "resultados": res_cen,
+                        "res_ano_fy26": _res_ano_fy26,
                         "mes": ("__ano__" if eh_ano_novo and not meses_sel else
                                 meses_sel[0] if meses_sel else _meses_disponiveis[0]),
                         "meses_configurados": list(meses_sel_raw),
@@ -2278,16 +2466,30 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
                     _m_ref = meses_cmp_lista[0] if meses_cmp_lista else None
                     _meses_prod = meses_cmp_lista if eh_ano_cmp else ([_m_ref] if _m_ref else [])
 
-                    def _calc_prod(res_d, meses_l):
-                        rr = [res_d.get(m) for m in meses_l if res_d.get(m)]
-                        if not rr: return None
-                        shc=sum(r["h_ciclo"] for r in rr); shl=sum(r["h_labor"] for r in rr)
-                        sha=sum(r["h_ativos"] for r in rr); sht=sum(r["h_todos"] for r in rr)
+                    def _calc_prod(res_d, meses_l, _res_ano=None):
+                        # Se resultado do ANO FY26 direto disponível, usa ele
+                        if _res_ano:
+                            r = _res_ano
+                            shc=r["h_ciclo"]; shl=r["h_labor"]
+                            sha=r["h_ativos"]; sht=r["h_todos"]
+                        else:
+                            rr = [res_d.get(m) for m in meses_l if res_d.get(m)]
+                            if not rr: return None
+                            shc=sum(r["h_ciclo"] for r in rr); shl=sum(r["h_labor"] for r in rr)
+                            sha=sum(r["h_ativos"] for r in rr); sht=sum(r["h_todos"] for r in rr)
                         return {"ciclo_op":shc/sha if sha>0 else 0,"ciclo_tot":shc/sht if sht>0 else 0,
                                 "labor_op":shl/sha if sha>0 else 0,"labor_tot":shl/sht if sht>0 else 0}
 
-                    prod_b = _calc_prod(res_base, _meses_prod)
-                    prod_c = _calc_prod(r_cen_res, _meses_prod)
+                    _res_ano_cen = dados_cen.get("res_ano_fy26") if eh_ano_cmp and dados_cen.get("eh_ano") and not dados_cen.get("meses_configurados", [None])[0].startswith("📅 ANO") else None
+                    _res_ano_base = read_horas_anual(st.session_state.get("_fb_anual"))
+                    _prod_base_ano = None
+                    if eh_ano_cmp and _res_ano_base:
+                        _h = _res_ano_base
+                        _shc=_h["h_ciclo"]; _shl=_h["h_labor"]; _sha=_h["h_ativos"]; _sht=_h["h_todos"]
+                        _prod_base_ano = {"ciclo_op":_shc/_sha if _sha>0 else 0,"ciclo_tot":_shc/_sht if _sht>0 else 0,
+                                          "labor_op":_shl/_sha if _sha>0 else 0,"labor_tot":_shl/_sht if _sht>0 else 0}
+                    prod_b = _prod_base_ano if _prod_base_ano else _calc_prod(res_base, _meses_prod)
+                    prod_c = _calc_prod(r_cen_res, _meses_prod, _res_ano=dados_cen.get("res_ano_fy26") if eh_ano_cmp else None)
 
                     if prod_b and prod_c:
                         st.markdown('<div class="jd-sub">Produtividades — Base vs Cenário</div>',unsafe_allow_html=True)
