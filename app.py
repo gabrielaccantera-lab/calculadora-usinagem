@@ -1354,8 +1354,8 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None,
         ws.row_dimensions[r].height = 14 if txt else 6
 
 @st.cache_data(show_spinner=False)
-def exportar_cenario_vs_base_cached(hash_key, _res_base, _res_cenario, meses_lista, nome_cenario, _res_ano_fy26_b=None, _res_ano_fy26_c=None, _file_bytes_ano=None):
-    return exportar_cenario_vs_base(_res_base, _res_cenario, meses_lista, nome_cenario, _res_ano_fy26_b, _res_ano_fy26_c, _file_bytes_ano)
+def exportar_cenario_vs_base_cached(hash_key, _res_base, _res_cenario, meses_lista, nome_cenario, _res_ano_fy26_b=None, _res_ano_fy26_c=None, _file_bytes_ano=None, _cp_data_fallback=None):
+    return exportar_cenario_vs_base(_res_base, _res_cenario, meses_lista, nome_cenario, _res_ano_fy26_b, _res_ano_fy26_c, _file_bytes_ano, _cp_data_fallback)
 
 @st.cache_data(show_spinner=False)
 def exportar_cached(res_hash, _resultados, _tempo=None, _dist=None, _aplic=None, _pmp=None, _file_bytes=None, _eh_cenario=False):
@@ -1443,7 +1443,7 @@ def exportar(resultados, _tempo=None, _dist=None, _aplic=None, _pmp=None, _file_
     gerar_aba_anual(wb,resultados,cp_data=_cp_ano,horas_anual=_horas_ano,eh_cenario=_eh_cenario)
     wb.save(out); out.seek(0); return out
 
-def exportar_cenario_vs_base(res_base, res_cenario, meses_lista, nome_cenario, res_ano_fy26_b=None, res_ano_fy26_c=None, _file_bytes_ano=None):
+def exportar_cenario_vs_base(res_base, res_cenario, meses_lista, nome_cenario, res_ano_fy26_b=None, res_ano_fy26_c=None, _file_bytes_ano=None, _cp_data_fallback=None):
     """Exporta base vs cenário para todos os meses em meses_lista.
     Gera: uma aba BASE por mês, uma aba CENÁRIO por mês, e uma aba Comparação consolidada.
     """
@@ -1572,23 +1572,17 @@ def exportar_cenario_vs_base(res_base, res_cenario, meses_lista, nome_cenario, r
 
     # ── aba ANO FY26: gerar aba ANO base + ANO cenário (igual ao exportar normal) ──
     if _usar_ano_fy26:
-        # _file_bytes_ano passado explicitamente (não usa st.session_state dentro do cache)
+        # cp_data: preferir AnoFY26; fallback = recalcular dos inputs do res_ano_fy26_b
         _cp_ano = build_cp_data_anual({}, None, None, None, None, file_bytes=_file_bytes_ano)
-        # Se não há AnoFY26, construir cp_data somando as peças do res_ano_fy26_b
-        if _cp_ano is None and res_ano_fy26_b is not None:
-            from collections import defaultdict as _dd
-            _cen_mc = _dd(float); _cen_ml = _dd(float)
-            if hasattr(res_ano_fy26_b.get("centros",None), "iterrows"):
-                for _, _r in res_ano_fy26_b["centros"].iterrows():
-                    _cen_mc[_r.centro]+=_r.min_ciclo_total; _cen_ml[_r.centro]+=_r.min_labor_total
-            _cp_ano = [(_cen,"(total)",1.0,0,0,1,1,1,1,_mc/_qt if (_qt:=1)>0 else 0,_mc,_cen_ml[_cen],1)
-                       for _cen,_mc in _cen_mc.items()] or None
+        if _cp_ano is None:
+            # Sem AnoFY26: usar cp_data calculado externamente por (centro, peça)
+            _cp_ano = _cp_data_fallback
         _ha = read_horas_anual(_file_bytes_ano)
-        # Aba BASE: usa res_base (todos os meses) com cp_data do AnoFY26
+        # Aba BASE: usa res_base (todos os meses) com cp_data
         _ws_base = wb.active; _ws_base.title = "ANO Base"
         gerar_aba_anual(wb, res_base, label="ANO Base", cp_data=_cp_ano,
                         horas_anual=_ha, eh_cenario=False, ws_existente=_ws_base)
-        # Aba CENÁRIO: usa res_cenario (todos os meses com overrides) com cp_data do AnoFY26
+        # Aba CENÁRIO: usa res_cenario (todos os meses com overrides) com cp_data
         _ws_cen = wb.create_sheet("ANO Cenário")
         gerar_aba_anual(wb, res_cenario, label="ANO Cenário", cp_data=_cp_ano,
                         horas_anual=None, eh_cenario=True, ws_existente=_ws_cen,
@@ -2770,9 +2764,10 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
                                 horas_turno, horas_efetivas)
                     else:
                         _r_ano_base_calc = None; _r_ano_cen = None
+                    _cp_fallback = _cp_fb if "_cp_fb" in dir() else None
                     st.download_button(label_dl, data=exportar_cenario_vs_base_cached(_cen_vs_hash, res_base, v["resultados"], _meses_exp, nm,
                                            _res_ano_fy26_b=_r_ano_base_calc, _res_ano_fy26_c=_r_ano_cen,
-                                           _file_bytes_ano=_fb_ano),
+                                           _file_bytes_ano=_fb_ano, _cp_data_fallback=_cp_fallback),
                                        file_name=fname_dl, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                        key=f"dl_cen_{nm}")
         with col_del:
