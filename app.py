@@ -1239,8 +1239,8 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None,
         ws.row_dimensions[r].height = 14 if txt else 6
 
 @st.cache_data(show_spinner=False)
-def exportar_cenario_vs_base_cached(hash_key, _res_base, _res_cenario, meses_lista, nome_cenario):
-    return exportar_cenario_vs_base(_res_base, _res_cenario, meses_lista, nome_cenario)
+def exportar_cenario_vs_base_cached(hash_key, _res_base, _res_cenario, meses_lista, nome_cenario, _res_ano_fy26_b=None, _res_ano_fy26_c=None):
+    return exportar_cenario_vs_base(_res_base, _res_cenario, meses_lista, nome_cenario, _res_ano_fy26_b, _res_ano_fy26_c)
 
 @st.cache_data(show_spinner=False)
 def exportar_cached(res_hash, _resultados, _tempo=None, _dist=None, _aplic=None, _pmp=None, _file_bytes=None, _eh_cenario=False):
@@ -1328,7 +1328,7 @@ def exportar(resultados, _tempo=None, _dist=None, _aplic=None, _pmp=None, _file_
     gerar_aba_anual(wb,resultados,cp_data=_cp_ano,horas_anual=_horas_ano,eh_cenario=_eh_cenario)
     wb.save(out); out.seek(0); return out
 
-def exportar_cenario_vs_base(res_base, res_cenario, meses_lista, nome_cenario):
+def exportar_cenario_vs_base(res_base, res_cenario, meses_lista, nome_cenario, res_ano_fy26_b=None, res_ano_fy26_c=None):
     """Exporta base vs cenário para todos os meses em meses_lista.
     Gera: uma aba BASE por mês, uma aba CENÁRIO por mês, e uma aba Comparação consolidada.
     """
@@ -1452,19 +1452,28 @@ def exportar_cenario_vs_base(res_base, res_cenario, meses_lista, nome_cenario):
 
     # ── aba ANO CONSOLIDADO (apenas quando há múltiplos meses) ───────────────
     meses_com_dados = [(m, res_base.get(m), res_cenario.get(m)) for m in meses_lista if res_base.get(m) and res_cenario.get(m)]
-    if len(meses_com_dados) > 1:
+    # Se res_ano_fy26 disponível: usar como período único (não soma dos meses)
+    _usar_ano_fy26 = res_ano_fy26_b is not None and res_ano_fy26_c is not None
+    if _usar_ano_fy26 or len(meses_com_dados) > 1:
         ws_ano = wb.create_sheet("ANO Consolidado")
         # Cabeçalho
-        _titulo_ano = f"ANO CONSOLIDADO | Base vs {nome_cenario} | {len(meses_com_dados)} meses"
+        if _usar_ano_fy26:
+            _titulo_ano = f"ANO FY26 | Base vs {nome_cenario} (aba AnoFY26)"
+        else:
+            _titulo_ano = f"ANO CONSOLIDADO | Base vs {nome_cenario} | {len(meses_com_dados)} meses"
         ws_ano.merge_cells("A1:J1")
         _ca = ws_ano.cell(1,1,_titulo_ano)
         _ca.font=Font(name="Arial",bold=True,color="FFFFFF",size=11); _ca.fill=PatternFill("solid",fgColor=JD_V)
         _ca.alignment=Alignment(horizontal="center",vertical="center"); _ca.border=brd
         ws_ano.row_dimensions[1].height=24
 
-        # Sub-cabeçalho: meses incluídos
+        # Sub-cabeçalho
         ws_ano.merge_cells("A2:J2")
-        _cm = ws_ano.cell(2,1,f"Meses: {', '.join(m[:3].upper() for m,_,__ in meses_com_dados)}")
+        if _usar_ano_fy26:
+            _sub = "Fonte: aba AnoFY26 — valores anuais diretos (não soma dos meses)"
+        else:
+            _sub = f"Meses: {', '.join(m[:3].upper() for m,_,__ in meses_com_dados)}"
+        _cm = ws_ano.cell(2,1,_sub)
         _cm.font=Font(name="Arial",bold=False,color="1F4D19",size=9); _cm.fill=PatternFill("solid",fgColor="E8F5E9")
         _cm.alignment=Alignment(horizontal="left",vertical="center"); _cm.border=brd
         ws_ano.row_dimensions[2].height=14
@@ -1477,60 +1486,76 @@ def exportar_cenario_vs_base(res_base, res_cenario, meses_lista, nome_cenario):
             _ch.alignment=Alignment(horizontal="center",vertical="center"); _ch.border=brd
         ws_ano.row_dimensions[3].height=16
 
-        # Agrega valores anuais
-        _sum = lambda key: (
-            sum(rb.get(key,0) for _,rb,__ in meses_com_dados),
-            sum(rc.get(key,0) for _,__,rc in meses_com_dados)
-        )
-        _avg = lambda key: (
-            sum(rb.get(key,0) for _,rb,__ in meses_com_dados) / len(meses_com_dados),
-            sum(rc.get(key,0) for _,__,rc in meses_com_dados) / len(meses_com_dados)
-        )
-        _sum_dias = sum(rb.get("dias",0) for _,rb,__ in meses_com_dados)
-
-        # Horas efetivas (usa o primeiro mês como referência)
-        _heA = meses_com_dados[0][1].get("heA", meses_com_dados[0][1].get("hA",0))
-        _heB = meses_com_dados[0][1].get("heB", meses_com_dados[0][1].get("hB",0))
-        _heC = meses_com_dados[0][1].get("heC", meses_com_dados[0][1].get("hC",0))
-
-        # Suporte anual: soma os valores de cada mês por função
-        _sup_keys = ["lavadora","gravacao","preset","coringa","facilitador"]
-        _sup_b_ano = {k: {"A": sum(rb["suporte"][k]["A"] for _,rb,__ in meses_com_dados),
-                          "B": sum(rb["suporte"][k]["B"] for _,rb,__ in meses_com_dados),
-                          "C": sum(rb["suporte"][k]["C"] for _,rb,__ in meses_com_dados)} for k in _sup_keys}
-        _sup_c_ano = {k: {"A": sum(rc["suporte"][k]["A"] for _,__,rc in meses_com_dados),
-                          "B": sum(rc["suporte"][k]["B"] for _,__,rc in meses_com_dados),
-                          "C": sum(rc["suporte"][k]["C"] for _,__,rc in meses_com_dados)} for k in _sup_keys}
-
-        metricas_ano = [
-            ("─── OPERADORES POR TURNO ───", None, None, True, "section"),
-            ("Turno A — Operadores",         *_sum("op_A"),    False, "int"),
-            ("Turno B — Operadores",         *_sum("op_B"),    False, "int"),
-            ("Turno C — Operadores",         *_sum("op_C"),    False, "int"),
-            ("─── TOTAL FUNCIONÁRIOS ───",   None, None, True, "section"),
-            ("Total Turno A (c/ suporte)",   *_sum("tot_A"),   True, "int"),
-            ("Total Turno B (c/ suporte)",   *_sum("tot_B"),   True, "int"),
-            ("Total Turno C (c/ suporte)",   *_sum("tot_C"),   True, "int"),
-            ("TOTAL FUNCIONÁRIOS (ano)",      *_sum("total"),   True, "int"),
-            ("─── HORAS DISPONÍVEIS ───",    None, None, True, "section"),
-            ("Horas totais Turno A",
-                sum(rb.get("tot_A",0)*_heA*rb.get("dias",0) for _,rb,__ in meses_com_dados),
-                sum(rc.get("tot_A",0)*_heA*rc.get("dias",0) for _,__,rc in meses_com_dados),
-                False, "float"),
-            ("Horas totais Turno B",
-                sum(rb.get("tot_B",0)*_heB*rb.get("dias",0) for _,rb,__ in meses_com_dados),
-                sum(rc.get("tot_B",0)*_heB*rc.get("dias",0) for _,__,rc in meses_com_dados),
-                False, "float"),
-            ("Horas totais Turno C",
-                sum(rb.get("tot_C",0)*_heC*rb.get("dias",0) for _,rb,__ in meses_com_dados),
-                sum(rc.get("tot_C",0)*_heC*rc.get("dias",0) for _,__,rc in meses_com_dados),
-                False, "float"),
-            ("─── PRODUTIVIDADE (média) ───", None, None, True, "section"),
-            ("Prod. Ciclo Operacional (méd.)", *_avg("prod_ciclo_op"), False, "pct"),
-            ("Prod. Ciclo Total (méd.)",       *_avg("prod_ciclo_tot"), False, "pct"),
-            ("Prod. Labor Operacional (méd.)", *_avg("prod_labor_op"), False, "pct"),
-            ("Prod. Labor Total ★ (méd.)",     *_avg("prod_labor_tot"), True, "pct"),
-        ]
+        if _usar_ano_fy26:
+            # Modo AnoFY26: usar res_ano_fy26_b e res_ano_fy26_c diretamente (período único)
+            _rb = res_ano_fy26_b; _rc = res_ano_fy26_c
+            _heA = _rb.get("heA", _rb.get("hA", 8.8))
+            _heB = _rb.get("heB", _rb.get("hB", 8.23))
+            _heC = _rb.get("heC", _rb.get("hC", 7.68))
+            _dias = _rb.get("dias", 214)
+            _sup_keys = ["lavadora","gravacao","preset","coringa","facilitador"]
+            metricas_ano = [
+                ("─── OPERADORES POR TURNO ───", None, None, True, "section"),
+                ("Turno A — Operadores",   _rb.get("op_A",0), _rc.get("op_A",0), False, "int"),
+                ("Turno B — Operadores",   _rb.get("op_B",0), _rc.get("op_B",0), False, "int"),
+                ("Turno C — Operadores",   _rb.get("op_C",0), _rc.get("op_C",0), False, "int"),
+                ("─── TOTAL FUNCIONÁRIOS ───", None, None, True, "section"),
+                ("Total Turno A (c/ suporte)", _rb.get("tot_A",0), _rc.get("tot_A",0), True, "int"),
+                ("Total Turno B (c/ suporte)", _rb.get("tot_B",0), _rc.get("tot_B",0), True, "int"),
+                ("Total Turno C (c/ suporte)", _rb.get("tot_C",0), _rc.get("tot_C",0), True, "int"),
+                ("TOTAL FUNCIONÁRIOS (ANO)",    _rb.get("total",0), _rc.get("total",0), True, "int"),
+                ("─── HORAS DISPONÍVEIS ───",  None, None, True, "section"),
+                ("Horas totais Turno A", _rb.get("tot_A",0)*_heA*_dias, _rc.get("tot_A",0)*_heA*_dias, False, "float"),
+                ("Horas totais Turno B", _rb.get("tot_B",0)*_heB*_dias, _rc.get("tot_B",0)*_heB*_dias, False, "float"),
+                ("Horas totais Turno C", _rb.get("tot_C",0)*_heC*_dias, _rc.get("tot_C",0)*_heC*_dias, False, "float"),
+                ("─── PRODUTIVIDADE ───", None, None, True, "section"),
+                ("Prod. Ciclo Operacional", _rb.get("prod_ciclo_op",0), _rc.get("prod_ciclo_op",0), False, "pct"),
+                ("Prod. Ciclo Total",       _rb.get("prod_ciclo_tot",0), _rc.get("prod_ciclo_tot",0), False, "pct"),
+                ("Prod. Labor Operacional", _rb.get("prod_labor_op",0), _rc.get("prod_labor_op",0), False, "pct"),
+                ("Prod. Labor Total ★",     _rb.get("prod_labor_tot",0), _rc.get("prod_labor_tot",0), True, "pct"),
+            ]
+        else:
+            # Modo soma de meses (comportamento original)
+            _sum = lambda key: (
+                sum(rb.get(key,0) for _,rb,__ in meses_com_dados),
+                sum(rc.get(key,0) for _,__,rc in meses_com_dados)
+            )
+            _avg = lambda key: (
+                sum(rb.get(key,0) for _,rb,__ in meses_com_dados) / len(meses_com_dados),
+                sum(rc.get(key,0) for _,__,rc in meses_com_dados) / len(meses_com_dados)
+            )
+            _heA = meses_com_dados[0][1].get("heA", meses_com_dados[0][1].get("hA",0))
+            _heB = meses_com_dados[0][1].get("heB", meses_com_dados[0][1].get("hB",0))
+            _heC = meses_com_dados[0][1].get("heC", meses_com_dados[0][1].get("hC",0))
+            metricas_ano = [
+                ("─── OPERADORES POR TURNO ───", None, None, True, "section"),
+                ("Turno A — Operadores",         *_sum("op_A"),    False, "int"),
+                ("Turno B — Operadores",         *_sum("op_B"),    False, "int"),
+                ("Turno C — Operadores",         *_sum("op_C"),    False, "int"),
+                ("─── TOTAL FUNCIONÁRIOS ───",   None, None, True, "section"),
+                ("Total Turno A (c/ suporte)",   *_sum("tot_A"),   True, "int"),
+                ("Total Turno B (c/ suporte)",   *_sum("tot_B"),   True, "int"),
+                ("Total Turno C (c/ suporte)",   *_sum("tot_C"),   True, "int"),
+                ("TOTAL FUNCIONÁRIOS (ano)",      *_sum("total"),   True, "int"),
+                ("─── HORAS DISPONÍVEIS ───",    None, None, True, "section"),
+                ("Horas totais Turno A",
+                    sum(rb.get("tot_A",0)*_heA*rb.get("dias",0) for _,rb,__ in meses_com_dados),
+                    sum(rc.get("tot_A",0)*_heA*rc.get("dias",0) for _,__,rc in meses_com_dados),
+                    False, "float"),
+                ("Horas totais Turno B",
+                    sum(rb.get("tot_B",0)*_heB*rb.get("dias",0) for _,rb,__ in meses_com_dados),
+                    sum(rc.get("tot_B",0)*_heB*rc.get("dias",0) for _,__,rc in meses_com_dados),
+                    False, "float"),
+                ("Horas totais Turno C",
+                    sum(rb.get("tot_C",0)*_heC*rb.get("dias",0) for _,rb,__ in meses_com_dados),
+                    sum(rc.get("tot_C",0)*_heC*rc.get("dias",0) for _,__,rc in meses_com_dados),
+                    False, "float"),
+                ("─── PRODUTIVIDADE (média) ───", None, None, True, "section"),
+                ("Prod. Ciclo Operacional (méd.)", *_avg("prod_ciclo_op"), False, "pct"),
+                ("Prod. Ciclo Total (méd.)",       *_avg("prod_ciclo_tot"), False, "pct"),
+                ("Prod. Labor Operacional (méd.)", *_avg("prod_labor_op"), False, "pct"),
+                ("Prod. Labor Total ★ (méd.)",     *_avg("prod_labor_tot"), True, "pct"),
+            ]
 
         _ri_ano = 4
         for item in metricas_ano:
@@ -2285,7 +2310,7 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
             st.warning("Selecione ao menos um período para configurar.")
         else:
             if eh_ano_novo and not meses_sel:
-                st.markdown('<div class="aviso-warn">📅 <b>ANO FY26</b> — o override será aplicado no consolidado anual (AnoFY26). A ocupação exibida é a média de todos os meses.</div>', unsafe_allow_html=True)
+                st.markdown('<div class="aviso-warn">📅 <b>ANO FY26</b> — ajuste os funcionários por turno e veja o impacto direto nas produtividades anuais.</div>', unsafe_allow_html=True)
             elif eh_ano_novo and meses_sel:
                 meses_str = ", ".join(m[:3].upper() for m in meses_sel)
                 st.markdown(f'<div class="aviso-warn">📅 <b>ANO FY26 + meses individuais</b> — ANO e também: {meses_str}.</div>', unsafe_allow_html=True)
@@ -2294,6 +2319,14 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
                 meses_str = ", ".join(m[:3].upper() for m in meses_sel)
                 st.markdown(f'<div class="aviso-ok">🗓️ <b>{n} mês(es)</b>: {meses_str}. Cada período tem overrides independentes.</div>', unsafe_allow_html=True)
 
+            # Botão de abertura em vez de aviso colapsável
+            _btn_key = f"btn_abrir_grade_{novo_nome}_{'_'.join(meses_sel_raw)}"
+            if _btn_key not in st.session_state:
+                st.session_state[_btn_key] = False
+            if not st.session_state[_btn_key]:
+                if st.button("✏️ Configurar funcionários por turno →", type="primary", key=f"open_{_btn_key}", use_container_width=True):
+                    st.session_state[_btn_key] = True; st.rerun()
+                st.stop()
             st.markdown('<div class="aviso-ok" style="margin-bottom:8px;">✏️ <b>Edite à vontade</b> — nada recalcula enquanto você ajusta. Só roda quando clicar em <b>Salvar</b>.</div>', unsafe_allow_html=True)
 
             # Pré-calcular referências de ocupação
@@ -2570,7 +2603,12 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
                     label_dl = f"📥 {nm} ({_label_meses})"
                     fname_dl = f"cenario_{nm.replace(' ','_')}_{'ANO' if v.get('eh_ano') else '_'.join(m[:3] for m in _meses_exp)}.xlsx"
                     _cen_vs_hash = hash(nm + str(v["resultados"]) + str(_meses_exp))
-                    st.download_button(label_dl, data=exportar_cenario_vs_base_cached(_cen_vs_hash, res_base, v["resultados"], _meses_exp, nm),
+                    _r_ano_b = read_horas_anual(st.session_state.get("_fb_anual")) if v.get("eh_ano") else None
+                    # Para base ANO FY26: criar res_ano_fy26 base (sem overrides)
+                    _r_ano_base_calc = calcular_ano_fy26(st.session_state.get("_fb_anual"), {}, horas_efetivas, suporte_cfg, horas_turno) if v.get("eh_ano") else None
+                    _r_ano_cen = v.get("res_ano_fy26") if v.get("eh_ano") else None
+                    st.download_button(label_dl, data=exportar_cenario_vs_base_cached(_cen_vs_hash, res_base, v["resultados"], _meses_exp, nm,
+                                           _res_ano_fy26_b=_r_ano_base_calc, _res_ano_fy26_c=_r_ano_cen),
                                        file_name=fname_dl, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                        key=f"dl_cen_{nm}")
         with col_del:
