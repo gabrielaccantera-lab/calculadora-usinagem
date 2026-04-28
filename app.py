@@ -869,7 +869,7 @@ def read_horas_anual(file_bytes):
     except: return None
 
 
-def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None):
+def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None, eh_cenario=False):
     meses_com_dados = [(m, resultados[m]) for m in MESES if resultados.get(m)]
     if not meses_com_dados: return
     brd = Border(left=Side(style='thin',color='CCCCCC'),right=Side(style='thin',color='CCCCCC'),
@@ -918,8 +918,9 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None)
         for (_cen,_peca,_pct,_tc,_tl,_dc,_vi,_dv,_di,_idx,_mc,_ml,_qt) in cp_data:
             _cmc[_cen]+=_mc; _cml[_cen]+=_ml
         cen_mc=_cmc; cen_ml=_cml
-    # Se horas_anual disponível (lido do AnoFY26), usar para produtividades consistentes
-    if horas_anual:
+    # Para a BASE: usa horas do AnoFY26 (consistente com tabela de peças)
+    # Para CENÁRIOS: usa soma dos meses do próprio cenário (reflete overrides)
+    if horas_anual and not eh_cenario:
         _hc=horas_anual["h_ciclo"]; _hl=horas_anual["h_labor"]
         _ha=horas_anual["h_ativos"]; _ht=horas_anual["h_todos"]
         prod_co=_hc/_ha if _ha>0 else 0; prod_ct=_hc/_ht if _ht>0 else 0
@@ -1117,10 +1118,10 @@ def exportar_cenario_vs_base_cached(hash_key, _res_base, _res_cenario, meses_lis
     return exportar_cenario_vs_base(_res_base, _res_cenario, meses_lista, nome_cenario)
 
 @st.cache_data(show_spinner=False)
-def exportar_cached(res_hash, _resultados, _tempo=None, _dist=None, _aplic=None, _pmp=None, _file_bytes=None):
-    return exportar(_resultados, _tempo, _dist, _aplic, _pmp, _file_bytes)
+def exportar_cached(res_hash, _resultados, _tempo=None, _dist=None, _aplic=None, _pmp=None, _file_bytes=None, _eh_cenario=False):
+    return exportar(_resultados, _tempo, _dist, _aplic, _pmp, _file_bytes, _eh_cenario)
 
-def exportar(resultados, _tempo=None, _dist=None, _aplic=None, _pmp=None, _file_bytes=None):
+def exportar(resultados, _tempo=None, _dist=None, _aplic=None, _pmp=None, _file_bytes=None, _eh_cenario=False):
     out=BytesIO(); wb=openpyxl.Workbook()
     brd=Border(left=Side(style='thin',color='CCCCCC'),right=Side(style='thin',color='CCCCCC'),top=Side(style='thin',color='CCCCCC'),bottom=Side(style='thin',color='CCCCCC'))
     def ec_l(c,bg="FFFFFF",fg="000000",bold=False,fmt=None,center=True):
@@ -1199,7 +1200,7 @@ def exportar(resultados, _tempo=None, _dist=None, _aplic=None, _pmp=None, _file_
     else:
         _cp_ano=None
     _horas_ano=read_horas_anual(_fb_ano)
-    gerar_aba_anual(wb,resultados,cp_data=_cp_ano,horas_anual=_horas_ano)
+    gerar_aba_anual(wb,resultados,cp_data=_cp_ano,horas_anual=_horas_ano,eh_cenario=_eh_cenario)
     wb.save(out); out.seek(0); return out
 
 def exportar_cenario_vs_base(res_base, res_cenario, meses_lista, nome_cenario):
@@ -2025,20 +2026,64 @@ with tab_cen:
 
     def _render_grade_form(centros_ref, prefix):
         """Grade de centros×turnos dentro de um st.form. Retorna dict {centro: {A,B,C}}."""
+        # Instrução clara no topo
+        st.markdown("""
+<div style="background:#0D2A0D;border-left:4px solid #FFDE00;border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:13px;color:#FAFAFA;">
+✏️ <b>Como usar:</b> para cada máquina, defina quantos <b>funcionários</b> devem trabalhar em cada turno.<br>
+Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa que o turno não estará ativo para aquela máquina.
+</div>
+""", unsafe_allow_html=True)
+
+        # Legenda de cores
+        st.markdown("""
+<div style="display:flex;gap:18px;font-size:12px;color:#AAAAAA;margin-bottom:10px;padding:6px 0;">
+  <span>🟢 Carga abaixo de 85% — turno confortável</span>
+  <span>🟡 Carga entre 85% e 100% — atenção</span>
+  <span>🔴 Carga acima de 100% — sobrecarga</span>
+</div>
+""", unsafe_allow_html=True)
+
+        # Cabeçalho da tabela
         cols_h = st.columns([3, 1, 1, 1])
-        cols_h[0].markdown("**Centro — Ocup. A / B / C**")
-        cols_h[1].markdown("**A**"); cols_h[2].markdown("**B**"); cols_h[3].markdown("**C**")
+        cols_h[0].markdown("**Máquina — % de ocupação atual (Turno A / B / C)**")
+        cols_h[1].markdown("**Nº Funcionários<br>Turno A (manhã)**", unsafe_allow_html=True)
+        cols_h[2].markdown("**Nº Funcionários<br>Turno B (tarde)**", unsafe_allow_html=True)
+        cols_h[3].markdown("**Nº Funcionários<br>Turno C (noite)**", unsafe_allow_html=True)
+
+        st.markdown("<hr style='border-color:#333;margin:4px 0 8px 0;'>", unsafe_allow_html=True)
+
         ov = {}
         for cen, ref in centros_ref.items():
             eA = "🔴" if ref["oA"] > 1 else ("🟡" if ref["oA"] >= 0.85 else "🟢")
             eB = "🔴" if ref["oB"] > 1 else ("🟡" if ref["oB"] >= 0.85 else "🟢")
             eC = "🔴" if ref["oC"] > 1 else ("🟡" if ref["oC"] >= 0.85 else "🟢")
             c0, c1, c2, c3 = st.columns([3, 1, 1, 1])
-            c0.markdown(f"`{cen}` {eA}{ref['oA']:.0%} / {eB}{ref['oB']:.0%} / {eC}{ref['oC']:.0%}")
-            vA = c1.number_input("A", 0, 5, ref["aA"], key=f"{prefix}_{cen}_A", label_visibility="collapsed")
-            vB = c2.number_input("B", 0, 5, ref["aB"], key=f"{prefix}_{cen}_B", label_visibility="collapsed")
-            vC = c3.number_input("C", 0, 5, ref["aC"], key=f"{prefix}_{cen}_C", label_visibility="collapsed")
+            c0.markdown(
+                f"<div style='padding:6px 0;font-size:13px;'>"
+                f"<b style='color:#FFDE00;font-size:14px;'>{cen}</b><br>"
+                f"<span style='font-size:12px;color:#AAAAAA;'>Ocupação: "
+                f"{eA} {ref['oA']:.0%} (A) &nbsp;|&nbsp; "
+                f"{eB} {ref['oB']:.0%} (B) &nbsp;|&nbsp; "
+                f"{eC} {ref['oC']:.0%} (C)</span></div>",
+                unsafe_allow_html=True
+            )
+            vA = c1.number_input(f"Funcionários Turno A — {cen}", 0, 5, ref["aA"],
+                                  key=f"{prefix}_{cen}_A", label_visibility="collapsed",
+                                  help=f"{cen}: número de funcionários no Turno A (manhã). Ocupação atual: {ref['oA']:.0%}")
+            vB = c2.number_input(f"Funcionários Turno B — {cen}", 0, 5, ref["aB"],
+                                  key=f"{prefix}_{cen}_B", label_visibility="collapsed",
+                                  help=f"{cen}: número de funcionários no Turno B (tarde). Ocupação atual: {ref['oB']:.0%}")
+            vC = c3.number_input(f"Funcionários Turno C — {cen}", 0, 5, ref["aC"],
+                                  key=f"{prefix}_{cen}_C", label_visibility="collapsed",
+                                  help=f"{cen}: número de funcionários no Turno C (noite). Ocupação atual: {ref['oC']:.0%}")
             ov[cen] = {"A": vA, "B": vB, "C": vC}
+
+        st.markdown("<hr style='border-color:#333;margin:8px 0 4px 0;'>", unsafe_allow_html=True)
+        st.markdown(
+            "<div style='font-size:11px;color:#666;text-align:right;'>"
+            "💡 Passe o mouse sobre os campos para ver detalhes de cada máquina e turno."
+            "</div>", unsafe_allow_html=True
+        )
         return ov
 
     _meses_disponiveis = [m for m in MESES if res_base.get(m)]
@@ -2817,4 +2862,4 @@ Inclui totais de minutos/horas/dias, bloco de DADOS AUTOMÁTICOS e aba ANO.
             st.markdown('<div class="jd-sub">Cenários salvos</div>',unsafe_allow_html=True)
             for nm,v in st.session_state.cenarios.items():
                 _cen_hash = hash(str(v["resultados"]) + nm)
-                st.download_button(f"📥 Cenário: {nm}",data=exportar_cached(_cen_hash, v["resultados"],tempo,dist,aplic,pmp),file_name=f"cenario_{nm.replace(' ','_')}.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key=f"exp_{nm}")
+                st.download_button(f"📥 Cenário: {nm}",data=exportar_cached(_cen_hash, v["resultados"],tempo,dist,aplic,pmp,_eh_cenario=True),file_name=f"cenario_{nm.replace(' ','_')}.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key=f"exp_{nm}")
