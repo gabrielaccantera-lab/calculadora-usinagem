@@ -994,6 +994,109 @@ def calcular_ano_fy26(file_bytes, overrides_ano, horas_efetivas, suporte_cfg, ho
         return None
 
 
+def build_cp_data_from_meses(resultados, tempo, dist, aplic, pmp, dias_por_mes, horas_turno, horas_efetivas):
+    """Constrói cp_data e res_ano no formato do AnoFY26 somando os meses disponíveis.
+    Usado quando o Excel de entrada não possui aba AnoFY26."""
+    from collections import defaultdict
+    meses_com_dados = [m for m in MESES if resultados.get(m)]
+    if not meses_com_dados: return None, None
+
+    # Agregar min_ciclo e min_labor por (centro, peca) somando os meses
+    try:
+        df = (aplic.merge(pmp, on="modelo").merge(tempo, on=["centro","peca"]).merge(dist, on=["centro","peca"]))
+        df["vol_int"]    = pd.to_numeric(df.get("vol_int",1),    errors="coerce").fillna(1.0)
+        df["div_carga"]  = pd.to_numeric(df["div_carga"],  errors="coerce").fillna(0.0)
+        df["div_volume"] = pd.to_numeric(df["div_volume"], errors="coerce").fillna(0.0)
+        df["disponib"]   = pd.to_numeric(df["disponib"],   errors="coerce").fillna(1.0)
+        df["indice_ciclo"] = (df.t_ciclo*df.div_carga*df.div_volume*df.vol_int)/df.disponib
+        df_ano = df[df.mes.isin(meses_com_dados)]
+        # Somar qtd por (centro, peca) nos meses com dados
+        agg = df_ano.groupby(["centro","peca"])[["qtd"]].sum().reset_index()
+        attrs = df_ano.drop_duplicates(["centro","peca"])[
+            ["centro","peca","t_ciclo","t_labor","div_carga","vol_int","div_volume","disponib","indice_ciclo","pc_trat"]
+        ].set_index(["centro","peca"])
+
+        cp_data = []
+        for _, row in agg.iterrows():
+            cen, peca = row.centro, row.peca
+            try:
+                at = attrs.loc[(cen,peca)]
+                tc=float(at.t_ciclo); tl=float(at.t_labor)
+                dc=float(at.div_carga); vi=float(at.vol_int)
+                dv=float(at.div_volume); di=float(at.disponib)
+                idx=float(at.indice_ciclo)
+                pct=float(at.pc_trat) if hasattr(at,'pc_trat') else 1.0
+                qt=int(row.qtd)
+                mc=idx*qt; ml=tl*dc*qt
+            except: continue
+            cp_data.append((cen, peca, pct, tc, tl, dc, vi, dv, di, idx, mc, ml, qt))
+
+        if not cp_data: return None, None
+
+        # Construir res_ano a partir dos meses (mesma estrutura que calcular_ano_fy26)
+        dias_total = sum(dias_por_mes.get(m, 0) for m in meses_com_dados)
+        hA = horas_turno.get("A", 7.5); hB = horas_turno.get("B", 14.25); hC = horas_turno.get("C", 19.5)
+        heA = horas_efetivas.get("A", hA); heB = horas_efetivas.get("B", hB); heC = horas_efetivas.get("C", hC)
+        minA = dias_total * hA * 60; minB = dias_total * hB * 60; minC = dias_total * hC * 60
+
+        cen_mc = defaultdict(float); cen_ml = defaultdict(float)
+        for (_cen,_peca,_pct,_tc,_tl,_dc,_vi,_dv,_di,_idx,_mc,_ml,_qt) in cp_data:
+            cen_mc[_cen]+=_mc; cen_ml[_cen]+=_ml
+
+        # Acumular totais dos meses
+        centros_rows = []
+        cen_ativos = defaultdict(lambda: {"aA":0,"aB":0,"aC":0})
+        for m in meses_com_dados:
+            r = resultados[m]
+            for _, row in r["centros"].iterrows():
+                cen = row.centro
+                cen_ativos[cen]["aA"] = max(cen_ativos[cen]["aA"], int(row.ativo_A))
+                cen_ativos[cen]["aB"] = max(cen_ativos[cen]["aB"], int(row.ativo_B))
+                cen_ativos[cen]["aC"] = max(cen_ativos[cen]["aC"], int(row.ativo_C))
+
+        centros = []
+        for cen in sorted(cen_mc.keys()):
+            mc=cen_mc[cen]; ml=cen_ml[cen]
+            oA=mc/minA if minA>0 else 0; oB=mc/minB if minB>0 else 0; oC=mc/minC if minC>0 else 0
+            ca = cen_ativos.get(cen,{"aA":0,"aB":0,"aC":0})
+            aA=ca["aA"]; aB=ca["aB"]; aC=ca["aC"]
+            centros.append({"centro":cen,"ocup_A":oA,"ocup_B":oB,"ocup_C":oC,
+                            "ativo_A":aA,"ativo_B":aB,"ativo_C":aC,
+                            "min_ciclo_total":mc,"min_labor_total":ml,
+                            "min_disp_A":minA,"min_disp_B":minB,"min_disp_C":minC,
+                            "horas_ciclo":mc/60,"horas_labor":ml/60,
+                            "horas_disp_A":dias_total*heA*aA,
+                            "horas_disp_B":dias_total*heB*aB,
+                            "horas_disp_C":dias_total*heC*aC})
+
+        df_c = pd.DataFrame(centros)
+        op_A=int(df_c.ativo_A.sum()); op_B=int(df_c.ativo_B.sum()); op_C=int(df_c.ativo_C.sum())
+
+        h_ciclo=float(df_c.horas_ciclo.sum()); h_labor=float(df_c.horas_labor.sum())
+        h_ativos=float((df_c.horas_disp_A+df_c.horas_disp_B+df_c.horas_disp_C).sum())
+        # h_todos: somar todos os funcionários (operadores + suporte fixo padrão) * horas * dias
+        sup_tot_A=1+1+2+1+1; sup_tot_B=1+1+1+0+1; sup_tot_C=0+0+1+0+0  # lav+gra+pre+cor+fac
+        tot_A=op_A+sup_tot_A; tot_B=op_B+sup_tot_B; tot_C=op_C+sup_tot_C
+        h_todos=tot_A*dias_total*heA+tot_B*dias_total*heB+tot_C*dias_total*heC
+
+        res_ano = {"centros":df_c,"op_A":op_A,"op_B":op_B,"op_C":op_C,
+                   "tot_A":tot_A,"tot_B":tot_B,"tot_C":tot_C,"total":tot_A+tot_B+tot_C,
+                   "suporte":{"lavadora":{"A":1,"B":1,"C":0},"gravacao":{"A":1,"B":1,"C":0},
+                              "preset":{"A":2,"B":1,"C":1},"coringa":{"A":1,"B":0,"C":0},
+                              "facilitador":{"A":1,"B":1,"C":0}},
+                   "h_ciclo":h_ciclo,"h_labor":h_labor,"h_ativos":h_ativos,"h_todos":h_todos,
+                   "prod_ciclo_op":h_ciclo/h_ativos if h_ativos>0 else 0,
+                   "prod_ciclo_tot":h_ciclo/h_todos if h_todos>0 else 0,
+                   "prod_labor_op":h_labor/h_ativos if h_ativos>0 else 0,
+                   "prod_labor_tot":h_labor/h_todos if h_todos>0 else 0,
+                   "dias":dias_total,"hA":hA,"hB":hB,"hC":hC,
+                   "heA":heA,"heB":heB,"heC":heC,
+                   "thr_A":0.0,"thr_B":0.0,"thr_C":0.0,
+                   "minA":minA,"minB":minB,"minC":minC}
+        return cp_data, res_ano
+    except: return None, None
+
+
 def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None, eh_cenario=False, ws_existente=None, res_ano_override=None):
     meses_com_dados = [(m, resultados[m]) for m in MESES if resultados.get(m)]
     if not meses_com_dados: return
@@ -1470,6 +1573,15 @@ def exportar_cenario_vs_base(res_base, res_cenario, meses_lista, nome_cenario, r
     if _usar_ano_fy26:
         # _file_bytes_ano passado explicitamente (não usa st.session_state dentro do cache)
         _cp_ano = build_cp_data_anual({}, None, None, None, None, file_bytes=_file_bytes_ano)
+        # Se não há AnoFY26, construir cp_data somando as peças do res_ano_fy26_b
+        if _cp_ano is None and res_ano_fy26_b is not None:
+            from collections import defaultdict as _dd
+            _cen_mc = _dd(float); _cen_ml = _dd(float)
+            if hasattr(res_ano_fy26_b.get("centros",None), "iterrows"):
+                for _, _r in res_ano_fy26_b["centros"].iterrows():
+                    _cen_mc[_r.centro]+=_r.min_ciclo_total; _cen_ml[_r.centro]+=_r.min_labor_total
+            _cp_ano = [(_cen,"(total)",1.0,0,0,1,1,1,1,_mc/_qt if (_qt:=1)>0 else 0,_mc,_cen_ml[_cen],1)
+                       for _cen,_mc in _cen_mc.items()] or None
         _ha = read_horas_anual(_file_bytes_ano)
         # Aba BASE: usa res_base (todos os meses) com cp_data do AnoFY26
         _ws_base = wb.active; _ws_base.title = "ANO Base"
@@ -2642,9 +2754,21 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
                     fname_dl = f"cenario_{nm.replace(' ','_')}_{'ANO' if v.get('eh_ano') else '_'.join(m[:3] for m in _meses_exp)}.xlsx"
                     _cen_vs_hash = hash(nm + str(v["resultados"]) + str(_meses_exp))
                     _fb_ano = st.session_state.get("_fb_anual")
-                    # Para base ANO FY26: criar res_ano_fy26 base (sem overrides)
-                    _r_ano_base_calc = calcular_ano_fy26(_fb_ano, {}, horas_efetivas, suporte_cfg, horas_turno) if v.get("eh_ano") else None
-                    _r_ano_cen = v.get("res_ano_fy26") if v.get("eh_ano") else None
+                    if v.get("eh_ano"):
+                        # Tentar AnoFY26; se não existir, construir dos meses
+                        _r_ano_base_calc = calcular_ano_fy26(_fb_ano, {}, horas_efetivas, suporte_cfg, horas_turno)
+                        _r_ano_cen = v.get("res_ano_fy26")
+                        if _r_ano_base_calc is None or _r_ano_cen is None:
+                            _cp_fb, _r_ano_base_calc = build_cp_data_from_meses(
+                                res_base, tempo, dist, aplic, pmp,
+                                {m: res_base[m]["dias"] for m in MESES if res_base.get(m)},
+                                horas_turno, horas_efetivas)
+                            _, _r_ano_cen = build_cp_data_from_meses(
+                                v["resultados"], tempo, dist, aplic, pmp,
+                                {m: res_base[m]["dias"] for m in MESES if res_base.get(m)},
+                                horas_turno, horas_efetivas)
+                    else:
+                        _r_ano_base_calc = None; _r_ano_cen = None
                     st.download_button(label_dl, data=exportar_cenario_vs_base_cached(_cen_vs_hash, res_base, v["resultados"], _meses_exp, nm,
                                            _res_ano_fy26_b=_r_ano_base_calc, _res_ano_fy26_c=_r_ano_cen,
                                            _file_bytes_ano=_fb_ano),
