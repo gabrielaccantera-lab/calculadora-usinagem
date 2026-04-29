@@ -1156,7 +1156,7 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None,
         sum_hativos=_ro.get("h_ativos",sum_hativos); sum_htodos=_ro.get("h_todos",sum_htodos)
         sup_somas={k:{"A":_ro["suporte"][k]["A"],"B":_ro["suporte"][k]["B"],"C":_ro["suporte"][k]["C"]} for k in sup_somas} if _ro.get("suporte") else sup_somas
     # Para a BASE: usa horas do AnoFY26 (consistente com tabela de peças)
-    # Para CENÁRIOS: usa soma dos meses do próprio cenário (reflete overrides)
+    # Para CENÁRIOS ou quando não há AnoFY26: recalcular do cp_data (parâmetros anuais)
     if horas_anual and not eh_cenario:
         _hc=horas_anual["h_ciclo"]; _hl=horas_anual["h_labor"]
         _ha=horas_anual["h_ativos"]; _ht=horas_anual["h_todos"]
@@ -1189,6 +1189,14 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None,
     tot_suporte_C=sum(sup_ano(k,"C") for k in sup_somas)
     tot_A_calc=op_A_ano+tot_suporte_A; tot_B_calc=op_B_ano+tot_suporte_B; tot_C_calc=op_C_ano+tot_suporte_C
     tot_func_calc=tot_A_calc+tot_B_calc+tot_C_calc
+    # Sem AnoFY26 e sem cenário: recalcular produtividades do cp_data (evita acumulação mensal incorreta)
+    if cp_data and not (horas_anual and not eh_cenario) and not eh_cenario:
+        _hc_cp = sum(mc for (_,_,_,_,_,_,_,_,_,_,mc,_,_) in cp_data) / 60
+        _hl_cp = sum(ml for (_,_,_,_,_,_,_,_,_,_,_,ml,_) in cp_data) / 60
+        _ha_cp = sum(hdA(c)+hdB(c)+hdC(c) for c in centros_ord)
+        _ht_cp = tot_A_calc*dias_ano*heA + tot_B_calc*dias_ano*heB + tot_C_calc*dias_ano*heC
+        if _ha_cp > 0: prod_co=_hc_cp/_ha_cp; prod_lo=_hl_cp/_ha_cp
+        if _ht_cp > 0: prod_ct=_hc_cp/_ht_cp; prod_lt=_hl_cp/_ht_cp
     if ws_existente is not None:
         ws=ws_existente; ws.title=label; ws.freeze_panes="F7"
     else:
