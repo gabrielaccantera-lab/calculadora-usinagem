@@ -2116,7 +2116,10 @@ with tab_vis:
 # ── TAB 2 INPUTS
 with tab_inp:
     st.markdown('<div class="jd-section">Dados carregados</div>',unsafe_allow_html=True)
-    aba_inp=st.radio("Qual dado conferir?",["INPUT_PMP","IMPUTTEMPO","IMPUTDISTRIBUIÇÃO","IMPUTAPLICAÇÃO"],horizontal=True)
+    _aba_labels = {"INPUT_PMP":"INPUT PMP","IMPUTTEMPO":"IMPUT TEMPO","IMPUTDISTRIBUIÇÃO":"IMPUT DISTRIBUIÇÃO","IMPUTAPLICAÇÃO":"IMPUT APLICAÇÃO"}
+    _aba_keys   = ["INPUT_PMP","IMPUTTEMPO","IMPUTDISTRIBUIÇÃO","IMPUTAPLICAÇÃO"]
+    _aba_sel_label = st.radio("Qual dado conferir?",[_aba_labels[k] for k in _aba_keys],horizontal=True)
+    aba_inp = _aba_keys[[_aba_labels[k] for k in _aba_keys].index(_aba_sel_label)]
     if aba_inp=="INPUT_PMP": st.dataframe(pmp.head(100),use_container_width=True,hide_index=True)
     elif aba_inp=="IMPUTTEMPO": st.dataframe(tempo.head(100),use_container_width=True,hide_index=True)
     elif aba_inp=="IMPUTDISTRIBUIÇÃO": st.dataframe(dist.head(100),use_container_width=True,hide_index=True)
@@ -2752,9 +2755,9 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
                 # Usa o primeiro mês com dados para a comparação base vs cenário
                 _m_exp = next((m for m in _meses_exp if res_base.get(m)), None)
                 if _m_exp:
-                    _label_meses = "ANO_FY26" if v.get("eh_ano") else ", ".join(m[:3].upper() for m in _meses_exp)
-                    label_dl = f"📥 {nm} ({_label_meses})"
-                    fname_dl = f"cenario_{nm.replace(' ','_')}_{'ANO' if v.get('eh_ano') else '_'.join(m[:3] for m in _meses_exp)}.xlsx"
+                    _label_meses = "ANO FY26" if v.get("eh_ano") else ", ".join(m[:3].upper() for m in _meses_exp)
+                    label_dl = f"📥 {nm} — {_label_meses}"
+                    fname_dl = f"cenario_{nm.replace(' ','_')}_ANO.xlsx" if v.get("eh_ano") else f"cenario_{nm.replace(' ','_')}_{'_'.join(m[:3] for m in _meses_exp)}.xlsx"
                     _cen_vs_hash = hash(nm + str(v["resultados"]) + str(_meses_exp))
                     _fb_ano = st.session_state.get("_fb_anual")
                     if v.get("eh_ano"):
