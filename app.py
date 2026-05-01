@@ -1445,7 +1445,7 @@ def exportar(resultados, _tempo=None, _dist=None, _aplic=None, _pmp=None, _file_
         c2=wsm.cell(2,1,"CENTRO"); c2.font=Font(name="Arial",bold=True,color="FFFFFF",size=9); c2.fill=PatternFill("solid",fgColor=JD_V2); c2.alignment=Alignment(horizontal="center",vertical="center"); c2.border=brd
         c2=wsm.cell(2,2,"% OCUPAÇÃO"); c2.font=Font(name="Arial",bold=True,color="FFFFFF",size=9); c2.fill=PatternFill("solid",fgColor=JD_V2); c2.alignment=Alignment(horizontal="center",vertical="center"); c2.border=brd
         wsm.merge_cells("E2:G2")
-        c2=wsm.cell(2,5,"TURNO ATIVO (0=inativo 1=ativo)"); c2.font=Font(name="Arial",bold=True,color=JD_V2,size=9); c2.fill=PatternFill("solid",fgColor=JD_Y2); c2.alignment=Alignment(horizontal="center",vertical="center"); c2.border=brd
+        c2=wsm.cell(2,5,"Nº FUNCIONÁRIOS POR TURNO"); c2.font=Font(name="Arial",bold=True,color=JD_V2,size=9); c2.fill=PatternFill("solid",fgColor=JD_Y2); c2.alignment=Alignment(horizontal="center",vertical="center"); c2.border=brd
         wsm.merge_cells("H2:J2")
         c2=wsm.cell(2,8,"HORAS DISPONIVEIS NO MES"); c2.font=Font(name="Arial",bold=True,color="FFFFFF",size=9); c2.fill=PatternFill("solid",fgColor="1565C0"); c2.alignment=Alignment(horizontal="center",vertical="center"); c2.border=brd
         wsm.row_dimensions[2].height=16
@@ -1455,7 +1455,10 @@ def exportar(resultados, _tempo=None, _dist=None, _aplic=None, _pmp=None, _file_
             return "E8F5E9"
         ri2=3
         for _,row in r["centros"].iterrows():
-            for ci,(val,bg,ctr) in enumerate([(row.centro,"FFFFFF",False),(f"{row.ocup_A:.1%}",cbg(row.ocup_A),True),(f"{row.ocup_B:.1%}",cbg(row.ocup_B),True),(f"{row.ocup_C:.1%}",cbg(row.ocup_C),True),(row.ativo_A,"B3E5FC" if row.ativo_A else "FFFDE7",True),(row.ativo_B,"B3E5FC" if row.ativo_B else "FFFDE7",True),(row.ativo_C,"B3E5FC" if row.ativo_C else "FFFDE7",True),(row.horas_disp_A if row.ativo_A else "0","B3E5FC" if row.ativo_A else "F5F5F5",True),(row.horas_disp_B if row.ativo_B else "0","B3E5FC" if row.ativo_B else "F5F5F5",True),(row.horas_disp_C if row.ativo_C else "0","B3E5FC" if row.ativo_C else "F5F5F5",True)],1):
+            _nA=int(row.num_A) if hasattr(row,"num_A") else int(row.ativo_A)
+            _nB=int(row.num_B) if hasattr(row,"num_B") else int(row.ativo_B)
+            _nC=int(row.num_C) if hasattr(row,"num_C") else int(row.ativo_C)
+            for ci,(val,bg,ctr) in enumerate([(row.centro,"FFFFFF",False),(f"{row.ocup_A:.1%}",cbg(row.ocup_A),True),(f"{row.ocup_B:.1%}",cbg(row.ocup_B),True),(f"{row.ocup_C:.1%}",cbg(row.ocup_C),True),(_nA,"B3E5FC" if row.ativo_A else "FFFDE7",True),(_nB,"B3E5FC" if row.ativo_B else "FFFDE7",True),(_nC,"B3E5FC" if row.ativo_C else "FFFDE7",True),(row.horas_disp_A if row.ativo_A else "0","B3E5FC" if row.ativo_A else "F5F5F5",True),(row.horas_disp_B if row.ativo_B else "0","B3E5FC" if row.ativo_B else "F5F5F5",True),(row.horas_disp_C if row.ativo_C else "0","B3E5FC" if row.ativo_C else "F5F5F5",True)],1):
                 ec_l(wsm.cell(ri2,ci,val),bg,center=ctr)
             ri2+=1
         sup=r["suporte"]
@@ -1516,7 +1519,7 @@ def exportar_cenario_vs_base(res_base, res_cenario, meses_lista, nome_cenario, r
             ec_c(ws.cell(1,ci,txt),JD_V,"FFFFFF",True)
         ws.row_dimensions[1].height=16
         ec_c(ws.cell(2,1,"CENTRO"),JD_V,"FFFFFF",True); ec_c(ws.cell(2,2,"% OCUPAÇÃO"),JD_V,"FFFFFF",True)
-        ws.merge_cells("E2:G2"); ec_c(ws.cell(2,5,"TURNO ATIVO (0=inativo 1=ativo)"),JD_Y,JD_V,True)
+        ws.merge_cells("E2:G2"); ec_c(ws.cell(2,5,"Nº FUNCIONÁRIOS POR TURNO"),JD_Y,JD_V,True)
         ws.merge_cells("H2:J2"); ec_c(ws.cell(2,8,"HORAS DISPONÍVEIS NO MÊS"),"1565C0","FFFFFF",True)
         ws.row_dimensions[2].height=16
         def cbg(v):
