@@ -2818,14 +2818,21 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
 
         st.markdown("---")
         if st.session_state.cenarios:
-            st.markdown('<div class="jd-sub">📥 Baixar cenários</div>', unsafe_allow_html=True)
+            st.markdown('<div class="jd-sub">📥 Baixar cenários (Base vs Cenário)</div>', unsafe_allow_html=True)
+            st.caption("Cada arquivo contém: uma aba com os dados originais (Base) e outra com o que você configurou (Cenário), por mês.")
             _dl_cols = st.columns(min(len(st.session_state.cenarios), 4))
             for _i, (nm, v) in enumerate(st.session_state.cenarios.items()):
-                _cen_hash = hash(str(v["resultados"]) + nm + "tab_cen")
+                _meses_cen = [m for m in MESES if v["resultados"].get(m) and res_base.get(m)]
+                _cen_vs_hash = hash(str(v["resultados"]) + str(res_base) + nm + "vs")
                 _dl_cols[_i % 4].download_button(
                     f"📥 {nm}",
-                    data=exportar_cached(_cen_hash, v["resultados"], tempo, dist, aplic, pmp, _eh_cenario=True),
-                    file_name=f"cenario_{nm.replace(' ','_')}.xlsx",
+                    data=exportar_cenario_vs_base_cached(
+                        _cen_vs_hash, res_base, v["resultados"],
+                        _meses_cen, nm,
+                        v.get("res_ano_fy26"), v.get("res_ano_fy26"),
+                        st.session_state.get("_fb_anual")
+                    ),
+                    file_name=f"cenario_{nm.replace(' ','_')}_vs_base.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     key=f"dl_cen_tab_{nm}",
                     use_container_width=True
