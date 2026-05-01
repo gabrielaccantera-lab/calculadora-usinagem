@@ -362,15 +362,17 @@ def calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg
             aA = 1 if pA > thr_A else 0
             aB = 1 if pA > thr_B else 0
             aC = 1 if pB > thr_C else 0
+            nA=aA; nB=aB; nC=aC  # número real de funcionários (padrão = binário)
             if overrides and mes in overrides and cen in overrides[mes]:
                 ov = overrides[mes][cen]
-                # Override guarda número de funcionários — converter para binário (0/1)
-                if "A" in ov: aA = 1 if int(ov["A"]) > 0 else 0
-                if "B" in ov: aB = 1 if int(ov["B"]) > 0 else 0
-                if "C" in ov: aC = 1 if int(ov["C"]) > 0 else 0
+                # Override guarda número de funcionários — guardar o número real e converter ativo para binário
+                if "A" in ov: nA=int(ov["A"]); aA = 1 if nA > 0 else 0
+                if "B" in ov: nB=int(ov["B"]); aB = 1 if nB > 0 else 0
+                if "C" in ov: nC=int(ov["C"]); aC = 1 if nC > 0 else 0
             centros.append({
                 "centro":cen,"ocup_A":pA,"ocup_B":pB,"ocup_C":pC,
                 "ativo_A":aA,"ativo_B":aB,"ativo_C":aC,
+                "num_A":nA,"num_B":nB,"num_C":nC,
                 "min_ciclo_total":mc,"min_labor_total":ml,
                 "min_disp_A":minA,"min_disp_B":minB,"min_disp_C":minC,
                 "horas_ciclo":mc/60,"horas_labor":ml/60,
@@ -1523,7 +1525,11 @@ def exportar_cenario_vs_base(res_base, res_cenario, meses_lista, nome_cenario, r
             return "E8F5E9"
         ri=3
         for _,row in r["centros"].iterrows():
-            for ci,(val,bg,ctr) in enumerate([(row.centro,"FFFFFF",False),(f"{row.ocup_A:.1%}",cbg(row.ocup_A),True),(f"{row.ocup_B:.1%}",cbg(row.ocup_B),True),(f"{row.ocup_C:.1%}",cbg(row.ocup_C),True),(row.ativo_A,"B3E5FC" if row.ativo_A else "FFFDE7",True),(row.ativo_B,"B3E5FC" if row.ativo_B else "FFFDE7",True),(row.ativo_C,"B3E5FC" if row.ativo_C else "FFFDE7",True),(row.horas_disp_A if row.ativo_A else "0","B3E5FC" if row.ativo_A else "F5F5F5",True),(row.horas_disp_B if row.ativo_B else "0","B3E5FC" if row.ativo_B else "F5F5F5",True),(row.horas_disp_C if row.ativo_C else "0","B3E5FC" if row.ativo_C else "F5F5F5",True)],1):
+            # Usa num_A/num_B/num_C se disponível (número real de funcionários), senão ativo binário
+            _nA = int(row.num_A) if hasattr(row,"num_A") and row.num_A is not None else int(row.ativo_A)
+            _nB = int(row.num_B) if hasattr(row,"num_B") and row.num_B is not None else int(row.ativo_B)
+            _nC = int(row.num_C) if hasattr(row,"num_C") and row.num_C is not None else int(row.ativo_C)
+            for ci,(val,bg,ctr) in enumerate([(row.centro,"FFFFFF",False),(f"{row.ocup_A:.1%}",cbg(row.ocup_A),True),(f"{row.ocup_B:.1%}",cbg(row.ocup_B),True),(f"{row.ocup_C:.1%}",cbg(row.ocup_C),True),(_nA,"B3E5FC" if row.ativo_A else "FFFDE7",True),(_nB,"B3E5FC" if row.ativo_B else "FFFDE7",True),(_nC,"B3E5FC" if row.ativo_C else "FFFDE7",True),(row.horas_disp_A if row.ativo_A else "0","B3E5FC" if row.ativo_A else "F5F5F5",True),(row.horas_disp_B if row.ativo_B else "0","B3E5FC" if row.ativo_B else "F5F5F5",True),(row.horas_disp_C if row.ativo_C else "0","B3E5FC" if row.ativo_C else "F5F5F5",True)],1):
                 ec_c(ws.cell(ri,ci,val),bg,center=ctr)
             ri+=1
         sup=r["suporte"]
@@ -2792,58 +2798,10 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
                         st.dataframe(df_det.style.apply(_sty_det,axis=1),use_container_width=True,hide_index=True)
 
         st.markdown("---")
-        col_exp, col_del = st.columns([3, 1])
-        with col_exp:
-            st.markdown('<div class="jd-sub">📥 Exportar cenários (todos os meses configurados)</div>', unsafe_allow_html=True)
-            for nm, v in st.session_state.cenarios.items():
-                # Exporta sempre cobrindo todos os meses modificados do cenário
-                _meses_exp = v.get("meses_configurados", [v.get("mes", MESES[0])]) if not v.get("eh_ano") else [m for m in MESES if res_base.get(m)]
-                # Usa o primeiro mês com dados para a comparação base vs cenário
-                _m_exp = next((m for m in _meses_exp if res_base.get(m)), None)
-                if _m_exp:
-                    _label_meses = "ANO_FY26" if v.get("eh_ano") else ", ".join(m[:3].upper() for m in _meses_exp)
-                    label_dl = f"📥 {nm} ({_label_meses})"
-                    fname_dl = f"cenario_{nm.replace(' ','_')}_{'ANO' if v.get('eh_ano') else '_'.join(m[:3] for m in _meses_exp)}.xlsx"
-                    _cen_vs_hash = hash(nm + str(v["resultados"]) + str(_meses_exp))
-                    _fb_ano = st.session_state.get("_fb_anual")
-                    if v.get("eh_ano"):
-                        # cp_data: preferir AnoFY26; fallback = inputs reais
-                        _cp_ano_exp = build_cp_data_anual(res_base, tempo, dist, aplic, pmp, file_bytes=_fb_ano)
-                        # BASE: calcular sem overrides
-                        _r_ano_base_calc = calcular_ano_fy26(_fb_ano, {}, horas_efetivas, suporte_cfg, horas_turno)
-                        # CENÁRIO: usar o res_ano_fy26 já calculado com overrides ao salvar
-                        _r_ano_cen = v.get("res_ano_fy26")
-                        # Extrai overrides do cenário (necessário para o fallback)
-                        _overrides_cen = v.get("overrides", {})
-                        _ov_ano_cen = next(
-                            (ov for ov in _overrides_cen.values() if isinstance(ov, dict)),
-                            {}
-                        )
-                        # Se res_ano_fy26 não disponível, recalcular com overrides
-                        if _r_ano_cen is None:
-                            _r_ano_cen = calcular_ano_fy26(_fb_ano, _ov_ano_cen, horas_efetivas, suporte_cfg, horas_turno)
-                        if _r_ano_base_calc is None or _r_ano_cen is None:
-                            _dias_map = {m: res_base[m]["dias"] for m in MESES if res_base.get(m)}
-                            _, _r_ano_base_calc = build_cp_data_from_meses(
-                                res_base, tempo, dist, aplic, pmp, _dias_map,
-                                horas_turno, horas_efetivas,
-                                overrides_ano=None, suporte_cfg=suporte_cfg)
-                            _, _r_ano_cen = build_cp_data_from_meses(
-                                v["resultados"], tempo, dist, aplic, pmp, _dias_map,
-                                horas_turno, horas_efetivas,
-                                overrides_ano=_ov_ano_cen, suporte_cfg=suporte_cfg)
-                    else:
-                        _cp_ano_exp = None; _r_ano_base_calc = None; _r_ano_cen = None
-                    st.download_button(label_dl, data=exportar_cenario_vs_base_cached(_cen_vs_hash, res_base, v["resultados"], _meses_exp, nm,
-                                           _res_ano_fy26_b=_r_ano_base_calc, _res_ano_fy26_c=_r_ano_cen,
-                                           _file_bytes_ano=_fb_ano, _cp_data_fallback=_cp_ano_exp),
-                                       file_name=fname_dl, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                       key=f"dl_cen_{nm}")
-        with col_del:
-            if st.session_state.cenarios:
-                dn = st.selectbox("Remover", list(st.session_state.cenarios.keys()), key="del_c")
-                if st.button("🗑️ Remover", type="secondary", key="btn_del_cen"):
-                    del st.session_state.cenarios[dn]; st.rerun()
+        if st.session_state.cenarios:
+            dn = st.selectbox("Remover cenário", list(st.session_state.cenarios.keys()), key="del_c")
+            if st.button("🗑️ Remover", type="secondary", key="btn_del_cen"):
+                del st.session_state.cenarios[dn]; st.rerun()
     else:
         st.info("Nenhum cenário criado ainda.")
 
