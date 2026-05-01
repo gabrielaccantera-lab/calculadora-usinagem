@@ -379,7 +379,7 @@ def calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg
                 "horas_disp_A":d*heA*aA,"horas_disp_B":d*heB*aB,"horas_disp_C":d*heC*aC,
             })
         df_c = pd.DataFrame(centros)
-        op_A = int(df_c.ativo_A.sum()); op_B = int(df_c.ativo_B.sum()); op_C = int(df_c.ativo_C.sum())
+        op_A = int(df_c.num_A.sum()); op_B = int(df_c.num_B.sum()); op_C = int(df_c.num_C.sum())
         def get_sup(key, t, op_count):
             cfg = suporte_cfg[key]
             # Se não há operadores no turno, não precisa de suporte nesse turno
@@ -731,7 +731,7 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
                     return _F_BRANCO
                 _ec(ws_out,_ri_c,_COL_F,_crow.centro,_F_BRANCO,False,"000000",8,False)
                 _ec_pct(ws_out,_ri_c,_COL_F+1,_crow.ocup_A,_cbg_t(_crow.ocup_A)); _ec_pct(ws_out,_ri_c,_COL_F+2,_crow.ocup_B,_cbg_t(_crow.ocup_B)); _ec_pct(ws_out,_ri_c,_COL_F+3,_crow.ocup_C,_cbg_t(_crow.ocup_C))
-                _ec(ws_out,_ri_c,_COL_F+4,int(_crow.ativo_A),_F_VERDE if _crow.ativo_A else _F_AMAR,True,"000000",8); _ec(ws_out,_ri_c,_COL_F+5,int(_crow.ativo_B),_F_VERDE if _crow.ativo_B else _F_AMAR,True,"000000",8); _ec(ws_out,_ri_c,_COL_F+6,int(_crow.ativo_C),_F_AZUL if _crow.ativo_C else _F_CINZA,True,"000000",8)
+                _ec(ws_out,_ri_c,_COL_F+4,int(_crow.num_A),_F_VERDE if _crow.ativo_A else _F_AMAR,True,"000000",8); _ec(ws_out,_ri_c,_COL_F+5,int(_crow.num_B),_F_VERDE if _crow.ativo_B else _F_AMAR,True,"000000",8); _ec(ws_out,_ri_c,_COL_F+6,int(_crow.num_C),_F_AZUL if _crow.ativo_C else _F_CINZA,True,"000000",8)
                 _ec(ws_out,_ri_c,_COL_F+7,_crow.horas_disp_A if _crow.ativo_A else 0,_F_VERDE if _crow.ativo_A else _F_BRANCO,True,"000000",8)
                 _ec(ws_out,_ri_c,_COL_F+8,_crow.horas_disp_B if _crow.ativo_B else 0,_F_AMAR if _crow.ativo_B else _F_BRANCO,True,"000000",8)
                 _ec(ws_out,_ri_c,_COL_F+9,_crow.horas_disp_C if _crow.ativo_C else 0,_F_AZUL if _crow.ativo_C else _F_BRANCO,True,"000000",8)
@@ -945,7 +945,7 @@ def calcular_ano_fy26(file_bytes, overrides_ano, horas_efetivas, suporte_cfg, ho
             })
 
         df_c = pd.DataFrame(centros)
-        op_A = int(df_c.ativo_A.sum()); op_B = int(df_c.ativo_B.sum()); op_C = int(df_c.ativo_C.sum())
+        op_A = int(df_c.num_A.sum()); op_B = int(df_c.num_B.sum()); op_C = int(df_c.num_C.sum())
 
         def _sup(key, t, op_count):
             cfg = suporte_cfg[key]
@@ -3187,9 +3187,9 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                     _ec_pct(ws_out,_ri_c,_COL_F+1,_crow.ocup_A,_cbg_t(_crow.ocup_A))
                                     _ec_pct(ws_out,_ri_c,_COL_F+2,_crow.ocup_B,_cbg_t(_crow.ocup_B))
                                     _ec_pct(ws_out,_ri_c,_COL_F+3,_crow.ocup_C,_cbg_t(_crow.ocup_C))
-                                    _ec(ws_out,_ri_c,_COL_F+4,int(_crow.ativo_A),_F_VERDE if _crow.ativo_A else _F_AMAR,True,"000000",8)
-                                    _ec(ws_out,_ri_c,_COL_F+5,int(_crow.ativo_B),_F_VERDE if _crow.ativo_B else _F_AMAR,True,"000000",8)
-                                    _ec(ws_out,_ri_c,_COL_F+6,int(_crow.ativo_C),_F_AZUL if _crow.ativo_C else _F_CINZA,True,"000000",8)
+                                    _ec(ws_out,_ri_c,_COL_F+4,int(_crow.num_A),_F_VERDE if _crow.ativo_A else _F_AMAR,True,"000000",8)
+                                    _ec(ws_out,_ri_c,_COL_F+5,int(_crow.num_B),_F_VERDE if _crow.ativo_B else _F_AMAR,True,"000000",8)
+                                    _ec(ws_out,_ri_c,_COL_F+6,int(_crow.num_C),_F_AZUL if _crow.ativo_C else _F_CINZA,True,"000000",8)
                                     _ec(ws_out,_ri_c,_COL_F+7,_crow.horas_disp_A if _crow.ativo_A else 0,_F_VERDE if _crow.ativo_A else _F_BRANCO,True,"000000",8)
                                     _ec(ws_out,_ri_c,_COL_F+8,_crow.horas_disp_B if _crow.ativo_B else 0,_F_AMAR if _crow.ativo_B else _F_BRANCO,True,"000000",8)
                                     _ec(ws_out,_ri_c,_COL_F+9,_crow.horas_disp_C if _crow.ativo_C else 0,_F_AZUL if _crow.ativo_C else _F_BRANCO,True,"000000",8)
