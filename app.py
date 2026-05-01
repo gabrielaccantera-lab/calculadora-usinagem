@@ -2508,14 +2508,19 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
                                     help="Clique para criar o cenário com o nome digitado")
 
         # Tipo de cenário: ANO ou Meses (separados — não podem ser combinados)
+        # Limpa keys antigas do session_state para evitar conflito com versões anteriores
+        for _old_key in ["cen_meses_sel"]:
+            if _old_key in st.session_state:
+                del st.session_state[_old_key]
+
         _tipo_cenario = st.radio(
             "Tipo de cenário",
             ["📅 ANO FY26", "🗓️ Meses individuais"],
             horizontal=True,
-            key="cen_tipo",
+            key="cen_tipo_v2",
             help="ANO FY26: afeta só a aba anual consolidada. Meses: afeta meses específicos."
         )
-        eh_ano_novo = _tipo_cenario == "📅 ANO FY26"
+        eh_ano_novo = (_tipo_cenario == "📅 ANO FY26")
 
         if eh_ano_novo:
             meses_sel_raw = ["📅 ANO FY26"]
