@@ -987,7 +987,7 @@ def calcular_ano_fy26(file_bytes, overrides_ano, horas_efetivas, suporte_cfg, ho
         return None
 
 
-def build_cp_data_from_meses(resultados, tempo, dist, aplic, pmp, dias_por_mes, horas_turno, horas_efetivas):
+def build_cp_data_from_meses(resultados, tempo, dist, aplic, pmp, dias_por_mes, horas_turno, horas_efetivas, overrides_ano=None, suporte_cfg=None):
     """Constrói cp_data e res_ano no formato do AnoFY26 somando os meses disponíveis.
     Usado quando o Excel de entrada não possui aba AnoFY26."""
     from collections import defaultdict
@@ -1053,6 +1053,12 @@ def build_cp_data_from_meses(resultados, tempo, dist, aplic, pmp, dias_por_mes, 
             oA=mc/minA if minA>0 else 0; oB=mc/minB if minB>0 else 0; oC=mc/minC if minC>0 else 0
             ca = cen_ativos.get(cen,{"aA":0,"aB":0,"aC":0})
             aA=ca["aA"]; aB=ca["aB"]; aC=ca["aC"]
+            # Aplicar overrides do cenário ANO se fornecidos
+            if overrides_ano and cen in overrides_ano:
+                ov = overrides_ano[cen]
+                if "A" in ov: aA = int(ov["A"])
+                if "B" in ov: aB = int(ov["B"])
+                if "C" in ov: aC = int(ov["C"])
             centros.append({"centro":cen,"ocup_A":oA,"ocup_B":oB,"ocup_C":oC,
                             "ativo_A":aA,"ativo_B":aB,"ativo_C":aC,
                             "min_ciclo_total":mc,"min_labor_total":ml,
@@ -1067,16 +1073,30 @@ def build_cp_data_from_meses(resultados, tempo, dist, aplic, pmp, dias_por_mes, 
 
         h_ciclo=float(df_c.horas_ciclo.sum()); h_labor=float(df_c.horas_labor.sum())
         h_ativos=float((df_c.horas_disp_A+df_c.horas_disp_B+df_c.horas_disp_C).sum())
-        # h_todos: somar todos os funcionários (operadores + suporte fixo padrão) * horas * dias
-        sup_tot_A=1+1+2+1+1; sup_tot_B=1+1+1+0+1; sup_tot_C=0+0+1+0+0  # lav+gra+pre+cor+fac
+        # Suporte: usa suporte_cfg se disponível, senão padrão
+        if suporte_cfg:
+            def _sup2(key,t,op_count):
+                cfg=suporte_cfg[key]
+                if op_count==0: return 0
+                if cfg["modo"]=="auto":
+                    defaults={"lavadora":{"A":1,"B":1,"C":0},"gravacao":{"A":1,"B":1,"C":0},
+                              "preset":{"A":2,"B":1,"C":1},"coringa":{"A":1,"B":0,"C":0},
+                              "facilitador":{"A":1,"B":1,"C":0}}
+                    return defaults[key][t]
+                return cfg[t]
+            sup_d={k:{t:_sup2(k,t,[op_A,op_B,op_C]["ABC".index(t)]) for t in "ABC"}
+                   for k in ["lavadora","gravacao","preset","coringa","facilitador"]}
+            sup_tot_A=sum(sup_d[k]["A"] for k in sup_d); sup_tot_B=sum(sup_d[k]["B"] for k in sup_d); sup_tot_C=sum(sup_d[k]["C"] for k in sup_d)
+        else:
+            sup_d={"lavadora":{"A":1,"B":1,"C":0},"gravacao":{"A":1,"B":1,"C":0},
+                   "preset":{"A":2,"B":1,"C":1},"coringa":{"A":1,"B":0,"C":0},"facilitador":{"A":1,"B":1,"C":0}}
+            sup_tot_A=1+1+2+1+1; sup_tot_B=1+1+1+0+1; sup_tot_C=0+0+1+0+0
         tot_A=op_A+sup_tot_A; tot_B=op_B+sup_tot_B; tot_C=op_C+sup_tot_C
         h_todos=tot_A*dias_total*heA+tot_B*dias_total*heB+tot_C*dias_total*heC
 
         res_ano = {"centros":df_c,"op_A":op_A,"op_B":op_B,"op_C":op_C,
                    "tot_A":tot_A,"tot_B":tot_B,"tot_C":tot_C,"total":tot_A+tot_B+tot_C,
-                   "suporte":{"lavadora":{"A":1,"B":1,"C":0},"gravacao":{"A":1,"B":1,"C":0},
-                              "preset":{"A":2,"B":1,"C":1},"coringa":{"A":1,"B":0,"C":0},
-                              "facilitador":{"A":1,"B":1,"C":0}},
+                   "suporte":sup_d,
                    "h_ciclo":h_ciclo,"h_labor":h_labor,"h_ativos":h_ativos,"h_todos":h_todos,
                    "prod_ciclo_op":h_ciclo/h_ativos if h_ativos>0 else 0,
                    "prod_ciclo_tot":h_ciclo/h_todos if h_todos>0 else 0,
@@ -2530,16 +2550,25 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
                         # ANO FY26: calcular como período único a partir da aba AnoFY26
                         _res_ano_fy26 = None
                         if eh_ano_novo and not meses_sel:
-                            _ov_ano_direto = novo_ov_por_mes.get(_meses_disponiveis[0], {}) if novo_ov_por_mes else {}
-                            # O override do ANO é o mesmo para todos os meses - pegar do primeiro
-                            # Mas _render_grade_form retorna {cen:{A,B,C}} diretamente para o ANO
-                            # Recuperar o override do ANO FY26 (foi salvo igual para todos os meses)
-                            _ov_ano_direto = novo_ov_por_mes.get(_meses_disponiveis[0]) if _meses_disponiveis else {}
+                            # Override do ANO: mesmo para todos os meses, pegar do primeiro disponível
+                            _ov_ano_direto = next(
+                                (ov for ov in novo_ov_por_mes.values() if isinstance(ov, dict)),
+                                {}
+                            )
+                            # Tenta usar a aba AnoFY26 se existir
                             _res_ano_fy26 = calcular_ano_fy26(
                                 st.session_state.get("_fb_anual"),
                                 _ov_ano_direto,
                                 horas_efetivas, suporte_cfg, horas_turno
                             )
+                            # Fallback: sem AnoFY26, calcula dos meses com os overrides aplicados
+                            if _res_ano_fy26 is None:
+                                _dias_map = {m: res_base[m]["dias"] for m in MESES if res_base.get(m)}
+                                _, _res_ano_fy26 = build_cp_data_from_meses(
+                                    res_cen, tempo, dist, aplic, pmp, _dias_map,
+                                    horas_turno, horas_efetivas,
+                                    overrides_ano=_ov_ano_direto, suporte_cfg=suporte_cfg
+                                )
                     _label_periodo = ("ANO FY26" if eh_ano_novo and not meses_sel else
                                       f"ANO FY26 + {','.join(m[:3].upper() for m in meses_sel)}" if eh_ano_novo else
                                       f"{len(meses_sel)} mês(es)")
@@ -2774,14 +2803,15 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
                             )
                             _r_ano_cen = calcular_ano_fy26(_fb_ano, _ov_ano_cen, horas_efetivas, suporte_cfg, horas_turno)
                         if _r_ano_base_calc is None or _r_ano_cen is None:
+                            _dias_map = {m: res_base[m]["dias"] for m in MESES if res_base.get(m)}
                             _, _r_ano_base_calc = build_cp_data_from_meses(
-                                res_base, tempo, dist, aplic, pmp,
-                                {m: res_base[m]["dias"] for m in MESES if res_base.get(m)},
-                                horas_turno, horas_efetivas)
+                                res_base, tempo, dist, aplic, pmp, _dias_map,
+                                horas_turno, horas_efetivas,
+                                overrides_ano=None, suporte_cfg=suporte_cfg)
                             _, _r_ano_cen = build_cp_data_from_meses(
-                                v["resultados"], tempo, dist, aplic, pmp,
-                                {m: res_base[m]["dias"] for m in MESES if res_base.get(m)},
-                                horas_turno, horas_efetivas)
+                                v["resultados"], tempo, dist, aplic, pmp, _dias_map,
+                                horas_turno, horas_efetivas,
+                                overrides_ano=_ov_ano_cen, suporte_cfg=suporte_cfg)
                     else:
                         _cp_ano_exp = None; _r_ano_base_calc = None; _r_ano_cen = None
                     st.download_button(label_dl, data=exportar_cenario_vs_base_cached(_cen_vs_hash, res_base, v["resultados"], _meses_exp, nm,
