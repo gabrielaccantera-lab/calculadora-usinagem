@@ -376,7 +376,7 @@ def calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg
                 "min_ciclo_total":mc,"min_labor_total":ml,
                 "min_disp_A":minA,"min_disp_B":minB,"min_disp_C":minC,
                 "horas_ciclo":mc/60,"horas_labor":ml/60,
-                "horas_disp_A":d*heA*aA,"horas_disp_B":d*heB*aB,"horas_disp_C":d*heC*aC,
+                "horas_disp_A":d*heA*nA,"horas_disp_B":d*heB*nB,"horas_disp_C":d*heC*nC,
             })
         df_c = pd.DataFrame(centros)
         op_A = int(df_c.num_A.sum()); op_B = int(df_c.num_B.sum()); op_C = int(df_c.num_C.sum())
@@ -447,7 +447,7 @@ def show_tabela(r):
     for _,row in r["centros"].iterrows():
         rows.append({"Centro":row.centro,
             "Ocup. A":row.ocup_A,"Ocup. B":row.ocup_B,"Ocup. C":row.ocup_C,
-            "Ativo A":int(row.ativo_A),"Ativo B":int(row.ativo_B),"Ativo C":int(row.ativo_C),
+            "Ativo A":int(row.num_A) if hasattr(row,"num_A") else int(row.ativo_A),"Ativo B":int(row.num_B) if hasattr(row,"num_B") else int(row.ativo_B),"Ativo C":int(row.num_C) if hasattr(row,"num_C") else int(row.ativo_C),
             "Horas A":round(row.horas_disp_A,2),"Horas B":round(row.horas_disp_B,2),"Horas C":round(row.horas_disp_C,2)})
     df=pd.DataFrame(rows)
     def sr(row):
@@ -928,20 +928,22 @@ def calcular_ano_fy26(file_bytes, overrides_ano, horas_efetivas, suporte_cfg, ho
             aA = base.get("aA", 1 if oA > 0.40 else 0)
             aB = base.get("aB", 1 if oA > 0.75 else 0)
             aC = base.get("aC", 1 if oB > 0.75 else 0)
+            nA = aA; nB = aB; nC = aC
             if overrides_ano and cen in overrides_ano:
                 ov = overrides_ano[cen]
-                if "A" in ov: aA = 1 if int(ov["A"]) > 0 else 0
-                if "B" in ov: aB = 1 if int(ov["B"]) > 0 else 0
-                if "C" in ov: aC = 1 if int(ov["C"]) > 0 else 0
+                if "A" in ov: nA = int(ov["A"]); aA = 1 if nA > 0 else 0
+                if "B" in ov: nB = int(ov["B"]); aB = 1 if nB > 0 else 0
+                if "C" in ov: nC = int(ov["C"]); aC = 1 if nC > 0 else 0
             centros.append({
                 "centro": cen, "ocup_A": oA, "ocup_B": oB, "ocup_C": oC,
                 "ativo_A": aA, "ativo_B": aB, "ativo_C": aC,
+                "num_A": nA, "num_B": nB, "num_C": nC,
                 "min_ciclo_total": mc, "min_labor_total": ml,
                 "min_disp_A": minA_ano, "min_disp_B": minB_ano, "min_disp_C": minC_ano,
                 "horas_ciclo": mc / 60, "horas_labor": ml / 60,
-                "horas_disp_A": dias_ano * heA * aA,
-                "horas_disp_B": dias_ano * heB * aB,
-                "horas_disp_C": dias_ano * heC * aC,
+                "horas_disp_A": dias_ano * heA * nA,
+                "horas_disp_B": dias_ano * heB * nB,
+                "horas_disp_C": dias_ano * heC * nC,
             })
 
         df_c = pd.DataFrame(centros)
@@ -1057,22 +1059,24 @@ def build_cp_data_from_meses(resultados, tempo, dist, aplic, pmp, dias_por_mes, 
             ca = cen_ativos.get(cen,{"aA":0,"aB":0,"aC":0})
             aA=ca["aA"]; aB=ca["aB"]; aC=ca["aC"]
             # Aplicar overrides do cenário ANO se fornecidos
+            nA = aA; nB = aB; nC = aC
             if overrides_ano and cen in overrides_ano:
                 ov = overrides_ano[cen]
-                if "A" in ov: aA = 1 if int(ov["A"]) > 0 else 0
-                if "B" in ov: aB = 1 if int(ov["B"]) > 0 else 0
-                if "C" in ov: aC = 1 if int(ov["C"]) > 0 else 0
+                if "A" in ov: nA = int(ov["A"]); aA = 1 if nA > 0 else 0
+                if "B" in ov: nB = int(ov["B"]); aB = 1 if nB > 0 else 0
+                if "C" in ov: nC = int(ov["C"]); aC = 1 if nC > 0 else 0
             centros.append({"centro":cen,"ocup_A":oA,"ocup_B":oB,"ocup_C":oC,
                             "ativo_A":aA,"ativo_B":aB,"ativo_C":aC,
+                            "num_A":nA,"num_B":nB,"num_C":nC,
                             "min_ciclo_total":mc,"min_labor_total":ml,
                             "min_disp_A":minA,"min_disp_B":minB,"min_disp_C":minC,
                             "horas_ciclo":mc/60,"horas_labor":ml/60,
-                            "horas_disp_A":dias_total*heA*aA,
-                            "horas_disp_B":dias_total*heB*aB,
-                            "horas_disp_C":dias_total*heC*aC})
+                            "horas_disp_A":dias_total*heA*nA,
+                            "horas_disp_B":dias_total*heB*nB,
+                            "horas_disp_C":dias_total*heC*nC})
 
         df_c = pd.DataFrame(centros)
-        op_A=int(df_c.ativo_A.sum()); op_B=int(df_c.ativo_B.sum()); op_C=int(df_c.ativo_C.sum())
+        op_A=int(df_c.num_A.sum()); op_B=int(df_c.num_B.sum()); op_C=int(df_c.num_C.sum())
 
         h_ciclo=float(df_c.horas_ciclo.sum()); h_labor=float(df_c.horas_labor.sum())
         h_ativos=float((df_c.horas_disp_A+df_c.horas_disp_B+df_c.horas_disp_C).sum())
@@ -1203,9 +1207,9 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None,
     # Se res_ano_override tem centros com overrides, usa ativos dele para op_A/B/C e por centro
     if res_ano_override and "centros" in res_ano_override and not res_ano_override["centros"].empty:
         _df_ro = res_ano_override["centros"]
-        op_A_ano = int(_df_ro.ativo_A.sum())
-        op_B_ano = int(_df_ro.ativo_B.sum())
-        op_C_ano = int(_df_ro.ativo_C.sum())
+        op_A_ano = int(_df_ro.num_A.sum()) if "num_A" in _df_ro.columns else int(_df_ro.ativo_A.sum())
+        op_B_ano = int(_df_ro.num_B.sum()) if "num_B" in _df_ro.columns else int(_df_ro.ativo_B.sum())
+        op_C_ano = int(_df_ro.num_C.sum()) if "num_C" in _df_ro.columns else int(_df_ro.ativo_C.sum())
         # sup_somas do override (se disponível)
         if res_ano_override.get("suporte"):
             sup_somas = {k: {"A": res_ano_override["suporte"][k]["A"]*n_meses,
@@ -1308,19 +1312,21 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None,
         oA=ocup_ano(cen,"A"); oB=ocup_ano(cen,"B"); oC=ocup_ano(cen,"C")
         if cen in _ro_map:
             _row_ro = _ro_map[cen]
-            aA=1 if int(_row_ro.ativo_A)>0 else 0
-            aB=1 if int(_row_ro.ativo_B)>0 else 0
-            aC=1 if int(_row_ro.ativo_C)>0 else 0
+            nA=int(_row_ro.num_A) if hasattr(_row_ro,"num_A") else int(_row_ro.ativo_A)
+            nB=int(_row_ro.num_B) if hasattr(_row_ro,"num_B") else int(_row_ro.ativo_B)
+            nC=int(_row_ro.num_C) if hasattr(_row_ro,"num_C") else int(_row_ro.ativo_C)
+            aA=1 if nA>0 else 0; aB=1 if nB>0 else 0; aC=1 if nC>0 else 0
         else:
             aA=ativo_ano_A(cen); aB=ativo_ano_B(cen); aC=ativo_ano_C(cen)
+            nA=aA; nB=aB; nC=aC
         _e(ws,_ri,_CF,cen,F_BRANCO_a,False,"000000",8,False)
         for _pci,_pv,_pbg in [(_CF+1,oA,_cbg_a(oA)),(_CF+2,oB,_cbg_a(oB)),(_CF+3,oC,_cbg_a(oC))]:
             _pc=_e(ws,_ri,_pci,_pv,_pbg,False,"000000",8)
             _pc.number_format="0.0000000000%"
-        _e(ws,_ri,_CF+4,aA,F_VERDE_a if aA else F_AMAR_a,True,"000000",8); _e(ws,_ri,_CF+5,aB,F_VERDE_a if aB else F_AMAR_a,True,"000000",8); _e(ws,_ri,_CF+6,aC,F_AZUL_a if aC else F_CINZA_a,True,"000000",8)
-        _e(ws,_ri,_CF+7,round(dias_ano*heA*aA,2) if aA else 0,F_VERDE_a if aA else F_BRANCO_a,True,"000000",8)
-        _e(ws,_ri,_CF+8,round(dias_ano*heB*aB,2) if aB else 0,F_AMAR_a if aB else F_BRANCO_a,True,"000000",8)
-        _e(ws,_ri,_CF+9,round(dias_ano*heC*aC,2) if aC else 0,F_AZUL_a if aC else F_BRANCO_a,True,"000000",8)
+        _e(ws,_ri,_CF+4,nA,F_VERDE_a if aA else F_AMAR_a,True,"000000",8); _e(ws,_ri,_CF+5,nB,F_VERDE_a if aB else F_AMAR_a,True,"000000",8); _e(ws,_ri,_CF+6,nC,F_AZUL_a if aC else F_CINZA_a,True,"000000",8)
+        _e(ws,_ri,_CF+7,round(dias_ano*heA*nA,2) if aA else 0,F_VERDE_a if aA else F_BRANCO_a,True,"000000",8)
+        _e(ws,_ri,_CF+8,round(dias_ano*heB*nB,2) if aB else 0,F_AMAR_a if aB else F_BRANCO_a,True,"000000",8)
+        _e(ws,_ri,_CF+9,round(dias_ano*heC*nC,2) if aC else 0,F_AZUL_a if aC else F_BRANCO_a,True,"000000",8)
         ws.row_dimensions[_ri].height=13; _ri+=1
     for _snm,_sk in [("TOTAL DE OPERADORES",None),("LAVADORA E INSPEÇÃO","lavadora"),("GRAVAÇÃO E ESTANQUEIDADE","gravacao"),("PRESET","preset"),("CORINGA","coringa"),("FACILITADOR","facilitador"),("TOTAL POR TURNO",None),("TOTAL FUNCIONÁRIOS",None)]:
         _bold="TOTAL" in _snm; _bg=F_AM_JD_a if _bold else F_BRANCO_a; _fg="1F4D19" if _bold else "000000"
@@ -2346,7 +2352,9 @@ with tab_cen:
             if not row_.empty:
                 r_ = row_.iloc[0]
                 ref[cen] = {"oA": r_.ocup_A, "oB": r_.ocup_B, "oC": r_.ocup_C,
-                             "aA": int(r_.ativo_A), "aB": int(r_.ativo_B), "aC": int(r_.ativo_C)}
+                             "aA": int(r_.num_A) if hasattr(r_,"num_A") else int(r_.ativo_A),
+                             "aB": int(r_.num_B) if hasattr(r_,"num_B") else int(r_.ativo_B),
+                             "aC": int(r_.num_C) if hasattr(r_,"num_C") else int(r_.ativo_C)}
         return ref
 
     def _build_ocup_ref_ano(meses_lista):
@@ -2412,7 +2420,9 @@ with tab_cen:
                 if not row_.empty:
                     r_ = row_.iloc[0]
                     vA.append(r_.ocup_A); vB.append(r_.ocup_B); vC.append(r_.ocup_C)
-                    aA.append(int(r_.ativo_A)); aB.append(int(r_.ativo_B)); aC.append(int(r_.ativo_C))
+                    aA.append(int(r_.num_A) if hasattr(r_,"num_A") else int(r_.ativo_A))
+                    aB.append(int(r_.num_B) if hasattr(r_,"num_B") else int(r_.ativo_B))
+                    aC.append(int(r_.num_C) if hasattr(r_,"num_C") else int(r_.ativo_C))
             if vA:
                 ref[cen] = {"oA": np.mean(vA), "oB": np.mean(vB), "oC": np.mean(vC),
                              "aA": round(np.mean(aA)), "aB": round(np.mean(aB)), "aC": round(np.mean(aC))}
@@ -2461,13 +2471,13 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
                 f"{eC} {ref['oC']:.0%} (C)</span></div>",
                 unsafe_allow_html=True
             )
-            vA = c1.number_input(f"Funcionários Turno A — {cen}", 0, 5, ref["aA"],
+            vA = c1.number_input(f"Funcionários Turno A — {cen}", 0, 20, ref["aA"],
                                   key=f"{prefix}_{cen}_A", label_visibility="collapsed",
                                   help=f"{cen}: número de funcionários no Turno A (manhã). Ocupação atual: {ref['oA']:.0%}")
-            vB = c2.number_input(f"Funcionários Turno B — {cen}", 0, 5, ref["aB"],
+            vB = c2.number_input(f"Funcionários Turno B — {cen}", 0, 20, ref["aB"],
                                   key=f"{prefix}_{cen}_B", label_visibility="collapsed",
                                   help=f"{cen}: número de funcionários no Turno B (tarde). Ocupação atual: {ref['oB']:.0%}")
-            vC = c3.number_input(f"Funcionários Turno C — {cen}", 0, 5, ref["aC"],
+            vC = c3.number_input(f"Funcionários Turno C — {cen}", 0, 20, ref["aC"],
                                   key=f"{prefix}_{cen}_C", label_visibility="collapsed",
                                   help=f"{cen}: número de funcionários no Turno C (noite). Ocupação atual: {ref['oC']:.0%}")
             ov[cen] = {"A": vA, "B": vB, "C": vC}
@@ -2791,8 +2801,14 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
                             rb_r=rb_c[rb_c.centro==cen]; rc_r=rc_c[rc_c.centro==cen]
                             if rb_r.empty or rc_r.empty: continue
                             rb=rb_r.iloc[0]; rc=rc_r.iloc[0]
-                            mA=int(rb.ativo_A)!=int(rc.ativo_A); mB=int(rb.ativo_B)!=int(rc.ativo_B); mC=int(rb.ativo_C)!=int(rc.ativo_C)
-                            det_rows.append({"Centro":cen,"Ocup.A":f"{rb.ocup_A:.0%}","Base A":int(rb.ativo_A),"Cen A":int(rc.ativo_A),"Ocup.B":f"{rb.ocup_B:.0%}","Base B":int(rb.ativo_B),"Cen B":int(rc.ativo_B),"Ocup.C":f"{rb.ocup_C:.0%}","Base C":int(rb.ativo_C),"Cen C":int(rc.ativo_C),"Mudou":"✅ Igual" if not(mA or mB or mC) else ("A " if mA else "")+("B " if mB else "")+("C" if mC else "")+"alterado(s)"})
+                            _rb_nA=int(rb.num_A) if hasattr(rb,"num_A") else int(rb.ativo_A)
+                            _rb_nB=int(rb.num_B) if hasattr(rb,"num_B") else int(rb.ativo_B)
+                            _rb_nC=int(rb.num_C) if hasattr(rb,"num_C") else int(rb.ativo_C)
+                            _rc_nA=int(rc.num_A) if hasattr(rc,"num_A") else int(rc.ativo_A)
+                            _rc_nB=int(rc.num_B) if hasattr(rc,"num_B") else int(rc.ativo_B)
+                            _rc_nC=int(rc.num_C) if hasattr(rc,"num_C") else int(rc.ativo_C)
+                            mA=_rb_nA!=_rc_nA; mB=_rb_nB!=_rc_nB; mC=_rb_nC!=_rc_nC
+                            det_rows.append({"Centro":cen,"Ocup.A":f"{rb.ocup_A:.0%}","Base A":_rb_nA,"Cen A":_rc_nA,"Ocup.B":f"{rb.ocup_B:.0%}","Base B":_rb_nB,"Cen B":_rc_nB,"Ocup.C":f"{rb.ocup_C:.0%}","Base C":_rb_nC,"Cen C":_rc_nC,"Mudou":"✅ Igual" if not(mA or mB or mC) else ("A " if mA else "")+("B " if mB else "")+("C" if mC else "")+"alterado(s)"})
                     if det_rows:
                         df_det=pd.DataFrame(det_rows)
                         def _sty_det(row):
