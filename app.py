@@ -2507,36 +2507,44 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
                                     key="btn_criar_cenario",
                                     help="Clique para criar o cenário com o nome digitado")
 
-        # "ANO FY26" aparece como opção junto com os meses — igual a selecionar um mês
-        _opcoes_periodo = _meses_disponiveis
-        meses_sel_raw = st.multiselect(
-            "Período(s) a configurar", _opcoes_periodo,
-            default=[_opcoes_periodo[0]] if _opcoes_periodo else [],
-            key="cen_meses_sel",
-            help="Selecione ANO FY26 para simular o consolidado anual, ou meses individuais."
+        # Tipo de cenário: ANO ou Meses (separados — não podem ser combinados)
+        _tipo_cenario = st.radio(
+            "Tipo de cenário",
+            ["📅 ANO FY26", "🗓️ Meses individuais"],
+            horizontal=True,
+            key="cen_tipo",
+            help="ANO FY26: afeta só a aba anual consolidada. Meses: afeta meses específicos."
         )
-        eh_ano_novo  = "📅 ANO FY26" in meses_sel_raw
-        meses_sel    = [m for m in meses_sel_raw if m != "📅 ANO FY26"]  # meses reais selecionados
-        # Se só ANO foi selecionado, usa todos os meses como base de cálculo mas exibe como ANO
-        meses_calc   = meses_sel if meses_sel else (_meses_disponiveis if eh_ano_novo else [])
+        eh_ano_novo = _tipo_cenario == "📅 ANO FY26"
+
+        if eh_ano_novo:
+            meses_sel_raw = ["📅 ANO FY26"]
+            meses_sel = []
+            meses_calc = _meses_disponiveis
+        else:
+            meses_sel_raw = st.multiselect(
+                "Meses a configurar", _meses_disponiveis,
+                default=[_meses_disponiveis[0]] if _meses_disponiveis else [],
+                key="cen_meses_sel",
+                help="Selecione os meses que deseja modificar."
+            )
+            meses_sel = meses_sel_raw
+            meses_calc = meses_sel
 
         if not novo_nome.strip():
             st.info("👆 Digite o nome do cenário e clique em 'Criar' para continuar.")
-        elif not meses_sel_raw:
-            st.warning("Selecione ao menos um período para configurar.")
+        elif not eh_ano_novo and not meses_sel:
+            st.warning("Selecione ao menos um mês para configurar.")
         else:
-            if eh_ano_novo and not meses_sel:
-                st.markdown('<div class="aviso-warn">📅 <b>ANO FY26</b> — ajuste os funcionários por turno e veja o impacto direto nas produtividades anuais.</div>', unsafe_allow_html=True)
-            elif eh_ano_novo and meses_sel:
-                meses_str = ", ".join(m[:3].upper() for m in meses_sel)
-                st.markdown(f'<div class="aviso-warn">📅 <b>ANO FY26 + meses individuais</b> — ANO e também: {meses_str}.</div>', unsafe_allow_html=True)
+            if eh_ano_novo:
+                st.markdown('<div class="aviso-warn">📅 <b>ANO FY26</b> — configure os funcionários por turno para o consolidado anual. Não afeta nenhum mês individual.</div>', unsafe_allow_html=True)
             else:
                 n = len(meses_sel)
                 meses_str = ", ".join(m[:3].upper() for m in meses_sel)
                 st.markdown(f'<div class="aviso-ok">🗓️ <b>{n} mês(es)</b>: {meses_str}. Cada período tem overrides independentes.</div>', unsafe_allow_html=True)
 
             # Botão de abertura: tanto o botão "Criar" do topo quanto o botão "Configurar" abrem a grade
-            _btn_key = f"btn_abrir_grade_{novo_nome}_{'_'.join(meses_sel_raw)}"
+            _btn_key = f"btn_abrir_grade_{novo_nome}_{'ANO' if eh_ano_novo else '_'.join(meses_sel_raw)}"
             if _btn_key not in st.session_state:
                 st.session_state[_btn_key] = False
             # Botão "Criar" do topo também abre a grade
@@ -2559,29 +2567,21 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
 
             with st.form(key=_form_key):
                 novo_ov_por_mes = {}
+                _ov_ano = {}
 
-                # Abas: ANO FY26 primeiro (se selecionado), depois meses individuais
-                _periodos_form = (["📅 ANO FY26"] if eh_ano_novo else []) + meses_sel
-
-                if len(_periodos_form) == 1:
-                    _p = _periodos_form[0]
-                    st.markdown(f"**Configurando: {_p}**")
-                    if _p == "📅 ANO FY26":
-                        _ov_ano = _render_grade_form(_refs["__ano__"], f"fa_{novo_nome}")
-                        # Aplica o mesmo override em todos os meses para cálculo
-                        for _m in _meses_disponiveis:
-                            novo_ov_por_mes[_m] = _ov_ano
-                    else:
-                        novo_ov_por_mes[_p] = _render_grade_form(_refs[_p], f"fm_{novo_nome}_{_p}")
+                if eh_ano_novo:
+                    # Cenário ANO: grade única, default = calculado automaticamente pelo app
+                    st.markdown("**📅 Configurando: ANO FY26** — afeta apenas o consolidado anual")
+                    _ov_ano = _render_grade_form(_refs["__ano__"], f"fa_{novo_nome}")
+                    # NÃO aplica nos meses — override anual fica separado
                 else:
-                    _tabs = st.tabs([f"📅 ANO" if p == "📅 ANO FY26" else f"📅 {p[:3].upper()}" for p in _periodos_form])
-                    for _tab, _p in zip(_tabs, _periodos_form):
-                        with _tab:
-                            if _p == "📅 ANO FY26":
-                                _ov_ano = _render_grade_form(_refs["__ano__"], f"fa_{novo_nome}")
-                                for _m in _meses_disponiveis:
-                                    novo_ov_por_mes[_m] = _ov_ano
-                            else:
+                    # Cenário de meses: uma aba por mês
+                    if len(meses_sel) == 1:
+                        novo_ov_por_mes[meses_sel[0]] = _render_grade_form(_refs[meses_sel[0]], f"fm_{novo_nome}_{meses_sel[0]}")
+                    else:
+                        _tabs = st.tabs([f"📅 {p[:3].upper()}" for p in meses_sel])
+                        for _tab, _p in zip(_tabs, meses_sel):
+                            with _tab:
                                 novo_ov_por_mes[_p] = _render_grade_form(_refs[_p], f"fm_{novo_nome}_{_p}")
 
                 salvar = st.form_submit_button("💾 Salvar cenário", type="primary", use_container_width=True)
@@ -2591,43 +2591,39 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
                     st.warning(f"Já existe um cenário chamado '{novo_nome}'. Escolha outro nome.")
                 else:
                     with st.spinner(f"Calculando '{novo_nome}'..."):
-                        res_cen = calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg,
-                                           horas_efetivas=horas_efetivas, overrides=novo_ov_por_mes)
-                        # ANO FY26: calcular como período único a partir da aba AnoFY26
-                        _res_ano_fy26 = None
-                        if eh_ano_novo and not meses_sel:
-                            # Override do ANO: mesmo para todos os meses, pegar do primeiro disponível
-                            _ov_ano_direto = next(
-                                (ov for ov in novo_ov_por_mes.values() if isinstance(ov, dict)),
-                                {}
-                            )
-                            # Tenta usar a aba AnoFY26 se existir
+                        if eh_ano_novo:
+                            # Cenário ANO: NÃO recalcula meses, só calcula a aba ANO
+                            res_cen = res_base  # meses ficam iguais à base
                             _res_ano_fy26 = calcular_ano_fy26(
                                 st.session_state.get("_fb_anual"),
-                                _ov_ano_direto,
+                                _ov_ano,
                                 horas_efetivas, suporte_cfg, horas_turno
                             )
-                            # Fallback: sem AnoFY26, calcula dos meses com os overrides aplicados
                             if _res_ano_fy26 is None:
+                                # Fallback: calcula ANO a partir dos meses base com overrides anuais
                                 _dias_map = {m: res_base[m]["dias"] for m in MESES if res_base.get(m)}
                                 _, _res_ano_fy26 = build_cp_data_from_meses(
-                                    res_cen, tempo, dist, aplic, pmp, _dias_map,
+                                    res_base, tempo, dist, aplic, pmp, _dias_map,
                                     horas_turno, horas_efetivas,
-                                    overrides_ano=_ov_ano_direto, suporte_cfg=suporte_cfg
+                                    overrides_ano=_ov_ano, suporte_cfg=suporte_cfg
                                 )
-                    _label_periodo = ("ANO FY26" if eh_ano_novo and not meses_sel else
-                                      f"ANO FY26 + {','.join(m[:3].upper() for m in meses_sel)}" if eh_ano_novo else
-                                      f"{len(meses_sel)} mês(es)")
+                        else:
+                            # Cenário de meses: recalcula os meses com overrides
+                            res_cen = calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg,
+                                               horas_efetivas=horas_efetivas, overrides=novo_ov_por_mes)
+                            _res_ano_fy26 = None
+
+                    _label_periodo = "ANO FY26" if eh_ano_novo else f"{len(meses_sel)} mês(es)"
                     st.session_state.cenarios[novo_nome] = {
                         "resultados": res_cen,
                         "res_ano_fy26": _res_ano_fy26,
-                        "mes": ("__ano__" if eh_ano_novo and not meses_sel else
-                                meses_sel[0] if meses_sel else _meses_disponiveis[0]),
-                        "meses_configurados": list(meses_sel_raw),
-                        "overrides": novo_ov_por_mes,
+                        "mes": "__ano__" if eh_ano_novo else (meses_sel[0] if meses_sel else _meses_disponiveis[0]),
+                        "meses_configurados": ["📅 ANO FY26"] if eh_ano_novo else list(meses_sel_raw),
+                        "overrides": {} if eh_ano_novo else novo_ov_por_mes,
+                        "overrides_ano": _ov_ano if eh_ano_novo else {},
                         "eh_ano": eh_ano_novo,
                     }
-                    st.success(f"✅ '{novo_nome}' salvo — {_label_periodo} configurado(s)!")
+                    st.success(f"✅ '{novo_nome}' salvo — {_label_periodo} configurado!")
                     st.rerun()
 
     if st.session_state.cenarios:
@@ -2829,29 +2825,57 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
             st.caption("Cada arquivo contém: uma aba com os dados originais (Base) e outra com o que você configurou (Cenário), por mês.")
             _dl_cols = st.columns(min(len(st.session_state.cenarios), 4))
             for _i, (nm, v) in enumerate(st.session_state.cenarios.items()):
-                _ovs = v.get("overrides", {})
-                _meses_modificados = [
-                    m for m in MESES
-                    if v["resultados"].get(m) and res_base.get(m) and m in _ovs and _ovs[m]
-                ]
-                if not _meses_modificados:
-                    _meses_modificados = [m for m in MESES if v["resultados"].get(m) and res_base.get(m)]
-                _tag_meses = ", ".join(m[:3].upper() for m in _meses_modificados)
-                _cen_vs_hash = hash(str(v["resultados"]) + str(res_base) + nm + "vs2")
-                _dl_cols[_i % 4].download_button(
-                    f"📥 {nm}",
-                    data=exportar_cenario_vs_base_cached(
-                        _cen_vs_hash, res_base, v["resultados"],
-                        _meses_modificados, nm,
-                        v.get("res_ano_fy26"), v.get("res_ano_fy26"),
-                        st.session_state.get("_fb_anual")
-                    ),
-                    file_name=f"cenario_{nm.replace(' ','_')}_vs_base.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key=f"dl_cen_tab_{nm}",
-                    use_container_width=True,
-                    help=f"Meses exportados: {_tag_meses}"
-                )
+                _cen_vs_hash = hash(str(v.get("res_ano_fy26")) + str(v["resultados"]) + nm + "vs3")
+                if v.get("eh_ano"):
+                    # Cenário ANO: exporta só aba ANO Base vs ANO Cenário
+                    _res_ano_base = calcular_ano_fy26(
+                        st.session_state.get("_fb_anual"), {},
+                        horas_efetivas, suporte_cfg, horas_turno
+                    )
+                    if _res_ano_base is None:
+                        _dias_map = {m: res_base[m]["dias"] for m in MESES if res_base.get(m)}
+                        _, _res_ano_base = build_cp_data_from_meses(
+                            res_base, tempo, dist, aplic, pmp, _dias_map,
+                            horas_turno, horas_efetivas, suporte_cfg=suporte_cfg
+                        )
+                    _dl_cols[_i % 4].download_button(
+                        f"📥 {nm}",
+                        data=exportar_cenario_vs_base_cached(
+                            _cen_vs_hash, res_base, res_base,
+                            [], nm,
+                            _res_ano_base, v.get("res_ano_fy26"),
+                            st.session_state.get("_fb_anual")
+                        ),
+                        file_name=f"cenario_{nm.replace(' ','_')}_ANO_vs_base.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key=f"dl_cen_tab_{nm}",
+                        use_container_width=True,
+                        help="Exporta: ANO Base vs ANO Cenário"
+                    )
+                else:
+                    # Cenário de meses: exporta só os meses modificados
+                    _ovs = v.get("overrides", {})
+                    _meses_modificados = [
+                        m for m in MESES
+                        if v["resultados"].get(m) and res_base.get(m) and m in _ovs and _ovs[m]
+                    ]
+                    if not _meses_modificados:
+                        _meses_modificados = [m for m in MESES if v["resultados"].get(m) and res_base.get(m)]
+                    _tag_meses = ", ".join(m[:3].upper() for m in _meses_modificados)
+                    _dl_cols[_i % 4].download_button(
+                        f"📥 {nm}",
+                        data=exportar_cenario_vs_base_cached(
+                            _cen_vs_hash, res_base, v["resultados"],
+                            _meses_modificados, nm,
+                            None, None,
+                            st.session_state.get("_fb_anual")
+                        ),
+                        file_name=f"cenario_{nm.replace(' ','_')}_vs_base.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key=f"dl_cen_tab_{nm}",
+                        use_container_width=True,
+                        help=f"Meses exportados: {_tag_meses}"
+                    )
             st.markdown("---")
             dn = st.selectbox("Remover cenário", list(st.session_state.cenarios.keys()), key="del_c")
             if st.button("🗑️ Remover", type="secondary", key="btn_del_cen"):
