@@ -2813,14 +2813,14 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
                         _r_ano_base_calc = calcular_ano_fy26(_fb_ano, {}, horas_efetivas, suporte_cfg, horas_turno)
                         # CENÁRIO: usar o res_ano_fy26 já calculado com overrides ao salvar
                         _r_ano_cen = v.get("res_ano_fy26")
-                        # Se não disponível (cenário antigo ou sem AnoFY26), recalcular com overrides do cenário
+                        # Extrai overrides do cenário (necessário para o fallback)
+                        _overrides_cen = v.get("overrides", {})
+                        _ov_ano_cen = next(
+                            (ov for ov in _overrides_cen.values() if isinstance(ov, dict)),
+                            {}
+                        )
+                        # Se res_ano_fy26 não disponível, recalcular com overrides
                         if _r_ano_cen is None:
-                            _overrides_cen = v.get("overrides", {})
-                            # Pega o override de qualquer mês (todos são iguais no ANO FY26)
-                            _ov_ano_cen = next(
-                                (ov for ov in _overrides_cen.values() if isinstance(ov, dict) and any(isinstance(v2, dict) for v2 in ov.values())),
-                                next(iter(_overrides_cen.values()), {}) if _overrides_cen else {}
-                            )
                             _r_ano_cen = calcular_ano_fy26(_fb_ano, _ov_ano_cen, horas_efetivas, suporte_cfg, horas_turno)
                         if _r_ano_base_calc is None or _r_ano_cen is None:
                             _dias_map = {m: res_base[m]["dias"] for m in MESES if res_base.get(m)}
