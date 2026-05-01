@@ -2525,7 +2525,7 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
             meses_sel_raw = st.multiselect(
                 "Meses a configurar", _meses_disponiveis,
                 default=[_meses_disponiveis[0]] if _meses_disponiveis else [],
-                key="cen_meses_sel",
+                key="cen_meses_sel_v2",
                 help="Selecione os meses que deseja modificar."
             )
             meses_sel = meses_sel_raw
