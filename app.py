@@ -2818,6 +2818,19 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
 
         st.markdown("---")
         if st.session_state.cenarios:
+            st.markdown('<div class="jd-sub">📥 Baixar cenários</div>', unsafe_allow_html=True)
+            _dl_cols = st.columns(min(len(st.session_state.cenarios), 4))
+            for _i, (nm, v) in enumerate(st.session_state.cenarios.items()):
+                _cen_hash = hash(str(v["resultados"]) + nm + "tab_cen")
+                _dl_cols[_i % 4].download_button(
+                    f"📥 {nm}",
+                    data=exportar_cached(_cen_hash, v["resultados"], tempo, dist, aplic, pmp, _eh_cenario=True),
+                    file_name=f"cenario_{nm.replace(' ','_')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"dl_cen_tab_{nm}",
+                    use_container_width=True
+                )
+            st.markdown("---")
             dn = st.selectbox("Remover cenário", list(st.session_state.cenarios.keys()), key="del_c")
             if st.button("🗑️ Remover", type="secondary", key="btn_del_cen"):
                 del st.session_state.cenarios[dn]; st.rerun()
@@ -3303,8 +3316,3 @@ Inclui totais de minutos/horas/dias, bloco de DADOS AUTOMÁTICOS e aba ANO.
                 st.session_state["base_tratada_cache"] = _buf_base.read()
                 st.session_state["_base_cache_key"] = _base_cache_key
             st.download_button("📥 Baixar base tratada", data=st.session_state["base_tratada_cache"], file_name="base_tratada.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_base")
-        if st.session_state.get("cenarios"):
-            st.markdown('<div class="jd-sub">Cenários salvos</div>',unsafe_allow_html=True)
-            for nm,v in st.session_state.cenarios.items():
-                _cen_hash = hash(str(v["resultados"]) + nm)
-                st.download_button(f"📥 Cenário: {nm}",data=exportar_cached(_cen_hash, v["resultados"],tempo,dist,aplic,pmp,_eh_cenario=True),file_name=f"cenario_{nm.replace(' ','_')}.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key=f"exp_{nm}")
