@@ -2482,10 +2482,10 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
                                     help="Clique para criar o cenário com o nome digitado")
 
         # "ANO FY26" aparece como opção junto com os meses — igual a selecionar um mês
-        _opcoes_periodo = ["📅 ANO FY26"] + _meses_disponiveis
+        _opcoes_periodo = _meses_disponiveis
         meses_sel_raw = st.multiselect(
             "Período(s) a configurar", _opcoes_periodo,
-            default=[_opcoes_periodo[0]],
+            default=[_opcoes_periodo[0]] if _opcoes_periodo else [],
             key="cen_meses_sel",
             help="Selecione ANO FY26 para simular o consolidado anual, ou meses individuais."
         )
