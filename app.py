@@ -908,17 +908,9 @@ def calcular_ano_fy26(file_bytes, overrides_ano, horas_efetivas, suporte_cfg, ho
             cen_mc[cen] += float(vals[15] or 0)
             cen_ml[cen] += float(vals[16] or 0)
 
-        # Ler ocupação base e ativo base do 1° bloco do RESUMO DA LOTAÇÃO
+        # cen_base: não usado para ativos (AnoFY26 não tem coluna Ativo/Inativo)
+        # Os ativos são calculados pela ocupação ou sobrescritos pelos overrides
         cen_base = {}
-        for row in rows:
-            vals = [c.value for c in row[:22]]
-            cen = vals[11] if len(vals) > 11 else None
-            if cen and str(cen).startswith("CEN"):
-                try:
-                    oA = float(vals[12] or 0); oB = float(vals[13] or 0); oC = float(vals[14] or 0)
-                    aA = int(vals[15] or 0);   aB = int(vals[16] or 0);   aC = int(vals[17] or 0)
-                    cen_base[str(cen)] = {"oA":oA,"oB":oB,"oC":oC,"aA":aA,"aB":aB,"aC":aC}
-                except: pass
         wb.close()
 
         # Montar centros com overrides aplicados
@@ -1180,25 +1172,17 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None,
     def hdA(cen): return dias_ano*heA*ativo_ano_A(cen)
     def hdB(cen): return dias_ano*heB*ativo_ano_B(cen)
     def hdC(cen): return dias_ano*heC*ativo_ano_C(cen)
-    # Se res_ano_override tem centros com overrides aplicados, usa ativos dele
+    # Se res_ano_override tem centros com overrides aplicados, usa ativos dele diretamente
     if res_ano_override and "centros" in res_ano_override and not res_ano_override["centros"].empty:
         _df_ro = res_ano_override["centros"]
-        op_A_ano = int(_df_ro.ativo_A.sum())
-        op_B_ano = int(_df_ro.ativo_B.sum())
-        op_C_ano = int(_df_ro.ativo_C.sum())
-        # Também reconstruir ativo por centro para as funções de horas
-        _ativo_map = {row.centro: {"A": int(row.ativo_A), "B": int(row.ativo_B), "C": int(row.ativo_C)}
+        _ativo_map = {row.centro: (int(row.ativo_A), int(row.ativo_B), int(row.ativo_C))
                       for _, row in _df_ro.iterrows()}
-        def ativo_ano_A(cen): return _ativo_map.get(cen, {}).get("A", ativo_ano_A.__wrapped__(cen))
-        def ativo_ano_B(cen): return _ativo_map.get(cen, {}).get("B", ativo_ano_B.__wrapped__(cen))
-        def ativo_ano_C(cen): return _ativo_map.get(cen, {}).get("C", ativo_ano_C.__wrapped__(cen))
-        ativo_ano_A.__wrapped__ = lambda cen: 1 if ocup_ano(cen,"A")>thr_A else 0
-        ativo_ano_B.__wrapped__ = lambda cen: 1 if ocup_ano(cen,"A")>thr_B else 0
-        ativo_ano_C.__wrapped__ = lambda cen: 1 if ocup_ano(cen,"B")>thr_C else 0
-    else:
-        op_A_ano=sum(ativo_ano_A(c) for c in centros_ord)
-        op_B_ano=sum(ativo_ano_B(c) for c in centros_ord)
-        op_C_ano=sum(ativo_ano_C(c) for c in centros_ord)
+        def ativo_ano_A(cen): return _ativo_map.get(cen, (1 if ocup_ano(cen,"A")>thr_A else 0, 0, 0))[0]
+        def ativo_ano_B(cen): return _ativo_map.get(cen, (0, 1 if ocup_ano(cen,"A")>thr_B else 0, 0))[1]
+        def ativo_ano_C(cen): return _ativo_map.get(cen, (0, 0, 1 if ocup_ano(cen,"B")>thr_C else 0))[2]
+    op_A_ano=sum(ativo_ano_A(c) for c in centros_ord)
+    op_B_ano=sum(ativo_ano_B(c) for c in centros_ord)
+    op_C_ano=sum(ativo_ano_C(c) for c in centros_ord)
     def sup_ano(key,t): return round(sup_somas[key][t]/n_meses) if n_meses else 0
     tot_suporte_A=sum(sup_ano(k,"A") for k in sup_somas)
     tot_suporte_B=sum(sup_ano(k,"B") for k in sup_somas)
@@ -2774,21 +2758,21 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
                     _cen_vs_hash = hash(nm + str(v["resultados"]) + str(_meses_exp))
                     _fb_ano = st.session_state.get("_fb_anual")
                     if v.get("eh_ano"):
-                        # cp_data: preferir AnoFY26; fallback = inputs reais (correto por peça)
+                        # cp_data: preferir AnoFY26; fallback = inputs reais
                         _cp_ano_exp = build_cp_data_anual(res_base, tempo, dist, aplic, pmp, file_bytes=_fb_ano)
-                        # Base: sem overrides
+                        # BASE: calcular sem overrides
                         _r_ano_base_calc = calcular_ano_fy26(_fb_ano, {}, horas_efetivas, suporte_cfg, horas_turno)
-                        # Cenário: resgata overrides salvos e recalcula com eles
-                        _overrides_cen = v.get("overrides", {})
-                        # overrides do cenário ANO: chave "__ano__" → dict por centro
-                        _ov_ano_cen = {}
-                        if _overrides_cen:
-                            # Pode estar em "__ano__" (modo ANO único) ou nos meses
-                            _ov_src = _overrides_cen.get("__ano__") or next(iter(_overrides_cen.values()), {})
-                            if isinstance(_ov_src, dict):
-                                _ov_ano_cen = _ov_src
-                        _r_ano_cen = calcular_ano_fy26(_fb_ano, _ov_ano_cen, horas_efetivas, suporte_cfg, horas_turno)
-                        if _r_ano_cen is None: _r_ano_cen = v.get("res_ano_fy26")
+                        # CENÁRIO: usar o res_ano_fy26 já calculado com overrides ao salvar
+                        _r_ano_cen = v.get("res_ano_fy26")
+                        # Se não disponível (cenário antigo ou sem AnoFY26), recalcular com overrides do cenário
+                        if _r_ano_cen is None:
+                            _overrides_cen = v.get("overrides", {})
+                            # Pega o override de qualquer mês (todos são iguais no ANO FY26)
+                            _ov_ano_cen = next(
+                                (ov for ov in _overrides_cen.values() if isinstance(ov, dict) and any(isinstance(v2, dict) for v2 in ov.values())),
+                                next(iter(_overrides_cen.values()), {}) if _overrides_cen else {}
+                            )
+                            _r_ano_cen = calcular_ano_fy26(_fb_ano, _ov_ano_cen, horas_efetivas, suporte_cfg, horas_turno)
                         if _r_ano_base_calc is None or _r_ano_cen is None:
                             _, _r_ano_base_calc = build_cp_data_from_meses(
                                 res_base, tempo, dist, aplic, pmp,
