@@ -364,9 +364,10 @@ def calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg
             aC = 1 if pB > thr_C else 0
             if overrides and mes in overrides and cen in overrides[mes]:
                 ov = overrides[mes][cen]
-                if "A" in ov: aA = ov["A"]
-                if "B" in ov: aB = ov["B"]
-                if "C" in ov: aC = ov["C"]
+                # Override guarda número de funcionários — converter para binário (0/1)
+                if "A" in ov: aA = 1 if int(ov["A"]) > 0 else 0
+                if "B" in ov: aB = 1 if int(ov["B"]) > 0 else 0
+                if "C" in ov: aC = 1 if int(ov["C"]) > 0 else 0
             centros.append({
                 "centro":cen,"ocup_A":pA,"ocup_B":pB,"ocup_C":pC,
                 "ativo_A":aA,"ativo_B":aB,"ativo_C":aC,
@@ -927,9 +928,9 @@ def calcular_ano_fy26(file_bytes, overrides_ano, horas_efetivas, suporte_cfg, ho
             aC = base.get("aC", 1 if oB > 0.75 else 0)
             if overrides_ano and cen in overrides_ano:
                 ov = overrides_ano[cen]
-                if "A" in ov: aA = int(ov["A"])
-                if "B" in ov: aB = int(ov["B"])
-                if "C" in ov: aC = int(ov["C"])
+                if "A" in ov: aA = 1 if int(ov["A"]) > 0 else 0
+                if "B" in ov: aB = 1 if int(ov["B"]) > 0 else 0
+                if "C" in ov: aC = 1 if int(ov["C"]) > 0 else 0
             centros.append({
                 "centro": cen, "ocup_A": oA, "ocup_B": oB, "ocup_C": oC,
                 "ativo_A": aA, "ativo_B": aB, "ativo_C": aC,
@@ -1043,9 +1044,9 @@ def build_cp_data_from_meses(resultados, tempo, dist, aplic, pmp, dias_por_mes, 
             r = resultados[m]
             for _, row in r["centros"].iterrows():
                 cen = row.centro
-                cen_ativos[cen]["aA"] = max(cen_ativos[cen]["aA"], int(row.ativo_A))
-                cen_ativos[cen]["aB"] = max(cen_ativos[cen]["aB"], int(row.ativo_B))
-                cen_ativos[cen]["aC"] = max(cen_ativos[cen]["aC"], int(row.ativo_C))
+                cen_ativos[cen]["aA"] = max(cen_ativos[cen]["aA"], 1 if int(row.ativo_A) > 0 else 0)
+                cen_ativos[cen]["aB"] = max(cen_ativos[cen]["aB"], 1 if int(row.ativo_B) > 0 else 0)
+                cen_ativos[cen]["aC"] = max(cen_ativos[cen]["aC"], 1 if int(row.ativo_C) > 0 else 0)
 
         centros = []
         for cen in sorted(cen_mc.keys()):
@@ -1056,9 +1057,9 @@ def build_cp_data_from_meses(resultados, tempo, dist, aplic, pmp, dias_por_mes, 
             # Aplicar overrides do cenário ANO se fornecidos
             if overrides_ano and cen in overrides_ano:
                 ov = overrides_ano[cen]
-                if "A" in ov: aA = int(ov["A"])
-                if "B" in ov: aB = int(ov["B"])
-                if "C" in ov: aC = int(ov["C"])
+                if "A" in ov: aA = 1 if int(ov["A"]) > 0 else 0
+                if "B" in ov: aB = 1 if int(ov["B"]) > 0 else 0
+                if "C" in ov: aC = 1 if int(ov["C"]) > 0 else 0
             centros.append({"centro":cen,"ocup_A":oA,"ocup_B":oB,"ocup_C":oC,
                             "ativo_A":aA,"ativo_B":aB,"ativo_C":aC,
                             "min_ciclo_total":mc,"min_labor_total":ml,
@@ -1300,7 +1301,9 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None,
         oA=ocup_ano(cen,"A"); oB=ocup_ano(cen,"B"); oC=ocup_ano(cen,"C")
         if cen in _ro_map:
             _row_ro = _ro_map[cen]
-            aA=int(_row_ro.ativo_A); aB=int(_row_ro.ativo_B); aC=int(_row_ro.ativo_C)
+            aA=1 if int(_row_ro.ativo_A)>0 else 0
+            aB=1 if int(_row_ro.ativo_B)>0 else 0
+            aC=1 if int(_row_ro.ativo_C)>0 else 0
         else:
             aA=ativo_ano_A(cen); aB=ativo_ano_B(cen); aC=ativo_ano_C(cen)
         _e(ws,_ri,_CF,cen,F_BRANCO_a,False,"000000",8,False)
