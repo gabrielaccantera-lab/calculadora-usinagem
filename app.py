@@ -1192,17 +1192,22 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None,
     def hdA(cen): return dias_ano*heA*ativo_ano_A(cen)
     def hdB(cen): return dias_ano*heB*ativo_ano_B(cen)
     def hdC(cen): return dias_ano*heC*ativo_ano_C(cen)
-    # Se res_ano_override tem centros com overrides aplicados, usa ativos dele diretamente
+    # Se res_ano_override tem centros com overrides, usa ativos dele para op_A/B/C e por centro
     if res_ano_override and "centros" in res_ano_override and not res_ano_override["centros"].empty:
         _df_ro = res_ano_override["centros"]
-        _ativo_map = {row.centro: (int(row.ativo_A), int(row.ativo_B), int(row.ativo_C))
-                      for _, row in _df_ro.iterrows()}
-        def ativo_ano_A(cen): return _ativo_map.get(cen, (1 if ocup_ano(cen,"A")>thr_A else 0, 0, 0))[0]
-        def ativo_ano_B(cen): return _ativo_map.get(cen, (0, 1 if ocup_ano(cen,"A")>thr_B else 0, 0))[1]
-        def ativo_ano_C(cen): return _ativo_map.get(cen, (0, 0, 1 if ocup_ano(cen,"B")>thr_C else 0))[2]
-    op_A_ano=sum(ativo_ano_A(c) for c in centros_ord)
-    op_B_ano=sum(ativo_ano_B(c) for c in centros_ord)
-    op_C_ano=sum(ativo_ano_C(c) for c in centros_ord)
+        op_A_ano = int(_df_ro.ativo_A.sum())
+        op_B_ano = int(_df_ro.ativo_B.sum())
+        op_C_ano = int(_df_ro.ativo_C.sum())
+        # sup_somas do override (se disponível)
+        if res_ano_override.get("suporte"):
+            sup_somas = {k: {"A": res_ano_override["suporte"][k]["A"],
+                             "B": res_ano_override["suporte"][k]["B"],
+                             "C": res_ano_override["suporte"][k]["C"]}
+                         for k in sup_somas}
+    else:
+        op_A_ano=sum(ativo_ano_A(c) for c in centros_ord)
+        op_B_ano=sum(ativo_ano_B(c) for c in centros_ord)
+        op_C_ano=sum(ativo_ano_C(c) for c in centros_ord)
     def sup_ano(key,t): return round(sup_somas[key][t]/n_meses) if n_meses else 0
     tot_suporte_A=sum(sup_ano(k,"A") for k in sup_somas)
     tot_suporte_B=sum(sup_ano(k,"B") for k in sup_somas)
@@ -1283,14 +1288,21 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None,
     for _ci,_txt in [(_CF+1,"% Ocup"),(_CF+2,"% Ocup"),(_CF+3,"% Ocup"),(_CF+4,"Ativo"),(_CF+5,"Ativo"),(_CF+6,"Ativo"),(_CF+7,"Horas"),(_CF+8,"Horas"),(_CF+9,"Horas")]:
         _e(ws,_RS+3,_ci,_txt,F_PRETO_a,True,"FFFFFF",8); ws.row_dimensions[_RS+3].height=14
     _ri=_RS+4
+    def _cbg_a(v):
+        if v>=1.06: return F_VERM_a
+        if v>=1.00: return PatternFill("solid",fgColor="FFFF00")
+        if v>=0.40: return F_VERDE_a
+        return F_BRANCO_a
+    # Quando há res_ano_override com centros, usa seus ativos diretamente (cenário ANO)
+    _ro_df = res_ano_override["centros"] if (res_ano_override and "centros" in res_ano_override and not res_ano_override["centros"].empty) else None
+    _ro_map = {row.centro: row for _, row in _ro_df.iterrows()} if _ro_df is not None else {}
     for cen in centros_ord:
         oA=ocup_ano(cen,"A"); oB=ocup_ano(cen,"B"); oC=ocup_ano(cen,"C")
-        aA=ativo_ano_A(cen); aB=ativo_ano_B(cen); aC=ativo_ano_C(cen)
-        def _cbg_a(v):
-            if v>=1.06: return F_VERM_a
-            if v>=1.00: return PatternFill("solid",fgColor="FFFF00")
-            if v>=0.40: return F_VERDE_a
-            return F_BRANCO_a
+        if cen in _ro_map:
+            _row_ro = _ro_map[cen]
+            aA=int(_row_ro.ativo_A); aB=int(_row_ro.ativo_B); aC=int(_row_ro.ativo_C)
+        else:
+            aA=ativo_ano_A(cen); aB=ativo_ano_B(cen); aC=ativo_ano_C(cen)
         _e(ws,_ri,_CF,cen,F_BRANCO_a,False,"000000",8,False)
         for _pci,_pv,_pbg in [(_CF+1,oA,_cbg_a(oA)),(_CF+2,oB,_cbg_a(oB)),(_CF+3,oC,_cbg_a(oC))]:
             _pc=_e(ws,_ri,_pci,_pv,_pbg,False,"000000",8)
