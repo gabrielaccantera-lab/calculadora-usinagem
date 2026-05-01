@@ -2822,20 +2822,28 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
             st.caption("Cada arquivo contém: uma aba com os dados originais (Base) e outra com o que você configurou (Cenário), por mês.")
             _dl_cols = st.columns(min(len(st.session_state.cenarios), 4))
             for _i, (nm, v) in enumerate(st.session_state.cenarios.items()):
-                _meses_cen = [m for m in MESES if v["resultados"].get(m) and res_base.get(m)]
-                _cen_vs_hash = hash(str(v["resultados"]) + str(res_base) + nm + "vs")
+                _ovs = v.get("overrides", {})
+                _meses_modificados = [
+                    m for m in MESES
+                    if v["resultados"].get(m) and res_base.get(m) and m in _ovs and _ovs[m]
+                ]
+                if not _meses_modificados:
+                    _meses_modificados = [m for m in MESES if v["resultados"].get(m) and res_base.get(m)]
+                _tag_meses = ", ".join(m[:3].upper() for m in _meses_modificados)
+                _cen_vs_hash = hash(str(v["resultados"]) + str(res_base) + nm + "vs2")
                 _dl_cols[_i % 4].download_button(
                     f"📥 {nm}",
                     data=exportar_cenario_vs_base_cached(
                         _cen_vs_hash, res_base, v["resultados"],
-                        _meses_cen, nm,
+                        _meses_modificados, nm,
                         v.get("res_ano_fy26"), v.get("res_ano_fy26"),
                         st.session_state.get("_fb_anual")
                     ),
                     file_name=f"cenario_{nm.replace(' ','_')}_vs_base.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     key=f"dl_cen_tab_{nm}",
-                    use_container_width=True
+                    use_container_width=True,
+                    help=f"Meses exportados: {_tag_meses}"
                 )
             st.markdown("---")
             dn = st.selectbox("Remover cenário", list(st.session_state.cenarios.keys()), key="del_c")
