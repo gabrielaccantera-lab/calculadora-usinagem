@@ -632,6 +632,14 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
     except: agg_cp_t=pd.DataFrame()
     pares_cp = list(dist[["centro","peca"]].drop_duplicates().itertuples(index=False, name=None))
     modelos_lista = sorted(pmp["modelo"].unique().tolist())
+
+    # Pré-computar lookups para evitar filtros pandas dentro dos loops
+    _dist_idx = {(r.centro, r.peca): r for r in dist.itertuples()}
+    _tempo_idx = {(r.centro, r.peca): r for r in tempo.itertuples()}
+    _aplic_set = set(zip(aplic.centro, aplic.peca, aplic.modelo))
+    _pmp_pivot = pmp.pivot_table(index=["modelo","mes"], values="qtd", aggfunc="sum").to_dict()
+    _aplic_pc_idx = {(r.centro, r.peca): float(r.pc_trat) if hasattr(r, "pc_trat") else 1.0 for r in aplic.drop_duplicates(["centro","peca"]).itertuples()}
+
     wb_out = _opx.Workbook(); primeira_t = True
     for mes_t in MESES:
         d_t = dias.get(mes_t, 0)
@@ -668,13 +676,14 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
         for mi_t,mod_t in enumerate(modelos_lista):
             ci_t=19+mi_t; _ec(ws_out,6,ci_t,mod_t,_F_CINZA,True,"000000",7,True,True); ws_out.column_dimensions[get_column_letter(ci_t)].width=7
         ws_out.row_dimensions[6].height=42
-        pmp_mes_t = pmp[pmp.mes==mes_t]; ri_t=7
+        _qtd_mes = {mod: int(_pmp_pivot.get("qtd", {}).get((mod, mes_t), 0)) for mod in modelos_lista}
+        ri_t=7
         for cen_t,peca_t in pares_cp:
-            dist_row=dist[(dist.centro==cen_t)&(dist.peca==peca_t)]; tempo_row=tempo[(tempo.centro==cen_t)&(tempo.peca==peca_t)]
-            if dist_row.empty or tempo_row.empty: continue
-            tc=float(tempo_row.iloc[0].t_ciclo); tl=float(tempo_row.iloc[0].t_labor)
-            dc=float(dist_row.iloc[0].div_carga); vi=float(dist_row.iloc[0].vol_int)
-            dv=float(dist_row.iloc[0].div_volume); di=float(dist_row.iloc[0].disponib)
+            _dk = (cen_t, peca_t); _dr = _dist_idx.get(_dk); _tr = _tempo_idx.get(_dk)
+            if _dr is None or _tr is None: continue
+            tc=float(_tr.t_ciclo); tl=float(_tr.t_labor)
+            dc=float(_dr.div_carga); vi=float(_dr.vol_int)
+            dv=float(_dr.div_volume); di=float(_dr.disponib)
             idx_c=(tc*dc*dv*vi)/di if di>0 else 0
             try: mc_t=float(agg_cp_t.loc[(cen_t,peca_t,mes_t),"min_ciclo"])
             except: mc_t=0.0
@@ -683,13 +692,10 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
             pA_t=mc_t/minA_t if minA_t>0 else 0; pB_t=mc_t/minB_t if minB_t>0 else 0; pC_t=mc_t/minC_t if minC_t>0 else 0
             app_mod_v={}; tot_pecas=0
             for mod_t2 in modelos_lista:
-                qtd_t=int(pmp_mes_t[pmp_mes_t.modelo==mod_t2]["qtd"].sum()) if mod_t2 in pmp_mes_t.modelo.values else 0
-                aplic_row=aplic[(aplic.centro==cen_t)&(aplic.peca==peca_t)&(aplic.modelo==mod_t2)]
-                flag_t=1 if len(aplic_row)>0 else 0
+                qtd_t = _qtd_mes.get(mod_t2, 0)
+                flag_t = 1 if (cen_t, peca_t, mod_t2) in _aplic_set else 0
                 app_mod_v[mod_t2]=qtd_t*flag_t; tot_pecas+=qtd_t*flag_t
-            pc_t = float(dist_row.iloc[0].get("pc_trat", 1.0)) if hasattr(dist_row.iloc[0], "get") else 1.0
-            _aplic_pc = aplic[(aplic.centro==cen_t)&(aplic.peca==peca_t)]
-            pc_t = float(_aplic_pc.iloc[0].pc_trat) if not _aplic_pc.empty and "pc_trat" in _aplic_pc.columns else 1.0
+            pc_t = _aplic_pc_idx.get((cen_t, peca_t), 1.0)
             _ec(ws_out,ri_t,1,cen_t,_F_BRANCO,False,"000000",8,False); _ec(ws_out,ri_t,2,peca_t,_F_BRANCO,False,"000000",8,False)
             _ec(ws_out,ri_t,3,"",_F_BRANCO,False,"000000",8,False); _ec(ws_out,ri_t,4,int(pc_t),_F_BRANCO,False,"000000",8); _ec(ws_out,ri_t,5,"PC",_F_BRANCO,False,"000000",8)
             _ec(ws_out,ri_t,6,tc,_F_PRETO,False,"FFFFFF",8); _ec(ws_out,ri_t,7,tl,_F_PRETO,False,"FFFFFF",8)
@@ -718,7 +724,7 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
             _ec(ws_out,_r69,_ci_g,_txt_g,_fg,True,"000000",8,True)
         ws_out.row_dimensions[_r69].height=14
         _r70=_ROW_START+4; _ec(ws_out,_r70,_COL_F,"Centro",_F_PRETO,True,"FFFFFF",8)
-        for _ci_s,_txt_s in [(_COL_F+1,"% Ocup"),(_COL_F+2,"% Ocup"),(_COL_F+3,"% Ocup"),(_COL_F+4,"Ativo"),(_COL_F+5,"Ativo"),(_COL_F+6,"Ativo"),(_COL_F+7,"Horas"),(_COL_F+8,"Horas"),(_COL_F+9,"Horas")]:
+        for _ci_s,_txt_s in [(_COL_F+1,"% Ocup"),(_COL_F+2,"% Ocup"),(_COL_F+3,"% Ocup"),(_COL_F+4,"Nº Func"),(_COL_F+5,"Nº Func"),(_COL_F+6,"Nº Func"),(_COL_F+7,"Horas"),(_COL_F+8,"Horas"),(_COL_F+9,"Horas")]:
             _ec(ws_out,_r70,_ci_s,_txt_s,_F_PRETO,True,"FFFFFF",8)
         ws_out.row_dimensions[_r70].height=14
         _ri_c=_ROW_START+5
@@ -1298,7 +1304,7 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None,
     for _ci,_txt,_f in [(_CF+1,"TURNO A",F_VERDE_a),(_CF+2,"TURNO B",F_AMAR_a),(_CF+3,"TURNO C",F_AZUL_a),(_CF+4,"TURNO A",F_VERDE_a),(_CF+5,"TURNO B",F_AMAR_a),(_CF+6,"TURNO C",F_AZUL_a),(_CF+7,"TURNO A",F_VERDE_a),(_CF+8,"TURNO B",F_AMAR_a),(_CF+9,"TURNO C",F_AZUL_a)]:
         _e(ws,_RS+2,_ci,_txt,_f,True,"000000",8); ws.row_dimensions[_RS+2].height=14
     _e(ws,_RS+3,_CF,"Centro",F_PRETO_a,True,"FFFFFF",8)
-    for _ci,_txt in [(_CF+1,"% Ocup"),(_CF+2,"% Ocup"),(_CF+3,"% Ocup"),(_CF+4,"Ativo"),(_CF+5,"Ativo"),(_CF+6,"Ativo"),(_CF+7,"Horas"),(_CF+8,"Horas"),(_CF+9,"Horas")]:
+    for _ci,_txt in [(_CF+1,"% Ocup"),(_CF+2,"% Ocup"),(_CF+3,"% Ocup"),(_CF+4,"Nº Func"),(_CF+5,"Nº Func"),(_CF+6,"Nº Func"),(_CF+7,"Horas"),(_CF+8,"Horas"),(_CF+9,"Horas")]:
         _e(ws,_RS+3,_ci,_txt,F_PRETO_a,True,"FFFFFF",8); ws.row_dimensions[_RS+3].height=14
     _ri=_RS+4
     def _cbg_a(v):
@@ -3221,7 +3227,7 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                 ws_out.row_dimensions[_r69].height=14
                                 _r70=_ROW_START+4
                                 _ec(ws_out,_r70,_COL_F,"Centro",_F_PRETO,True,"FFFFFF",8)
-                                for _ci_s,_txt_s in [(_COL_F+1,"% Ocup"),(_COL_F+2,"% Ocup"),(_COL_F+3,"% Ocup"),(_COL_F+4,"Ativo"),(_COL_F+5,"Ativo"),(_COL_F+6,"Ativo"),(_COL_F+7,"Horas"),(_COL_F+8,"Horas"),(_COL_F+9,"Horas")]:
+                                for _ci_s,_txt_s in [(_COL_F+1,"% Ocup"),(_COL_F+2,"% Ocup"),(_COL_F+3,"% Ocup"),(_COL_F+4,"Nº Func"),(_COL_F+5,"Nº Func"),(_COL_F+6,"Nº Func"),(_COL_F+7,"Horas"),(_COL_F+8,"Horas"),(_COL_F+9,"Horas")]:
                                     _ec(ws_out,_r70,_ci_s,_txt_s,_F_PRETO,True,"FFFFFF",8)
                                 ws_out.row_dimensions[_r70].height=14
                                 _ri_c=_ROW_START+5
