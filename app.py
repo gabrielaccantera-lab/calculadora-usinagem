@@ -1167,7 +1167,12 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None,
         tot_C_ano=_ro.get("tot_C",tot_C_ano); tot_func_ano=_ro.get("total",tot_func_ano)
         sum_hciclo=_ro.get("h_ciclo",sum_hciclo); sum_hlabor=_ro.get("h_labor",sum_hlabor)
         sum_hativos=_ro.get("h_ativos",sum_hativos); sum_htodos=_ro.get("h_todos",sum_htodos)
-        sup_somas={k:{"A":_ro["suporte"][k]["A"],"B":_ro["suporte"][k]["B"],"C":_ro["suporte"][k]["C"]} for k in sup_somas} if _ro.get("suporte") else sup_somas
+        # res_ano_override["suporte"] tem valor POR PERÍODO (não soma mensal)
+        # sup_ano divide por n_meses, então multiplicamos para compensar
+        sup_somas={k:{"A":_ro["suporte"][k]["A"]*n_meses,
+                      "B":_ro["suporte"][k]["B"]*n_meses,
+                      "C":_ro["suporte"][k]["C"]*n_meses}
+                   for k in sup_somas} if _ro.get("suporte") else sup_somas
     # Para a BASE: usa horas do AnoFY26 (consistente com tabela de peças)
     # Para CENÁRIOS ou quando não há AnoFY26: recalcular do cp_data (parâmetros anuais)
     if horas_anual and not eh_cenario:
@@ -1201,9 +1206,9 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None,
         op_C_ano = int(_df_ro.ativo_C.sum())
         # sup_somas do override (se disponível)
         if res_ano_override.get("suporte"):
-            sup_somas = {k: {"A": res_ano_override["suporte"][k]["A"],
-                             "B": res_ano_override["suporte"][k]["B"],
-                             "C": res_ano_override["suporte"][k]["C"]}
+            sup_somas = {k: {"A": res_ano_override["suporte"][k]["A"]*n_meses,
+                             "B": res_ano_override["suporte"][k]["B"]*n_meses,
+                             "C": res_ano_override["suporte"][k]["C"]*n_meses}
                          for k in sup_somas}
     else:
         op_A_ano=sum(ativo_ano_A(c) for c in centros_ord)
