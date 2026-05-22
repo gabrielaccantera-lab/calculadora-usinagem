@@ -84,7 +84,7 @@ COL_MAP = {
 ABA_FORMATOS = {
     "INPUT_PMP": "**INPUT_PMP** — Linha 1: dias trabalhados (colunas B→M = Nov→Out). Linhas 3+: modelos, colunas B→M = qtd peças.",
     "IMPUTTEMPO": "**IMPUTTEMPO** — Cabeçalho linha 1. Colunas: `Máquina`, `REFERÊNCIA` (ou `PEÇA`), `Tempo Ciclo (min)`, `Tempo Labor (min)`.",
-    "IMPUTDISTRIBUIÇÃO": "**IMPUTDISTRIBUIÇÃO** — Cabeçalho linha 1. Colunas: `Máquina`, `REFERÊNCIA` (ou `PEÇA`), `Divisão Carga`, `Vol. Interna`, `Divisão de Volume`, `Disponibilidade`.",
+    "IMPUTDISTRIBUIÇÃO": "**IMPUTDISTRIBUIÇÃO** — Cabeçalho linha 1. Colunas: `Máquina`, `REFERÊNCIA` (ou `PEÇA`), `Divisão Carga`, `Vol. Interna`, `Divisão de Volume`, `Disponibilidade`, `Performance Operador X Máquina`.",
     "IMPUTAPLICAÇÃO": "**IMPUTAPLICAÇÃO** — Cabeçalho linha 1. Col A=Centro, Col B=REFERÊNCIA (ou PEÇA), depois colunas por modelo (qualquer nome).",
     "IMPUTTURNOS": "**IMPUTTURNOS** — Linha 1: horas acumuladas. B1=Turno A, C1=Turno B, D1=Turno C.",
 }
@@ -262,9 +262,9 @@ def read_dist(fb, log):
     out["perf_op"]    = pd.to_numeric(out["perf_op"],    errors="coerce").fillna(1.0)
     out = out.dropna(subset=["centro"])
     verificar_prefixo_centro(out, aba, log)
-    amostra = out[["centro","peca","div_carga","vol_int","div_volume","disponib"]].head(3)
+    amostra = out[["centro","peca","div_carga","vol_int","div_volume","disponib","perf_op"]].head(3)
     for _, r in amostra.iterrows():
-        log.append(f"   ✔ {r.centro}/{r.peca}: div_carga={r.div_carga}, vol_int={r.vol_int}, div_volume={r.div_volume}, disponib={r.disponib}")
+        log.append(f"   ✔ {r.centro}/{r.peca}: div_carga={r.div_carga}, vol_int={r.vol_int}, div_volume={r.div_volume}, disponib={r.disponib}, perf_op={r.perf_op}")
     log.append(f"   {len(out)} combinações")
     return out.copy()
 
@@ -751,15 +751,15 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
         _ec(ws_out,4,16,d_t,_F_VERDE,True,"FF0000",9); _ec(ws_out,4,17,d_t,_F_AMAR,True,"FF0000",9); _ec(ws_out,4,18,d_t,_F_AZUL,True,"FF0000",9)
         ws_out.row_dimensions[4].height=13
         n_mod=len(modelos_lista)
-        ws_out.merge_cells(f"A5:{get_column_letter(18+n_mod)}5")
+        ws_out.merge_cells(f"A5:{get_column_letter(19+n_mod)}5")
         _ec(ws_out,5,1,f"RESUMO DA CARGA — {mes_t.upper()} ({d_t} dias)",_F_VERDE_JD,True,"FFFFFF",10,True)
         ws_out.row_dimensions[5].height=18
-        hdrs_f=[("Máquina",_F_CINZA2,"000000"),("PEÇA",_F_CINZA2,"000000"),("DESCRIÇÃO",_F_CINZA2,"000000"),("PÇ/TRAT",_F_CINZA2,"000000"),("UM",_F_CINZA2,"000000"),("Tempo Ciclo (min)",_F_PRETO,"FFFFFF"),("Tempo Labor (min)",_F_PRETO,"FFFFFF"),("Div. Carga",_PF("solid",fgColor="FF0000"),"FFFF00"),("Vol. Interna",_F_CINZA2,"000000"),("Div. Volume",_PF("solid",fgColor="FF0000"),"FFFF00"),("Disponib.",_F_CINZA2,"000000"),("Indice Ciclo",_F_CINZA2,"000000"),("JA.A",_F_VERDE,"000000"),("JA.B",_F_AMAR,"000000"),("JA.C",_F_AZUL,"000000"),("TOTAL CICLOS (MIN)",_F_CINZA,"000000"),("TOTAL LABOR (MIN)",_F_CINZA,"000000"),("TOTAL PECAS",_F_CINZA,"000000")]
-        largs_t=[9,8,16,6,5,9,9,8,8,8,8,9,8,8,8,12,12,8]
+        hdrs_f=[("Máquina",_F_CINZA2,"000000"),("PEÇA",_F_CINZA2,"000000"),("DESCRIÇÃO",_F_CINZA2,"000000"),("PÇ/TRAT",_F_CINZA2,"000000"),("UM",_F_CINZA2,"000000"),("Tempo Ciclo (min)",_F_PRETO,"FFFFFF"),("Tempo Labor (min)",_F_PRETO,"FFFFFF"),("Div. Carga",_PF("solid",fgColor="FF0000"),"FFFF00"),("Vol. Interna",_F_CINZA2,"000000"),("Div. Volume",_PF("solid",fgColor="FF0000"),"FFFF00"),("Disponib.",_F_CINZA2,"000000"),("Perf. Op.",_F_CINZA2,"000000"),("Indice Ciclo",_F_CINZA2,"000000"),("JA.A",_F_VERDE,"000000"),("JA.B",_F_AMAR,"000000"),("JA.C",_F_AZUL,"000000"),("TOTAL CICLOS (MIN)",_F_CINZA,"000000"),("TOTAL LABOR (MIN)",_F_CINZA,"000000"),("TOTAL PECAS",_F_CINZA,"000000")]
+        largs_t=[9,8,16,6,5,9,9,8,8,8,8,8,9,8,8,8,12,12,8]
         for ci_t,(h_t,f_t,cor_t) in enumerate(hdrs_f,1):
             _ec(ws_out,6,ci_t,h_t,f_t,True,cor_t,8,True,True); ws_out.column_dimensions[get_column_letter(ci_t)].width=largs_t[ci_t-1]
         for mi_t,mod_t in enumerate(modelos_lista):
-            ci_t=19+mi_t; _ec(ws_out,6,ci_t,mod_t,_F_CINZA,True,"000000",7,True,True); ws_out.column_dimensions[get_column_letter(ci_t)].width=7
+            ci_t=20+mi_t; _ec(ws_out,6,ci_t,mod_t,_F_CINZA,True,"000000",7,True,True); ws_out.column_dimensions[get_column_letter(ci_t)].width=7
         ws_out.row_dimensions[6].height=42
         _qtd_mes = {mod: int(_pmp_pivot.get("qtd", {}).get((mod, mes_t), 0)) for mod in modelos_lista}
         ri_t=7
@@ -769,7 +769,8 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
             tc=float(_tr.t_ciclo); tl=float(_tr.t_labor)
             dc=float(_dr.div_carga); vi=float(_dr.vol_int)
             dv=float(_dr.div_volume); di=float(_dr.disponib)
-            idx_c=(tc*dc*dv*vi)/di if di>0 else 0
+            po=float(_dr.perf_op) if hasattr(_dr, "perf_op") else 1.0
+            idx_c=(tc*dc*dv*vi)/(di*po) if (di>0 and po>0) else 0
             try: mc_t=float(agg_cp_t.loc[(cen_t,peca_t,mes_t),"min_ciclo"])
             except: mc_t=0.0
             try: ml_t=float(agg_cp_t.loc[(cen_t,peca_t,mes_t),"min_labor"])
@@ -788,11 +789,13 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
             _fill_dv_p = _F_VERM if abs(dv-1.0)>0.001 else _F_BRANCO
             _ec(ws_out,ri_t,8,dc,_fill_dc_p,False,"000000",8); _ec(ws_out,ri_t,9,vi,_F_BRANCO,False,"000000",8)
             _ec(ws_out,ri_t,10,dv,_fill_dv_p,False,"000000",8); _ec(ws_out,ri_t,11,di,_F_BRANCO,False,"000000",8)
-            _ec(ws_out,ri_t,12,idx_c,_F_BRANCO,False,"000000",8)
-            _ec_pct(ws_out,ri_t,13,pA_t,_cor_pct(pA_t)); _ec_pct(ws_out,ri_t,14,pB_t,_cor_pct(pB_t)); _ec_pct(ws_out,ri_t,15,pC_t,_cor_pct(pC_t))
-            _ec(ws_out,ri_t,16,mc_t,_F_BRANCO,False,"000000",8); _ec(ws_out,ri_t,17,ml_t,_F_BRANCO,False,"000000",8); _ec(ws_out,ri_t,18,tot_pecas,_F_BRANCO,False,"000000",8)
+            _fill_po_p = _F_VERM if abs(po-1.0)>0.001 else _F_BRANCO
+            _ec(ws_out,ri_t,12,po,_fill_po_p,False,"000000",8)
+            _ec(ws_out,ri_t,13,idx_c,_F_BRANCO,False,"000000",8)
+            _ec_pct(ws_out,ri_t,14,pA_t,_cor_pct(pA_t)); _ec_pct(ws_out,ri_t,15,pB_t,_cor_pct(pB_t)); _ec_pct(ws_out,ri_t,16,pC_t,_cor_pct(pC_t))
+            _ec(ws_out,ri_t,17,mc_t,_F_BRANCO,False,"000000",8); _ec(ws_out,ri_t,18,ml_t,_F_BRANCO,False,"000000",8); _ec(ws_out,ri_t,19,tot_pecas,_F_BRANCO,False,"000000",8)
             for mi_t2,mod_t2 in enumerate(modelos_lista):
-                ci_t2=19+mi_t2; v_app_t=app_mod_v.get(mod_t2,0)
+                ci_t2=20+mi_t2; v_app_t=app_mod_v.get(mod_t2,0)
                 _ec(ws_out,ri_t,ci_t2,v_app_t if v_app_t else None,_F_CINZA if v_app_t else _F_BRANCO,False,"000000",7)
             ws_out.row_dimensions[ri_t].height=13; ri_t+=1
         _COL_F=6; _ROW_START=66; _F_CINZA_D=_PF("solid",fgColor="D9D9D9")
@@ -1284,3 +1287,275 @@ def show_memoria_ano(res_base, df_intermediario, agg, horas_turno, thresholds):
     st.download_button("📥 Baixar base completa pós-JOIN (ano todo)", data=st.session_state["mem_base_ano"],
                        file_name="base_ano_completo.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                        key="dl_mem_ano")
+
+
+def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None, eh_cenario=False, ws_existente=None, res_ano_override=None):
+    meses_com_dados = [(m, resultados[m]) for m in MESES if resultados.get(m)]
+    if not meses_com_dados: return
+    brd = Border(left=Side(style='thin',color='CCCCCC'),right=Side(style='thin',color='CCCCCC'),
+                 top=Side(style='thin',color='CCCCCC'),bottom=Side(style='thin',color='CCCCCC'))
+    F_VERDE_a  = PatternFill("solid",fgColor="92D050"); F_AMAR_a  = PatternFill("solid",fgColor="FFDE00")
+    F_AZUL_a   = PatternFill("solid",fgColor="00B0F0"); F_PRETO_a = PatternFill("solid",fgColor="000000")
+    F_CINZA_a  = PatternFill("solid",fgColor="D9D9D9"); F_CINZA2_a= PatternFill("solid",fgColor="BFBFBF")
+    F_BRANCO_a = PatternFill("solid",fgColor="FFFFFF"); F_VD_JD_a = PatternFill("solid",fgColor="1F4D19")
+    F_AM_JD_a  = PatternFill("solid",fgColor="FFDE00"); F_VERM_a  = PatternFill("solid",fgColor="FF0000")
+    F_CINZA_H_a= PatternFill("solid",fgColor="D9D9D9")
+    def _e(ws,r,c,val,fill=None,bold=False,color="000000",size=9,center=True,wrap=False):
+        cell=ws.cell(row=r,column=c,value=val)
+        cell.font=Font(name="Arial",bold=bold,color=color,size=size)
+        cell.fill=fill or F_BRANCO_a
+        cell.alignment=Alignment(horizontal="center" if center else "left",vertical="center",wrap_text=wrap)
+        cell.border=brd; return cell
+    def _cor_pct_a(v):
+        try:
+            f=float(str(v).strip('%'))/100 if '%' in str(v) else float(v)
+            if f>=1.06: return F_VERM_a
+            if f>=1.00: return PatternFill("solid",fgColor="FFFF00")
+            if f>=0.40: return F_VERDE_a
+            return F_BRANCO_a
+        except: return F_BRANCO_a
+    n_meses=len(meses_com_dados); dias_ano=sum(r["dias"] for _,r in meses_com_dados)
+    hA=meses_com_dados[0][1]["hA"]; hB=meses_com_dados[0][1]["hB"]; hC=meses_com_dados[0][1]["hC"]
+    heA=meses_com_dados[0][1].get("heA",hA); heB=meses_com_dados[0][1].get("heB",hB); heC=meses_com_dados[0][1].get("heC",hC)
+    minA_ano=dias_ano*hA*60; minB_ano=dias_ano*hB*60; minC_ano=dias_ano*hC*60
+    from collections import defaultdict
+    cen_mc=defaultdict(float); cen_ml=defaultdict(float)
+    sup_somas={k:{"A":0,"B":0,"C":0} for k in ["lavadora","gravacao","preset","coringa","facilitador"]}
+    tot_A_ano=0; tot_B_ano=0; tot_C_ano=0; tot_func_ano=0
+    sum_hciclo=0; sum_hlabor=0; sum_hativos=0; sum_htodos=0
+    for mes,r in meses_com_dados:
+        for _,row in r["centros"].iterrows():
+            cen_mc[row.centro]+=row.min_ciclo_total; cen_ml[row.centro]+=row.min_labor_total
+        sum_hciclo+=r["h_ciclo"]; sum_hlabor+=r["h_labor"]
+        sum_hativos+=r["h_ativos"]; sum_htodos+=r["h_todos"]
+        tot_A_ano+=r["tot_A"]; tot_B_ano+=r["tot_B"]; tot_C_ano+=r["tot_C"]; tot_func_ano+=r["total"]
+        for k in sup_somas:
+            sup_somas[k]["A"]+=r["suporte"][k]["A"]; sup_somas[k]["B"]+=r["suporte"][k]["B"]; sup_somas[k]["C"]+=r["suporte"][k]["C"]
+    if cp_data:
+        _cmc=defaultdict(float); _cml=defaultdict(float)
+        for (_cen,_peca,_pct,_tc,_tl,_dc,_vi,_dv,_di,_po,_idx,_mc,_ml,_qt) in cp_data:
+            _cmc[_cen]+=_mc; _cml[_cen]+=_ml
+        cen_mc=_cmc; cen_ml=_cml
+    if res_ano_override:
+        _ro = res_ano_override
+        tot_A_ano=_ro.get("tot_A",tot_A_ano); tot_B_ano=_ro.get("tot_B",tot_B_ano)
+        tot_C_ano=_ro.get("tot_C",tot_C_ano); tot_func_ano=_ro.get("total",tot_func_ano)
+        sum_hciclo=_ro.get("h_ciclo",sum_hciclo); sum_hlabor=_ro.get("h_labor",sum_hlabor)
+        sum_hativos=_ro.get("h_ativos",sum_hativos); sum_htodos=_ro.get("h_todos",sum_htodos)
+        sup_somas={k:{"A":_ro["suporte"][k]["A"]*n_meses,"B":_ro["suporte"][k]["B"]*n_meses,"C":_ro["suporte"][k]["C"]*n_meses}
+                   for k in sup_somas} if _ro.get("suporte") else sup_somas
+    if horas_anual and not eh_cenario:
+        _hc=horas_anual["h_ciclo"]; _hl=horas_anual["h_labor"]
+        _ha=horas_anual["h_ativos"]; _ht=horas_anual["h_todos"]
+        prod_co=_hc/_ha if _ha>0 else 0; prod_ct=_hc/_ht if _ht>0 else 0
+        prod_lo=_hl/_ha if _ha>0 else 0; prod_lt=_hl/_ht if _ht>0 else 0
+    else:
+        prod_lt=sum_hlabor/sum_htodos if sum_htodos>0 else 0
+        prod_ct=sum_hciclo/sum_htodos if sum_htodos>0 else 0
+        prod_lo=sum_hlabor/sum_hativos if sum_hativos>0 else 0
+        prod_co=sum_hciclo/sum_hativos if sum_hativos>0 else 0
+    centros_ord=list(cen_mc.keys())
+    thr_A=meses_com_dados[0][1]["thr_A"]; thr_B=meses_com_dados[0][1]["thr_B"]; thr_C=meses_com_dados[0][1]["thr_C"]
+    def ocup_ano(cen,t):
+        mc=cen_mc[cen]
+        if t=="A": return mc/minA_ano if minA_ano>0 else 0
+        if t=="B": return mc/minB_ano if minB_ano>0 else 0
+        return mc/minC_ano if minC_ano>0 else 0
+    def ativo_ano_A(cen): return 1 if ocup_ano(cen,"A")>thr_A else 0
+    def ativo_ano_B(cen): return 1 if ocup_ano(cen,"A")>thr_B else 0
+    def ativo_ano_C(cen): return 1 if ocup_ano(cen,"B")>thr_C else 0
+    def hdA(cen): return dias_ano*heA*ativo_ano_A(cen)
+    def hdB(cen): return dias_ano*heB*ativo_ano_B(cen)
+    def hdC(cen): return dias_ano*heC*ativo_ano_C(cen)
+    if res_ano_override and "centros" in res_ano_override and not res_ano_override["centros"].empty:
+        _df_ro = res_ano_override["centros"]
+        op_A_ano = int(_df_ro.num_A.sum()) if "num_A" in _df_ro.columns else int(_df_ro.ativo_A.sum())
+        op_B_ano = int(_df_ro.num_B.sum()) if "num_B" in _df_ro.columns else int(_df_ro.ativo_B.sum())
+        op_C_ano = int(_df_ro.num_C.sum()) if "num_C" in _df_ro.columns else int(_df_ro.ativo_C.sum())
+        if res_ano_override.get("suporte"):
+            sup_somas = {k: {"A": res_ano_override["suporte"][k]["A"]*n_meses,
+                             "B": res_ano_override["suporte"][k]["B"]*n_meses,
+                             "C": res_ano_override["suporte"][k]["C"]*n_meses}
+                         for k in sup_somas}
+    else:
+        op_A_ano=sum(ativo_ano_A(c) for c in centros_ord)
+        op_B_ano=sum(ativo_ano_B(c) for c in centros_ord)
+        op_C_ano=sum(ativo_ano_C(c) for c in centros_ord)
+    def sup_ano(key,t): return round(sup_somas[key][t]/n_meses) if n_meses else 0
+    tot_suporte_A=sum(sup_ano(k,"A") for k in sup_somas)
+    tot_suporte_B=sum(sup_ano(k,"B") for k in sup_somas)
+    tot_suporte_C=sum(sup_ano(k,"C") for k in sup_somas)
+    tot_A_calc=op_A_ano+tot_suporte_A; tot_B_calc=op_B_ano+tot_suporte_B; tot_C_calc=op_C_ano+tot_suporte_C
+    tot_func_calc=tot_A_calc+tot_B_calc+tot_C_calc
+    if cp_data and not (horas_anual and not eh_cenario) and not eh_cenario:
+        _hc_cp = sum(mc for (_,_,_,_,_,_,_,_,_,_,_,mc,_,_) in cp_data) / 60
+        _hl_cp = sum(ml for (_,_,_,_,_,_,_,_,_,_,_,_,ml,_) in cp_data) / 60
+        _ha_cp = sum(hdA(c)+hdB(c)+hdC(c) for c in centros_ord)
+        _ht_cp = tot_A_calc*dias_ano*heA + tot_B_calc*dias_ano*heB + tot_C_calc*dias_ano*heC
+        if _ha_cp > 0: prod_co=_hc_cp/_ha_cp; prod_lo=_hl_cp/_ha_cp
+        if _ht_cp > 0: prod_ct=_hc_cp/_ht_cp; prod_lt=_hl_cp/_ht_cp
+    if ws_existente is not None:
+        ws=ws_existente; ws.title=label; ws.freeze_panes="F7"
+    else:
+        ws=wb.create_sheet(label); ws.freeze_panes="F7"
+    ws.merge_cells("A1:O1"); _e(ws,1,1,"TOTAIS — ANO",F_VD_JD_a,True,"FFFFFF",9,True)
+    for ci,txt,f in [(16,"TURNO A",F_VERDE_a),(17,"TURNO B",F_AMAR_a),(18,"TURNO C",F_AZUL_a)]:
+        _e(ws,1,ci,txt,f,True,"000000",8)
+    ws.row_dimensions[1].height=14
+    ws.merge_cells("A2:O2"); _e(ws,2,1,"TOTAL DE MINUTOS",F_CINZA_H_a,True,"000000",8,False)
+    _e(ws,2,16,round(minA_ano,1),F_VERDE_a,True,"000000",8); _e(ws,2,17,round(minB_ano,1),F_AMAR_a,True,"000000",8); _e(ws,2,18,round(minC_ano,1),F_AZUL_a,True,"000000",8)
+    ws.row_dimensions[2].height=13
+    ws.merge_cells("A3:O3"); _e(ws,3,1,"TOTAL DE HORAS",F_CINZA_H_a,True,"000000",8,False)
+    _e(ws,3,16,round(minA_ano/60,2),F_VERDE_a,True,"000000",8); _e(ws,3,17,round(minB_ano/60,2),F_AMAR_a,True,"000000",8); _e(ws,3,18,round(minC_ano/60,2),F_AZUL_a,True,"000000",8)
+    ws.row_dimensions[3].height=13
+    ws.merge_cells("A4:O4"); _e(ws,4,1,"Nº DIAS TRABALHADOS",F_CINZA_H_a,True,"000000",8,False)
+    _e(ws,4,16,dias_ano,F_VERDE_a,True,"FF0000",9); _e(ws,4,17,dias_ano,F_AMAR_a,True,"FF0000",9); _e(ws,4,18,dias_ano,F_AZUL_a,True,"FF0000",9)
+    ws.row_dimensions[4].height=13
+    # LINHA 5 — agora 19 colunas fixas (adicionou Perf. Op.)
+    ws.merge_cells("A5:S5"); _e(ws,5,1,f"RESUMO DA CARGA — ANO ({dias_ano} dias / {n_meses} meses)",F_VD_JD_a,True,"FFFFFF",10,True)
+    ws.row_dimensions[5].height=18
+    # CABEÇALHO — Perf. Op. entre Disponib. e Indice Ciclo
+    hdrs_f=[("Máquina",F_CINZA2_a,"000000"),("PEÇA",F_CINZA2_a,"000000"),("DESCRIÇÃO",F_CINZA2_a,"000000"),("PÇ/TRAT",F_CINZA2_a,"000000"),("UM",F_CINZA2_a,"000000"),
+            ("Tempo Ciclo (min)",F_PRETO_a,"FFFFFF"),("Tempo Labor (min)",F_PRETO_a,"FFFFFF"),
+            ("Div. Carga",PatternFill("solid",fgColor="FF0000"),"FFFF00"),("Vol. Interna",F_CINZA2_a,"000000"),
+            ("Div. Volume",PatternFill("solid",fgColor="FF0000"),"FFFF00"),("Disponib.",F_CINZA2_a,"000000"),("Perf. Op.",F_CINZA2_a,"000000"),("Indice Ciclo",F_CINZA2_a,"000000"),
+            ("JA.A",F_VERDE_a,"000000"),("JA.B",F_AMAR_a,"000000"),("JA.C",F_AZUL_a,"000000"),
+            ("TOTAL CICLOS (MIN)",F_CINZA_a,"000000"),("TOTAL LABOR (MIN)",F_CINZA_a,"000000"),("TOTAL PECAS",F_CINZA_a,"000000")]
+    largs=[9,8,16,6,5,9,9,8,8,8,8,8,9,8,8,8,12,12,8]
+    for ci,(h,f,cor) in enumerate(hdrs_f,1):
+        _e(ws,6,ci,h,f,True,cor,8,True,True); ws.column_dimensions[get_column_letter(ci)].width=largs[ci-1]
+    ws.row_dimensions[6].height=42
+    ri=7
+    if cp_data:
+        # cp_data agora tem 14 elementos: cen,peca,_pc_t,tc,tl,dc,vi,dv,di,po,idx_c,mc,ml,_qtd
+        for (cen,peca,_pc_t,tc,tl,dc,vi,dv,di,po,idx_c,mc,ml,_qtd) in cp_data:
+            pA=mc/minA_ano if minA_ano>0 else 0; pB=mc/minB_ano if minB_ano>0 else 0; pC=mc/minC_ano if minC_ano>0 else 0
+            _e(ws,ri,1,cen,F_BRANCO_a,False,"000000",8,False); _e(ws,ri,2,peca,F_BRANCO_a,False,"000000",8,False)
+            _e(ws,ri,3,"ANO",F_BRANCO_a,False,"000000",8,False); _e(ws,ri,4,int(_pc_t),F_BRANCO_a,False,"000000",8); _e(ws,ri,5,"PC",F_BRANCO_a,False,"000000",8)
+            _e(ws,ri,6,round(tc,4) if tc else "",F_PRETO_a,False,"FFFFFF",8); _e(ws,ri,7,round(tl,4) if tl else "",F_PRETO_a,False,"FFFFFF",8)
+            _e(ws,ri,8,round(dc,4) if dc else "",PatternFill("solid",fgColor="FF0000"),False,"FFFF00",8)
+            _e(ws,ri,9,round(vi,4) if vi else "",F_BRANCO_a,False,"000000",8)
+            _e(ws,ri,10,round(dv,4) if dv else "",PatternFill("solid",fgColor="FF0000"),False,"FFFF00",8)
+            _e(ws,ri,11,round(di,4) if di else "",F_CINZA2_a,False,"000000",8)
+            # col 12 = Perf. Op. (NOVO)
+            _e(ws,ri,12,round(po,4) if po else "",F_CINZA2_a,False,"000000",8)
+            # col 13 = Indice Ciclo
+            _e(ws,ri,13,round(idx_c,4),F_BRANCO_a,False,"000000",8)
+            # cols 14/15/16 = JA.A / JA.B / JA.C
+            _e(ws,ri,14,f"{pA:.1%}",_cor_pct_a(pA),False,"000000",8)
+            _e(ws,ri,15,f"{pB:.1%}",_cor_pct_a(pB),False,"000000",8)
+            _e(ws,ri,16,f"{pC:.1%}",_cor_pct_a(pC),False,"000000",8)
+            # cols 17/18/19 = TOTAL CICLOS / LABOR / PECAS
+            _e(ws,ri,17,round(mc,4),F_BRANCO_a,False,"000000",8)
+            _e(ws,ri,18,round(ml,4),F_BRANCO_a,False,"000000",8)
+            _e(ws,ri,19,_qtd,F_BRANCO_a,False,"000000",8)
+            ws.row_dimensions[ri].height=13; ri+=1
+    else:
+        for cen in centros_ord:
+            mc=cen_mc[cen]; ml=cen_ml[cen]
+            pA=mc/minA_ano if minA_ano>0 else 0; pB=mc/minB_ano if minB_ano>0 else 0; pC=mc/minC_ano if minC_ano>0 else 0
+            _e(ws,ri,1,cen,F_BRANCO_a,False,"000000",8,False); _e(ws,ri,2,"—",F_BRANCO_a,False,"000000",8)
+            for ci_z in range(3,14): _e(ws,ri,ci_z,"",F_BRANCO_a,False,"000000",8)
+            _e(ws,ri,14,f"{pA:.1%}",_cor_pct_a(pA),False,"000000",8)
+            _e(ws,ri,15,f"{pB:.1%}",_cor_pct_a(pB),False,"000000",8)
+            _e(ws,ri,16,f"{pC:.1%}",_cor_pct_a(pC),False,"000000",8)
+            _e(ws,ri,17,round(mc,4),F_BRANCO_a,False,"000000",8); _e(ws,ri,18,round(ml,4),F_BRANCO_a,False,"000000",8)
+            ws.row_dimensions[ri].height=13; ri+=1
+    _CF=6; _RS=66
+    ws.merge_cells(start_row=_RS-1,start_column=_CF,end_row=_RS-1,end_column=_CF+9)
+    _e(ws,_RS-1,_CF,"RESUMO DA CARGA MÁQUINA X QUADRO DE LOTAÇÃO",F_CINZA_H_a,True,"000000",9,True); ws.row_dimensions[_RS-1].height=14
+    _e(ws,_RS,_CF,"PERÍODO:",F_CINZA_H_a,True,"000000",8,False); _e(ws,_RS,_CF+1,"ANO",F_BRANCO_a,True,"FF0000",9,False)
+    _e(ws,_RS,_CF+3,"DATA DE REVISÃO:",F_CINZA_H_a,True,"000000",8,False)
+    _e(ws,_RS,_CF+4,datetime.now().strftime("%d/%m/%Y"),F_BRANCO_a,True,"FF0000",9)
+    _e(ws,_RS,_CF+6,"HORAS POR TURNO DE TRABALHO",F_CINZA_H_a,True,"000000",8,True); ws.row_dimensions[_RS].height=14
+    _e(ws,_RS+1,_CF+6,heA,F_CINZA_H_a,True,"000000",8); _e(ws,_RS+1,_CF+7,heB,F_CINZA_H_a,True,"000000",8); _e(ws,_RS+1,_CF+8,heC,F_CINZA_H_a,True,"000000",8); ws.row_dimensions[_RS+1].height=14
+    for _ci,_txt,_f in [(_CF+1,"TURNO A",F_VERDE_a),(_CF+2,"TURNO B",F_AMAR_a),(_CF+3,"TURNO C",F_AZUL_a),(_CF+4,"TURNO A",F_VERDE_a),(_CF+5,"TURNO B",F_AMAR_a),(_CF+6,"TURNO C",F_AZUL_a),(_CF+7,"TURNO A",F_VERDE_a),(_CF+8,"TURNO B",F_AMAR_a),(_CF+9,"TURNO C",F_AZUL_a)]:
+        _e(ws,_RS+2,_ci,_txt,_f,True,"000000",8); ws.row_dimensions[_RS+2].height=14
+    _e(ws,_RS+3,_CF,"Centro",F_PRETO_a,True,"FFFFFF",8)
+    for _ci,_txt in [(_CF+1,"% Ocup"),(_CF+2,"% Ocup"),(_CF+3,"% Ocup"),(_CF+4,"Nº Func"),(_CF+5,"Nº Func"),(_CF+6,"Nº Func"),(_CF+7,"Horas"),(_CF+8,"Horas"),(_CF+9,"Horas")]:
+        _e(ws,_RS+3,_ci,_txt,F_PRETO_a,True,"FFFFFF",8); ws.row_dimensions[_RS+3].height=14
+    _ri=_RS+4
+    def _cbg_a(v):
+        if v>=1.06: return F_VERM_a
+        if v>=1.00: return PatternFill("solid",fgColor="FFFF00")
+        if v>=0.40: return F_VERDE_a
+        return F_BRANCO_a
+    _ro_df = res_ano_override["centros"] if (res_ano_override and "centros" in res_ano_override and not res_ano_override["centros"].empty) else None
+    _ro_map = {row.centro: row for _, row in _ro_df.iterrows()} if _ro_df is not None else {}
+    for cen in centros_ord:
+        oA=ocup_ano(cen,"A"); oB=ocup_ano(cen,"B"); oC=ocup_ano(cen,"C")
+        if cen in _ro_map:
+            _row_ro = _ro_map[cen]
+            nA=int(_row_ro.num_A) if hasattr(_row_ro,"num_A") else int(_row_ro.ativo_A)
+            nB=int(_row_ro.num_B) if hasattr(_row_ro,"num_B") else int(_row_ro.ativo_B)
+            nC=int(_row_ro.num_C) if hasattr(_row_ro,"num_C") else int(_row_ro.ativo_C)
+            aA=1 if nA>0 else 0; aB=1 if nB>0 else 0; aC=1 if nC>0 else 0
+        else:
+            aA=ativo_ano_A(cen); aB=ativo_ano_B(cen); aC=ativo_ano_C(cen)
+            nA=aA; nB=aB; nC=aC
+        _e(ws,_ri,_CF,cen,F_BRANCO_a,False,"000000",8,False)
+        for _pci,_pv,_pbg in [(_CF+1,oA,_cbg_a(oA)),(_CF+2,oB,_cbg_a(oB)),(_CF+3,oC,_cbg_a(oC))]:
+            _pc=_e(ws,_ri,_pci,_pv,_pbg,False,"000000",8)
+            _pc.number_format="0.0000000000%"
+        _e(ws,_ri,_CF+4,nA,F_VERDE_a if aA else F_AMAR_a,True,"000000",8); _e(ws,_ri,_CF+5,nB,F_VERDE_a if aB else F_AMAR_a,True,"000000",8); _e(ws,_ri,_CF+6,nC,F_AZUL_a if aC else F_CINZA_a,True,"000000",8)
+        _e(ws,_ri,_CF+7,round(dias_ano*heA*nA,2) if aA else 0,F_VERDE_a if aA else F_BRANCO_a,True,"000000",8)
+        _e(ws,_ri,_CF+8,round(dias_ano*heB*nB,2) if aB else 0,F_AMAR_a if aB else F_BRANCO_a,True,"000000",8)
+        _e(ws,_ri,_CF+9,round(dias_ano*heC*nC,2) if aC else 0,F_AZUL_a if aC else F_BRANCO_a,True,"000000",8)
+        ws.row_dimensions[_ri].height=13; _ri+=1
+    for _snm,_sk in [("TOTAL DE OPERADORES",None),("LAVADORA E INSPEÇÃO","lavadora"),("GRAVAÇÃO E ESTANQUEIDADE","gravacao"),("PRESET","preset"),("CORINGA","coringa"),("FACILITADOR","facilitador"),("TOTAL POR TURNO",None),("TOTAL FUNCIONÁRIOS",None)]:
+        _bold="TOTAL" in _snm; _bg=F_AM_JD_a if _bold else F_BRANCO_a; _fg="1F4D19" if _bold else "000000"
+        _e(ws,_ri,_CF,_snm,_bg,_bold,_fg,8,False)
+        if _sk:
+            sA=sup_ano(_sk,"A"); sB=sup_ano(_sk,"B"); sC=sup_ano(_sk,"C")
+            for _ci,_v in [(_CF+4,sA),(_CF+5,sB),(_CF+6,sC)]: _e(ws,_ri,_ci,_v,F_VERDE_a if _ci==_CF+4 else (F_AMAR_a if _ci==_CF+5 else F_AZUL_a),True,"000000",8)
+            for _ci,_v,_he in [(_CF+7,sA,heA),(_CF+8,sB,heB),(_CF+9,sC,heC)]: _e(ws,_ri,_ci,round(_v*_he*dias_ano,2) if _v else 0,F_VERDE_a if _ci==_CF+7 else (F_AMAR_a if _ci==_CF+8 else F_AZUL_a),True,"000000",8)
+        elif "TOTAL DE OPERADORES" in _snm:
+            for _ci,_v in [(_CF+4,op_A_ano),(_CF+5,op_B_ano),(_CF+6,op_C_ano)]: _e(ws,_ri,_ci,_v,F_AM_JD_a,True,"1F4D19",8)
+            for _ci,_v,_he in [(_CF+7,op_A_ano,heA),(_CF+8,op_B_ano,heB),(_CF+9,op_C_ano,heC)]: _e(ws,_ri,_ci,round(_v*_he*dias_ano,2),F_AM_JD_a,True,"1F4D19",8)
+        elif "TOTAL POR TURNO" in _snm:
+            for _ci,_v in [(_CF+4,tot_A_calc),(_CF+5,tot_B_calc),(_CF+6,tot_C_calc)]: _e(ws,_ri,_ci,_v,F_AM_JD_a,True,"1F4D19",8)
+            for _ci,_v,_he in [(_CF+7,tot_A_calc,heA),(_CF+8,tot_B_calc,heB),(_CF+9,tot_C_calc,heC)]: _e(ws,_ri,_ci,round(_v*_he*dias_ano,2),F_AM_JD_a,True,"1F4D19",8)
+        elif "FUNCIONÁRIOS" in _snm:
+            _e(ws,_ri,_CF+4,tot_func_calc,F_AM_JD_a,True,"1F4D19",9)
+            _e(ws,_ri,_CF+7,round(tot_A_calc*heA*dias_ano+tot_B_calc*heB*dias_ano+tot_C_calc*heC*dias_ano,2),F_AM_JD_a,True,"1F4D19",9)
+        ws.row_dimensions[_ri].height=13; _ri+=1
+    _ri+=1
+    for _pnm,_pv,_dest in [("PRODUTIVIDADE POR TEMPO DE CICLO OPERACIONAL",prod_co,False),("PRODUTIVIDADE POR TEMPO DE CICLO TOTAL",prod_ct,False),("PRODUTIVIDADE POR TEMPO DE LABOR OPERACIONAL",prod_lo,False),("PRODUTIVIDADE POR TEMPO DE LABOR TOTAL ★",prod_lt,True)]:
+        ws.merge_cells(start_row=_ri,start_column=_CF,end_row=_ri,end_column=_CF+8)
+        _e(ws,_ri,_CF,_pnm,F_AM_JD_a if _dest else F_BRANCO_a,_dest,"1F4D19" if _dest else "000000",8,False)
+        _pv_cell=_e(ws,_ri,_CF+9,_pv,F_AM_JD_a if _dest else F_BRANCO_a,_dest,"1F4D19" if _dest else "000000",8)
+        _pv_cell.number_format="0.0000000000%"
+        ws.row_dimensions[_ri].height=14; _ri+=1
+    for ci,w in enumerate([9,8,16,6,5,9,9,8,8,8,8,8,9,8,8,8,12,12,8],1): ws.column_dimensions[get_column_letter(ci)].width=w
+    for _ci,_ww in [(_CF,14),(_CF+1,8),(_CF+2,8),(_CF+3,8),(_CF+4,8),(_CF+5,8),(_CF+6,8),(_CF+7,10),(_CF+8,10),(_CF+9,10)]:
+        ws.column_dimensions[get_column_letter(_ci)].width=_ww
+    _nota_row = _ri + 2
+    F_NOTA = PatternFill("solid", fgColor="FFF2CC")
+    F_NOTA_H = PatternFill("solid", fgColor="FFD966")
+    _brd_n = Border(left=Side(style="thin",color="C9A700"),right=Side(style="thin",color="C9A700"),
+                    top=Side(style="thin",color="C9A700"),bottom=Side(style="thin",color="C9A700"))
+    ws.merge_cells(start_row=_nota_row, start_column=1, end_row=_nota_row, end_column=19)
+    _nh = ws.cell(row=_nota_row, column=1, value="⚠️  NOTA SOBRE O TOTAL LABOR E TOTAL CICLOS — ANO")
+    _nh.font = Font(name="Arial", bold=True, size=9, color="7D4E00")
+    _nh.fill = F_NOTA_H
+    _nh.border = _brd_n
+    _nh.alignment = Alignment(horizontal="left", vertical="center", wrap_text=False)
+    ws.row_dimensions[_nota_row].height = 16
+    _linhas_nota = [
+        ("Por que alguns valores do TOTAL LABOR (MIN) ou TOTAL CICLOS (MIN) podem diferir do Excel de referência (AnoFY26)?", True),
+        ("O App calcula os totais anuais a partir do INPUT_PMP × IMPUTAPLICAÇÃO × IMPUTTEMPO × IMPUTDISTRIBUIÇÃO.", False),
+        ("O Excel de referência calcula via fórmulas próprias em cada aba mensal, que podem incorporar ajustes manuais,", False),
+        ("   células editadas diretamente ou lógicas de arredondamento diferentes das fórmulas do App.", False),
+        ("", False),
+        ("✅  Os valores calculados pelo App são fiéis ao INPUT_PMP e às regras definidas nos inputs.", True),
+        ("   Se desejar que o anual bata com o Excel de referência, alinhe o INPUT_PMP com as quantidades reais de cada aba mensal.", False),
+    ]
+    for i, (txt, bold) in enumerate(_linhas_nota):
+        r = _nota_row + 1 + i
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=19)
+        cell = ws.cell(row=r, column=1, value=txt)
+        cell.font = Font(name="Arial", bold=bold, size=8, color="7D4E00")
+        cell.fill = F_NOTA
+        cell.border = _brd_n
+        cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+        ws.row_dimensions[r].height = 14 if txt else 6
