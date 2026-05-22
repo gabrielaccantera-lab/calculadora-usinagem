@@ -798,17 +798,15 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
             dv=float(_dr.div_volume); di=float(_dr.disponib)
             po=float(_dr.perf_op) if hasattr(_dr, "perf_op") else 1.0
             idx_c=(tc*dc*dv*vi)/(di*po) if (di>0 and po>0) else 0
-            try: mc_t=float(agg_cp_t.loc[(cen_t,peca_t,mes_t),"min_ciclo"])
-            except: mc_t=0.0
-            try: ml_t=float(agg_cp_t.loc[(cen_t,peca_t,mes_t),"min_labor"])
-            except: ml_t=0.0
-            pA_t=mc_t/minA_t if minA_t>0 else 0; pB_t=mc_t/minB_t if minB_t>0 else 0; pC_t=mc_t/minC_t if minC_t>0 else 0
             app_mod_v={}; tot_pecas=0
             for mod_t2 in modelos_lista:
                 qtd_t = _qtd_mes.get(mod_t2, 0)
                 flag_t = 1 if (cen_t, peca_t, mod_t2) in _aplic_set else 0
                 app_mod_v[mod_t2]=qtd_t*flag_t; tot_pecas+=qtd_t*flag_t
             pc_t = _aplic_pc_idx.get((cen_t, peca_t), 1.0)
+            mc_t = idx_c * tot_pecas
+            ml_t = tl * dc * pc_t * tot_pecas
+            pA_t=mc_t/minA_t if minA_t>0 else 0; pB_t=mc_t/minB_t if minB_t>0 else 0; pC_t=mc_t/minC_t if minC_t>0 else 0
             _ec(ws_out,ri_t,1,cen_t,_F_BRANCO,False,"000000",8,False); _ec(ws_out,ri_t,2,peca_t,_F_BRANCO,False,"000000",8,False)
             _ec(ws_out,ri_t,3,"",_F_BRANCO,False,"000000",8,False); _ec(ws_out,ri_t,4,int(pc_t),_F_BRANCO,False,"000000",8); _ec(ws_out,ri_t,5,"PC",_F_BRANCO,False,"000000",8)
             _ec(ws_out,ri_t,6,tc,_F_PRETO,False,"FFFFFF",8); _ec(ws_out,ri_t,7,tl,_F_PRETO,False,"FFFFFF",8)
@@ -2075,6 +2073,100 @@ def comparar_com_excel(res_app, file_bytes, tempo, dist, aplic, pmp, dias, horas
     wb.close()
     return pd.DataFrame(resumo_rows),pd.DataFrame(detalhe_rows) if detalhe_rows else pd.DataFrame(),None
 
+@st.cache_data
+def gerar_template_input():
+    import openpyxl as _ox
+    from openpyxl.styles import PatternFill as _PF, Font as _Ft, Alignment as _Al
+    wb = _ox.Workbook()
+    _FH = _PF("solid", fgColor="1F4D19"); _FD = _PF("solid", fgColor="D9EAD3")
+    _FA = _PF("solid", fgColor="FFF2CC"); _FB = _PF("solid", fgColor="FFFFFF")
+    _fh = lambda: _Ft(name="Arial", bold=True, color="FFFFFF", size=8)
+    _fd = lambda: _Ft(name="Arial", size=8)
+    _fa = lambda: _Ft(name="Arial", italic=True, color="666666", size=7)
+    _ac = _Al(horizontal="center", vertical="center", wrap_text=True)
+    _al = _Al(horizontal="left",   vertical="center", wrap_text=True)
+
+    def _h(ws, r, c, v, fill=None, bold=False, italic=False, center=True, color="000000", size=8):
+        cell = ws.cell(r, c, v)
+        cell.font = _Ft(name="Arial", bold=bold, italic=italic, color=color, size=size)
+        cell.fill = fill or _FB
+        cell.alignment = _ac if center else _al
+        return cell
+
+    MESES_A = ["NOV","DEZ","JAN","FEV","MAR","ABR","MAI","JUN","JUL","AGO","SET","OUT"]
+
+    # ── INPUTPMP ──────────────────────────────────────────
+    ws = wb.active; ws.title = "INPUTPMP"
+    ws.column_dimensions["A"].width = 14
+    for i in range(2, 14): ws.column_dimensions[chr(64+i)].width = 7
+    # Linha 1: dias trabalhados (lida pelo app)
+    _h(ws,1,1,"DIAS TRABALHADOS",_FH,True,center=False,color="FFFFFF")
+    for i,d in enumerate([17,20,19,20,22,20,21,22,21,22,20,21],2):
+        _h(ws,1,i,d,_FH,True,color="FFFFFF")
+    ws.row_dimensions[1].height = 16
+    # Linha 2: labels dos meses (informativo)
+    _h(ws,2,1,"MODELO",_FA,italic=True,center=False,color="666666")
+    for i,m in enumerate(MESES_A,2):
+        _h(ws,2,i,m,_FA,italic=True,color="666666")
+    ws.row_dimensions[2].height = 14
+    # Linha 3: exemplo de modelo
+    for i,v in enumerate(["6155M",50,45,60,55,50,48,52,53,51,49,55,50],1):
+        _h(ws,3,i,v,_FD)
+    ws.row_dimensions[3].height = 14
+
+    # ── INPUTTURNOS ───────────────────────────────────────
+    ws2 = wb.create_sheet("INPUTTURNOS")
+    ws2.column_dimensions["A"].width = 22
+    for c in ["B","C","D"]: ws2.column_dimensions[c].width = 14
+    # Linha 1: valores lidos pelo app (B1=hA, C1=hB, D1=hC)
+    _h(ws2,1,1,"HORAS ACUMULADAS",_FH,True,center=False,color="FFFFFF")
+    _h(ws2,1,2,7.5,  _FD, center=True)
+    _h(ws2,1,3,14.25,_FD, center=True)
+    _h(ws2,1,4,19.5, _FD, center=True)
+    ws2.row_dimensions[1].height = 16
+    # Linha 2: labels descritivos (ignorados pelo app)
+    _h(ws2,2,1,"",_FA)
+    for i,t in enumerate(["Turno A","Turno B","Turno C"],2):
+        _h(ws2,2,i,t,_FA,italic=True,color="666666")
+    ws2.row_dimensions[2].height = 14
+
+    # ── INPUTTEMPO ────────────────────────────────────────
+    ws3 = wb.create_sheet("INPUTTEMPO")
+    ws3.column_dimensions["A"].width = 10; ws3.column_dimensions["B"].width = 14
+    ws3.column_dimensions["C"].width = 18; ws3.column_dimensions["D"].width = 18
+    for i,h in enumerate(["Máquina","PEÇA","Tempo Ciclo (min)","Tempo Labor (min)"],1):
+        _h(ws3,1,i,h,_FH,True,color="FFFFFF")
+    ws3.row_dimensions[1].height = 16
+    for i,v in enumerate(["CEN005","R182470",25.0,12.5],1):
+        _h(ws3,2,i,v,_FD)
+    ws3.row_dimensions[2].height = 14
+
+    # ── INPUTDISTRIBUIÇÃO ─────────────────────────────────
+    ws4 = wb.create_sheet("INPUTDISTRIBUIÇÃO")
+    for c,w in zip(["A","B","C","D","E","F","G"],[10,14,10,11,11,14,26]):
+        ws4.column_dimensions[c].width = w
+    for i,h in enumerate(["Máquina","PEÇA","Div Carga","Vol. Interna","Div Volume","Disponibilidade","Performance Operador X Máquina"],1):
+        _h(ws4,1,i,h,_FH,True,color="FFFFFF")
+    ws4.row_dimensions[1].height = 16
+    for i,v in enumerate(["CEN005","R182470",0.5,1.0,1.0,0.9,1.0],1):
+        _h(ws4,2,i,v,_FD)
+    ws4.row_dimensions[2].height = 14
+
+    # ── INPUTAPLICAÇÃO ────────────────────────────────────
+    ws5 = wb.create_sheet("INPUTAPLICAÇÃO")
+    for c,w in zip(["A","B","C","D","E","F"],[10,14,6,8,10,10]):
+        ws5.column_dimensions[c].width = w
+    for i,h in enumerate(["Máquina","PEÇA","UM","PÇ/TRAT","6155M","7215R"],1):
+        _h(ws5,1,i,h,_FH,True,color="FFFFFF")
+    ws5.row_dimensions[1].height = 16
+    # ativo=1 → peça é produzida nesse modelo; ativo=0 → não
+    for i,v in enumerate(["CEN005","R182470","PC",1,1,0],1):
+        _h(ws5,2,i,v,_FD)
+    ws5.row_dimensions[2].height = 14
+
+    buf = BytesIO(); wb.save(buf); buf.seek(0)
+    return buf.read()
+
 # ════════════════════════════════════════
 # INTERFACE PRINCIPAL
 # ════════════════════════════════════════
@@ -2093,6 +2185,19 @@ with st.expander("👋 Primeira vez aqui? Veja como usar em 3 passos", expanded=
         st.markdown('<div class="mem-step"><span class="step-num">2</span> <b>Confira os resultados</b><br><br>📊 <b>Resultado por Mês</b> — headcount por turno (A/B/C)<br>🔬 <b>Como foi Calculado</b> — passo a passo do cálculo, inclusive visão <b>anual</b><br>🔄 <b>Comparar com Excel</b> — valida se o app bate com seu Excel atual<br>📥 <b>Exportar</b> — baixa o resultado formatado</div>', unsafe_allow_html=True)
     with col3:
         st.markdown('<div class="mem-step"><span class="step-num">3</span> <b>Crie cenários</b><br><br>🎯 Na aba <b>Cenários</b>: simule alterações de turno por centro<br>• Por mês: ajuste um período específico<br>• <b>ANO FY26</b>: simula o período anual consolidado (AnoFY26) com overrides aplicados em todos os meses<br>• Compare múltiplos cenários no mesmo gráfico<br>• Baixe o cenário comparado com a base</div>', unsafe_allow_html=True)
+
+with st.expander("📄 Baixar arquivo modelo de inputs (template)", expanded=False):
+    st.caption(
+        "Arquivo Excel com uma linha de exemplo em cada aba. "
+        "Use como base para montar seu arquivo de inputs — basta substituir os valores de exemplo pelos reais."
+    )
+    st.download_button(
+        "📥 Baixar template",
+        data=gerar_template_input(),
+        file_name="template_inputs_usinagem.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="dl_template"
+    )
 
 uploaded=st.file_uploader("Upload do arquivo de inputs (.xlsm ou .xlsx)",type=["xlsm","xlsx"])
 if not uploaded:
@@ -3172,9 +3277,10 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                 tc_inp = float(tc_xl_t or 0)
                                 idx_app_t = (tc_inp * dc_inp * dv_inp * vi_inp) / (di_inp * po_inp) if (di_inp and po_inp) else 0.0
                                 div_idx_t = abs(float(idx_xl_t or 0) - float(idx_app_t or 0)) > 0.5
-                                # Recompute mc_t consistente com idx_app_t e app_tot_t
-                                # (agg_cp_t pode inflar por duplicatas no JOIN)
+                                # Recompute mc_t e ml_t consistentes com os inputs (evita inflação do JOIN)
                                 mc_t = idx_app_t * app_tot_t
+                                pc_trat_t = float(base_row_t[3]) if base_row_t[3] else 1.0
+                                ml_t = float(tl_xl_t or 0) * dc_inp * pc_trat_t * app_tot_t
                                 pA_t = mc_t/minA_t if minA_t>0 else 0
                                 pB_t = mc_t/minB_t if minB_t>0 else 0
                                 pC_t = mc_t/minC_t if minC_t>0 else 0
