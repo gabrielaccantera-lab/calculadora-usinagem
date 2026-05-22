@@ -352,7 +352,9 @@ def validar(pmp, tempo, dist, aplic, dias):
         exemplos = list(diff_td)[:3]
         erros.append(f"{len(diff_td)} combinações em INPUTTEMPO sem INPUTDISTRIBUIÇÃO — não terão carga calculada. Ex: {exemplos}")
 
-    t_invalidos = tempo[(tempo.t_ciclo <= 0) | (tempo.t_labor < 0)]
+    tempo["t_ciclo"] = pd.to_numeric(tempo["t_ciclo"], errors="coerce")
+    tempo["t_labor"] = pd.to_numeric(tempo["t_labor"], errors="coerce")
+    t_invalidos = tempo[(tempo.t_ciclo.fillna(0) <= 0) | (tempo.t_labor.fillna(0) < 0)]
     if len(t_invalidos):
         exemplos = t_invalidos[["centro","peca","t_ciclo","t_labor"]].head(3).to_dict("records")
         erros.append(f"Tempo de ciclo ≤0 ou labor <0 em {len(t_invalidos)} linha(s) — verifique INPUTTEMPO. Ex: {exemplos[0]}")
