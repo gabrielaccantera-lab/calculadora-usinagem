@@ -9,6 +9,7 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from datetime import datetime
 import math
+import re
 
 st.set_page_config(page_title="Calculadora de Recursos — Usinagem", layout="wide", page_icon="🏭")
 
@@ -61,13 +62,13 @@ MESES       = ["Novembro","Dezembro","Janeiro","Fevereiro","Março","Abril",
 MESES_ABREV = ["NOV","DEZ","JAN","FEV","MAR","ABR","MAI","JUN","JUL","AGO","SET","OUT"]
 
 COL_MAP = {
-    "IMPUTTEMPO": {
+    "INPUTTEMPO": {
         "centro":  ["Máquina","MÁQUINA","maquina","Centro","CENTRO"],
         "peca":    ["PEÇA","Peça","peca","PECA","REFERÊNCIA","Referência","referencia","REFERENCIA","REF"],
         "t_ciclo": ["Tempo\nCiclo\n(min)","Tempo Ciclo (min)","T.CICLO","t_ciclo","CICLO"],
         "t_labor": ["Tempo\nLabor\n(min)","Tempo Labor (min)","T.LABOR","t_labor","LABOR"],
     },
-    "IMPUTDISTRIBUIÇÃO": {
+    "INPUTDISTRIBUIÇÃO": {
         "centro":     ["Máquina","MÁQUINA","maquina","Centro","CENTRO"],
         "peca":       ["PEÇA","Peça","peca","PECA","REFERÊNCIA","Referência","referencia","REFERENCIA","REF"],
         "div_carga":  ["Divisão\nCarga\nENTRE\nMÁQUINAS","Div Carga","DIV_CARGA","div_carga"],
@@ -76,21 +77,28 @@ COL_MAP = {
         "disponib":   ["Disponi-\nbilidade","Disponibilidade","DISPONIB","disponib"],
         "perf_op":    ["Performance\nOperador X\nMáquina","Performance Operador X Máquina",
                        "Performance\nOperador X\nMaquina","Performance Operador X Maquina",
+                       "Performance\nOperador X\n Máquina","Performance\nOperador X\n Maquina",
                        "Performance\nOperador\nMáquina","Performance Operador Máquina",
-                       "Performance Operador","PERF_OP","perf_op","PERFORMANCE"],
+                       "Performance\nOperador\nMaquina","Performance Operador Maquina",
+                       "Performance Operador X Maq","Performance Op X Maq",
+                       "Perf. Operador Máquina","Perf. Operador Maquina",
+                       "Perf Operador Máquina","Perf Operador Maquina",
+                       "Perf. Op. Máquina","Perf. Op. Maquina",
+                       "Performance Operador","PERF_OP","perf_op","PERFORMANCE",
+                       "NOVO","Performance\nOperador\nX\nMáquina","Performance\nOperador\nX\nMaquina"],
     },
 }
 
 ABA_FORMATOS = {
-    "INPUT_PMP": "**INPUT_PMP** — Linha 1: dias trabalhados (colunas B→M = Nov→Out). Linhas 3+: modelos, colunas B→M = qtd peças.",
-    "IMPUTTEMPO": "**IMPUTTEMPO** — Cabeçalho linha 1. Colunas: `Máquina`, `REFERÊNCIA` (ou `PEÇA`), `Tempo Ciclo (min)`, `Tempo Labor (min)`.",
-    "IMPUTDISTRIBUIÇÃO": "**IMPUTDISTRIBUIÇÃO** — Cabeçalho linha 1. Colunas: `Máquina`, `REFERÊNCIA` (ou `PEÇA`), `Divisão Carga`, `Vol. Interna`, `Divisão de Volume`, `Disponibilidade`, `Performance Operador X Máquina`.",
-    "IMPUTAPLICAÇÃO": "**IMPUTAPLICAÇÃO** — Cabeçalho linha 1. Col A=Centro, Col B=REFERÊNCIA (ou PEÇA), depois colunas por modelo (qualquer nome).",
-    "IMPUTTURNOS": "**IMPUTTURNOS** — Linha 1: horas acumuladas. B1=Turno A, C1=Turno B, D1=Turno C.",
+    "INPUTPMP": "**INPUTPMP** — Linha 1: dias trabalhados (colunas B→M = Nov→Out). Linhas 3+: modelos, colunas B→M = qtd peças.",
+    "INPUTTEMPO": "**INPUTTEMPO** — Cabeçalho linha 1. Colunas: `Máquina`, `REFERÊNCIA` (ou `PEÇA`), `Tempo Ciclo (min)`, `Tempo Labor (min)`.",
+    "INPUTDISTRIBUIÇÃO": "**INPUTDISTRIBUIÇÃO** — Cabeçalho linha 1. Colunas: `Máquina`, `REFERÊNCIA` (ou `PEÇA`), `Divisão Carga`, `Vol. Interna`, `Divisão de Volume`, `Disponibilidade`, `Performance Operador X Máquina`.",
+    "INPUTAPLICAÇÃO": "**INPUTAPLICAÇÃO** — Cabeçalho linha 1. Col A=Centro, Col B=REFERÊNCIA (ou PEÇA), depois colunas por modelo (qualquer nome).",
+    "INPUTTURNOS": "**INPUTTURNOS** — Linha 1: horas acumuladas. B1=Turno A, C1=Turno B, D1=Turno C.",
 }
 
 def _norm(s):
-    return str(s).lower().replace("\n"," ").replace("\r"," ").strip()
+    return re.sub(r'\s+', ' ', str(s).lower().replace("\n"," ").replace("\r"," ")).strip()
 
 def find_col(df, candidates, aba, campo):
     # 1) busca exata
@@ -168,15 +176,15 @@ def verificar_abas(fb):
     except: sheetnames = []
 
     CANDIDATOS = {
-        "INPUT_PMP":         ["INPUT_PMP","INPUTPMP","INPUT PMP","PMP"],
-        "IMPUTTEMPO":        ["IMPUTTEMPO","INPUT_TEMPO","INPUTTEMPO","INPUT TEMPO","TEMPO"],
-        "IMPUTDISTRIBUIÇÃO": ["IMPUTDISTRIBUIÇÃO","IMPUTDISTRIBUICAO","INPUT_DISTRIBUIÇÃO",
-                              "INPUTDISTRIBUIÇÃO","INPUTDISTRIBUICAO","INPUT DISTRIBUIÇÃO",
+        "INPUTPMP":         ["INPUTPMP","INPUT_PMP","INPUT PMP","PMP"],
+        "INPUTTEMPO":        ["INPUTTEMPO","IMPUTTEMPO","INPUT_TEMPO","INPUT TEMPO","TEMPO"],
+        "INPUTDISTRIBUIÇÃO": ["INPUTDISTRIBUIÇÃO","INPUTDISTRIBUICAO","IMPUTDISTRIBUIÇÃO",
+                              "IMPUTDISTRIBUICAO","INPUT_DISTRIBUIÇÃO","INPUT DISTRIBUIÇÃO",
                               "INPUT_DISTRIBUICAO","DISTRIBUIÇÃO","DISTRIBUICAO"],
-        "IMPUTAPLICAÇÃO":    ["IMPUTAPLICAÇÃO","IMPUTAPLICACAO","INPUT_APLICAÇÃO",
-                              "INPUTAPLICAÇÃO","INPUTAPLICACAO","INPUT APLICAÇÃO",
+        "INPUTAPLICAÇÃO":    ["INPUTAPLICAÇÃO","INPUTAPLICACAO","IMPUTAPLICAÇÃO",
+                              "IMPUTAPLICACAO","INPUT_APLICAÇÃO","INPUT APLICAÇÃO",
                               "INPUT_APLICACAO","APLICAÇÃO","APLICACAO"],
-        "IMPUTTURNOS":       ["IMPUTTURNOS","INPUT_TURNOS","INPUTTURNOS","INPUT TURNOS","TURNOS"],
+        "INPUTTURNOS":       ["INPUTTURNOS","IMPUTTURNOS","INPUT_TURNOS","INPUT TURNOS","TURNOS"],
     }
 
     resultado = {}
@@ -190,12 +198,12 @@ def _get_aba(chave):
     return st.session_state.get("_abas_map", {}).get(chave) or chave
 
 def read_pmp(fb, log):
-    aba = _get_aba("INPUT_PMP")
+    aba = _get_aba("INPUTPMP")
     try:
         df = pd.read_excel(BytesIO(fb), sheet_name=aba, header=None)
     except Exception as e:
-        raise ValueError(f"Não foi possível ler '{aba}': {e}\n\n{ABA_FORMATOS['INPUT_PMP']}")
-    log.append(f"✅ INPUT_PMP lido (aba: '{aba}'): {df.shape[0]}L × {df.shape[1]}C")
+        raise ValueError(f"Não foi possível ler '{aba}': {e}\n\n{ABA_FORMATOS['INPUTPMP']}")
+    log.append(f"✅ INPUTPMP lido (aba: '{aba}'): {df.shape[0]}L × {df.shape[1]}C")
     dias = {}
     for i, m in enumerate(MESES, 1):
         v = df.iloc[0, i] if i < df.shape[1] else None
@@ -216,7 +224,7 @@ def read_pmp(fb, log):
     return pd.DataFrame(rows), dias
 
 def read_turnos(fb):
-    aba = _get_aba("IMPUTTURNOS")
+    aba = _get_aba("INPUTTURNOS")
     try:
         df = pd.read_excel(BytesIO(fb), sheet_name=aba, header=None)
         hA = float(df.iloc[0,1]) if pd.notna(df.iloc[0,1]) else 7.5
@@ -227,13 +235,13 @@ def read_turnos(fb):
         return {"A": 7.5, "B": 14.25, "C": 19.5}, False
 
 def read_tempo(fb, log):
-    aba = _get_aba("IMPUTTEMPO")
+    aba = _get_aba("INPUTTEMPO")
     try:
         df = pd.read_excel(BytesIO(fb), sheet_name=aba, header=0)
     except Exception as e:
-        raise ValueError(f"Não foi possível ler '{aba}': {e}\n\n{ABA_FORMATOS['IMPUTTEMPO']}")
-    log.append(f"✅ IMPUTTEMPO lido (aba: '{aba}'): {df.shape[0]}L")
-    mp = COL_MAP["IMPUTTEMPO"]
+        raise ValueError(f"Não foi possível ler '{aba}': {e}\n\n{ABA_FORMATOS['INPUTTEMPO']}")
+    log.append(f"✅ INPUTTEMPO lido (aba: '{aba}'): {df.shape[0]}L")
+    mp = COL_MAP["INPUTTEMPO"]
     c = {k: find_col(df, v, aba, k) for k,v in mp.items()}
     out = df[[c["centro"],c["peca"],c["t_ciclo"],c["t_labor"]]].copy()
     out.columns = ["centro","peca","t_ciclo","t_labor"]
@@ -243,14 +251,14 @@ def read_tempo(fb, log):
     return out.copy()
 
 def read_dist(fb, log):
-    aba = _get_aba("IMPUTDISTRIBUIÇÃO")
+    aba = _get_aba("INPUTDISTRIBUIÇÃO")
     try:
         df = pd.read_excel(BytesIO(fb), sheet_name=aba, header=0)
     except Exception as e:
-        raise ValueError(f"Não foi possível ler '{aba}': {e}\n\n{ABA_FORMATOS['IMPUTDISTRIBUIÇÃO']}")
-    log.append(f"✅ IMPUTDISTRIBUIÇÃO lido (aba: '{aba}'): {df.shape[0]}L")
+        raise ValueError(f"Não foi possível ler '{aba}': {e}\n\n{ABA_FORMATOS['INPUTDISTRIBUIÇÃO']}")
+    log.append(f"✅ INPUTDISTRIBUIÇÃO lido (aba: '{aba}'): {df.shape[0]}L")
     log.append(f"   Colunas brutas: {list(df.columns)}")
-    mp = COL_MAP["IMPUTDISTRIBUIÇÃO"]
+    mp = COL_MAP["INPUTDISTRIBUIÇÃO"]
     c = {k: find_col(df, v, aba, k) for k,v in mp.items()}
     log.append(f"   Mapeamento: { {k: v for k,v in c.items()} }")
     out = df[[c["centro"],c["peca"],c["div_carga"],c["vol_int"],c["div_volume"],c["disponib"],c["perf_op"]]].copy()
@@ -269,12 +277,12 @@ def read_dist(fb, log):
     return out.copy()
 
 def read_aplic(fb, log):
-    aba = _get_aba("IMPUTAPLICAÇÃO")
+    aba = _get_aba("INPUTAPLICAÇÃO")
     try:
         df = pd.read_excel(BytesIO(fb), sheet_name=aba, header=0)
     except Exception as e:
-        raise ValueError(f"Não foi possível ler '{aba}': {e}\n\n{ABA_FORMATOS['IMPUTAPLICAÇÃO']}")
-    log.append(f"✅ IMPUTAPLICAÇÃO lido (aba: '{aba}'): {df.shape[0]}L")
+        raise ValueError(f"Não foi possível ler '{aba}': {e}\n\n{ABA_FORMATOS['INPUTAPLICAÇÃO']}")
+    log.append(f"✅ INPUTAPLICAÇÃO lido (aba: '{aba}'): {df.shape[0]}L")
     # Sempre usa índice posicional: coluna 0 = centro, coluna 1 = peça/referência
     df = df.rename(columns={df.columns[0]: "centro", df.columns[1]: "peca"})
 
@@ -302,9 +310,9 @@ def read_aplic(fb, log):
 
     if not mcols:
         raise ValueError(
-            f"\n🔴 [IMPUTAPLICAÇÃO] Nenhuma coluna de modelo encontrada a partir da coluna 5!\n\n"
+            f"\n🔴 [INPUTAPLICAÇÃO] Nenhuma coluna de modelo encontrada a partir da coluna 5!\n\n"
             f"   Colunas encontradas: {', '.join(str(c) for c in df.columns)}\n\n"
-            f"   👉 Verifique se as colunas de modelo estão a partir da 5ª coluna da aba IMPUTAPLICAÇÃO.\n"
+            f"   👉 Verifique se as colunas de modelo estão a partir da 5ª coluna da aba INPUTAPLICAÇÃO.\n"
             f"   Os modelos podem ter qualquer nome — não precisam seguir um padrão específico."
         )
 
@@ -319,7 +327,7 @@ def read_aplic(fb, log):
 
     melted = df[id_vars + mcols].melt(id_vars=id_vars, var_name="modelo", value_name="ativo")
     out = melted[melted["ativo"] == 1][id_vars + ["modelo"]].reset_index(drop=True)
-    verificar_prefixo_centro(out, "IMPUTAPLICAÇÃO", log)
+    verificar_prefixo_centro(out, "INPUTAPLICAÇÃO", log)
     log.append(f"   {len(out)} combinações ativas")
     return out
 
@@ -334,15 +342,20 @@ def validar(pmp, tempo, dist, aplic, dias):
         exemplos = zero_disp[["centro","peca"]].head(3).apply(lambda r: f"{r.centro}/{r.peca}", axis=1).tolist()
         erros.append(f"Disponibilidade=0 em {len(zero_disp)} linha(s) — causa divisão por zero no índice de ciclo. Ex: {', '.join(exemplos)}")
 
+    zero_perf = dist[pd.to_numeric(dist.perf_op, errors="coerce").fillna(0) == 0]
+    if len(zero_perf):
+        exemplos = zero_perf[["centro","peca"]].head(3).apply(lambda r: f"{r.centro}/{r.peca}", axis=1).tolist()
+        erros.append(f"Performance Operador=0 em {len(zero_perf)} linha(s) — causa divisão por zero no índice de ciclo. Ex: {', '.join(exemplos)}")
+
     diff_td = chaves_tempo - chaves_dist
     if diff_td:
         exemplos = list(diff_td)[:3]
-        erros.append(f"{len(diff_td)} combinações em IMPUTTEMPO sem IMPUTDISTRIBUIÇÃO — não terão carga calculada. Ex: {exemplos}")
+        erros.append(f"{len(diff_td)} combinações em INPUTTEMPO sem INPUTDISTRIBUIÇÃO — não terão carga calculada. Ex: {exemplos}")
 
     t_invalidos = tempo[(tempo.t_ciclo <= 0) | (tempo.t_labor < 0)]
     if len(t_invalidos):
         exemplos = t_invalidos[["centro","peca","t_ciclo","t_labor"]].head(3).to_dict("records")
-        erros.append(f"Tempo de ciclo ≤0 ou labor <0 em {len(t_invalidos)} linha(s) — verifique IMPUTTEMPO. Ex: {exemplos[0]}")
+        erros.append(f"Tempo de ciclo ≤0 ou labor <0 em {len(t_invalidos)} linha(s) — verifique INPUTTEMPO. Ex: {exemplos[0]}")
 
     dist_num = dist.copy()
     dist_num["div_carga"]  = pd.to_numeric(dist_num["div_carga"],  errors="coerce").fillna(0)
@@ -357,7 +370,7 @@ def validar(pmp, tempo, dist, aplic, dias):
     sem_aplic = chaves_tempo - chaves_aplic
     if sem_aplic:
         exemplos = list(sem_aplic)[:3]
-        alertas.append(f"{len(sem_aplic)} centro+peça sem modelo em IMPUTAPLICAÇÃO — não entrarão no cálculo de carga. Ex: {exemplos}")
+        alertas.append(f"{len(sem_aplic)} centro+peça sem modelo em INPUTAPLICAÇÃO — não entrarão no cálculo de carga. Ex: {exemplos}")
 
     modelos_sem = set(pmp.modelo.unique()) - set(aplic.modelo.unique())
     if modelos_sem:
@@ -398,7 +411,7 @@ def validar(pmp, tempo, dist, aplic, dias):
         tempo[tempo.peca.isin(pecas_com_demanda)].centro.unique()
     )
     if centros_sem_demanda:
-        alertas.append(f"{len(centros_sem_demanda)} centro(s) sem nenhuma demanda ativa — aparecem em IMPUTTEMPO mas nenhuma peça deles tem produção no PMP: {sorted(centros_sem_demanda)[:5]}")
+        alertas.append(f"{len(centros_sem_demanda)} centro(s) sem nenhuma demanda ativa — aparecem em INPUTTEMPO mas nenhuma peça deles tem produção no PMP: {sorted(centros_sem_demanda)[:5]}")
 
     dist_vi = dist.copy()
     dist_vi["vol_int"] = pd.to_numeric(dist_vi["vol_int"], errors="coerce")
@@ -906,13 +919,14 @@ def build_cp_data_anual(resultados, tempo, dist, aplic, pmp, file_bytes=None):
         df["div_volume"] = pd.to_numeric(df["div_volume"], errors="coerce").fillna(0.0)
         df["disponib"]   = pd.to_numeric(df["disponib"],   errors="coerce").fillna(1.0)
         df["perf_op"]    = pd.to_numeric(df["perf_op"],    errors="coerce").fillna(1.0) if "perf_op" in df.columns else 1.0
+        df["pc_trat"]      = pd.to_numeric(df["pc_trat"],    errors="coerce").fillna(1.0) if "pc_trat" in df.columns else 1.0
         df["indice_ciclo"] = (df.t_ciclo*df.div_carga*df.div_volume*df.vol_int)/(df.disponib*df.perf_op)
         df["min_ciclo"] = df.indice_ciclo * df.qtd
-        df["min_labor"] = df.t_labor * df.div_carga * df.qtd
+        df["min_labor"] = df.t_labor * df.div_carga * df.qtd * df.pc_trat.fillna(1.0)
         df_ano = df[df.mes.isin(meses_c)]
         agg = df_ano.groupby(["centro","peca"])[["min_ciclo","min_labor","qtd"]].sum().reset_index()
         attrs = df_ano.drop_duplicates(["centro","peca"])[
-            ["centro","peca","t_ciclo","t_labor","div_carga","vol_int","div_volume","disponib","perf_op","indice_ciclo"]
+            ["centro","peca","t_ciclo","t_labor","div_carga","vol_int","div_volume","disponib","perf_op","indice_ciclo","pc_trat"]
         ].set_index(["centro","peca"])
         result = []
         for _, row in agg.iterrows():
@@ -924,8 +938,9 @@ def build_cp_data_anual(resultados, tempo, dist, aplic, pmp, file_bytes=None):
                 dv=float(at.div_volume); di=float(at.disponib)
                 po=float(at.perf_op) if hasattr(at,"perf_op") else 1.0
                 idx=float(at.indice_ciclo)
-            except: tc=tl=dc=vi=dv=di=po=0.0; idx=0.0
-            result.append((cen, peca, 1.0, tc, tl, dc, vi, dv, di, po, idx,
+                pct=float(at.pc_trat) if hasattr(at,"pc_trat") else 1.0
+            except: tc=tl=dc=vi=dv=di=po=0.0; idx=0.0; pct=1.0
+            result.append((cen, peca, pct, tc, tl, dc, vi, dv, di, po, idx,
                            float(row.min_ciclo), float(row.min_labor), int(row.qtd)))
         return result
     except: return None
@@ -1088,7 +1103,7 @@ def build_cp_data_from_meses(resultados, tempo, dist, aplic, pmp, dias_por_mes, 
                 idx=float(at.indice_ciclo)
                 pct=float(at.pc_trat) if hasattr(at,'pc_trat') else 1.0
                 qt=int(row.qtd)
-                mc=idx*qt; ml=tl*dc*qt
+                mc=idx*qt; ml=tl*dc*qt*pct
             except: continue
             cp_data.append((cen, peca, pct, tc, tl, dc, vi, dv, di, po, idx, mc, ml, qt))
         if not cp_data: return None, None
@@ -1543,12 +1558,12 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None,
     ws.row_dimensions[_nota_row].height = 16
     _linhas_nota = [
         ("Por que alguns valores do TOTAL LABOR (MIN) ou TOTAL CICLOS (MIN) podem diferir do Excel de referência (AnoFY26)?", True),
-        ("O App calcula os totais anuais a partir do INPUT_PMP × IMPUTAPLICAÇÃO × IMPUTTEMPO × IMPUTDISTRIBUIÇÃO.", False),
+        ("O App calcula os totais anuais a partir do INPUTPMP × INPUTAPLICAÇÃO × INPUTTEMPO × INPUTDISTRIBUIÇÃO.", False),
         ("O Excel de referência calcula via fórmulas próprias em cada aba mensal, que podem incorporar ajustes manuais,", False),
         ("   células editadas diretamente ou lógicas de arredondamento diferentes das fórmulas do App.", False),
         ("", False),
-        ("✅  Os valores calculados pelo App são fiéis ao INPUT_PMP e às regras definidas nos inputs.", True),
-        ("   Se desejar que o anual bata com o Excel de referência, alinhe o INPUT_PMP com as quantidades reais de cada aba mensal.", False),
+        ("✅  Os valores calculados pelo App são fiéis ao INPUTPMP e às regras definidas nos inputs.", True),
+        ("   Se desejar que o anual bata com o Excel de referência, alinhe o INPUTPMP com as quantidades reais de cada aba mensal.", False),
     ]
     for i, (txt, bold) in enumerate(_linhas_nota):
         r = _nota_row + 1 + i
@@ -1559,3 +1574,4 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None,
         cell.border = _brd_n
         cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
         ws.row_dimensions[r].height = 14 if txt else 6
+
