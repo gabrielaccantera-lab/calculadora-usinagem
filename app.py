@@ -3143,7 +3143,9 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                     fr_t=aplic_orig[(aplic_orig.centro==cen_t)&(aplic_orig.peca==peca_t)]
                                     flag_t=int(fr_t[mod_t2].values[0]) if len(fr_t)>0 and mod_t2 in fr_t.columns and not pd.isna(fr_t[mod_t2].values[0] if len(fr_t)>0 else 0) else 0
                                     app_mod_v[mod_t2]=qtd_t*flag_t
-                                app_tot_t=sum(app_mod_v.values())
+                                # Calcula total de peças direto do aplic+pmp (independente dos nomes do Excel)
+                                _aplic_models_cp = set(aplic[(aplic.centro==cen_t)&(aplic.peca==peca_t)].modelo.unique())
+                                app_tot_t = int(sum(int(pmp_mes_t[pmp_mes_t.modelo==m]["qtd"].sum()) for m in _aplic_models_cp))
 
                                 def _df(a,b,tol=0.02):
                                     if b is None: return False
