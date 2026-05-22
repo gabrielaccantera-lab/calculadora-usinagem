@@ -3061,29 +3061,29 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                             _F_CINZA_H=_PF("solid",fgColor="D9D9D9"); _F_VD_H=_PF("solid",fgColor="1F4D19")
                             ws_out.merge_cells("A1:O1")
                             _ec(ws_out,1,1,f"TOTAIS — {mes_t.upper()}",_F_VD_H,True,"FFFFFF",9,True)
-                            for ci_h,txt_h,f_h in [(16,"TURNO A",_F_VERDE),(17,"TURNO B",_F_AMAR),(18,"TURNO C",_F_AZUL)]:
+                            for ci_h,txt_h,f_h in [(17,"TURNO A",_F_VERDE),(18,"TURNO B",_F_AMAR),(19,"TURNO C",_F_AZUL)]:
                                 _ec(ws_out,1,ci_h,txt_h,f_h,True,"000000",8,True)
                             ws_out.row_dimensions[1].height=14
                             ws_out.merge_cells("A2:O2")
                             _ec(ws_out,2,1,"TOTAL DE MINUTOS",_F_CINZA_H,True,"000000",8,False)
-                            _ec(ws_out,2,16,minA_t,_F_VERDE,True,"000000",8)
-                            _ec(ws_out,2,17,minB_t,_F_AMAR,True,"000000",8)
-                            _ec(ws_out,2,18,minC_t,_F_AZUL,True,"000000",8)
+                            _ec(ws_out,2,17,minA_t,_F_VERDE,True,"000000",8)
+                            _ec(ws_out,2,18,minB_t,_F_AMAR,True,"000000",8)
+                            _ec(ws_out,2,19,minC_t,_F_AZUL,True,"000000",8)
                             ws_out.row_dimensions[2].height=13
                             ws_out.merge_cells("A3:O3")
                             _ec(ws_out,3,1,"TOTAL DE HORAS",_F_CINZA_H,True,"000000",8,False)
-                            _ec(ws_out,3,16,minA_t/60,_F_VERDE,True,"000000",8)
-                            _ec(ws_out,3,17,minB_t/60,_F_AMAR,True,"000000",8)
-                            _ec(ws_out,3,18,minC_t/60,_F_AZUL,True,"000000",8)
+                            _ec(ws_out,3,17,minA_t/60,_F_VERDE,True,"000000",8)
+                            _ec(ws_out,3,18,minB_t/60,_F_AMAR,True,"000000",8)
+                            _ec(ws_out,3,19,minC_t/60,_F_AZUL,True,"000000",8)
                             ws_out.row_dimensions[3].height=13
                             ws_out.merge_cells("A4:O4")
                             _ec(ws_out,4,1,"Nº DIAS TRABALHADOS",_F_CINZA_H,True,"000000",8,False)
-                            _ec(ws_out,4,16,d_t,_F_VERDE,True,"FF0000",9)
-                            _ec(ws_out,4,17,d_t,_F_AMAR,True,"FF0000",9)
-                            _ec(ws_out,4,18,d_t,_F_AZUL,True,"FF0000",9)
+                            _ec(ws_out,4,17,d_t,_F_VERDE,True,"FF0000",9)
+                            _ec(ws_out,4,18,d_t,_F_AMAR,True,"FF0000",9)
+                            _ec(ws_out,4,19,d_t,_F_AZUL,True,"FF0000",9)
                             ws_out.row_dimensions[4].height=13
 
-                            ws_out.merge_cells(f"A5:{get_column_letter(18+len(modelos_xl_t))}5")
+                            ws_out.merge_cells(f"A5:{get_column_letter(19+len(modelos_xl_t))}5")
                             _ec(ws_out,5,1,f"RESUMO DA CARGA — {mes_t.upper()} ({d_t} dias)",_F_VERDE_JD,True,"FFFFFF",10,True)
                             ws_out.row_dimensions[5].height=18
 
@@ -3092,16 +3092,16 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                     ("Tempo Ciclo (min)",_F_PRETO,"FFFFFF"),("Tempo Labor (min)",_F_PRETO,"FFFFFF"),
                                     ("Div. Carga",_PF("solid",fgColor="FF0000"),"FFFF00"),("Vol. Interna",_F_CINZA2,"000000"),
                                     ("Div. Volume",_PF("solid",fgColor="FF0000"),"FFFF00"),("Disponib.",_F_CINZA2,"000000"),
-                                    ("Indice Ciclo",_F_CINZA2,"000000"),
+                                    ("Perf. Op.",_F_CINZA2,"000000"),("Indice Ciclo",_F_CINZA2,"000000"),
                                     ("JA.A",_F_VERDE,"000000"),("JA.B",_F_AMAR,"000000"),("JA.C",_F_AZUL,"000000"),
                                     ("TOTAL CICLOS (MIN)",_F_CINZA,"000000"),("TOTAL LABOR (MIN)",_F_CINZA,"000000"),
                                     ("TOTAL PECAS",_F_CINZA,"000000")]
-                            largs_t=[9,8,16,6,5,9,9,8,8,8,8,9,8,8,8,12,12,8]
+                            largs_t=[9,8,16,6,5,9,9,8,8,8,8,8,9,8,8,8,12,12,8]
                             for ci_t,(h_t,f_t,cor_t) in enumerate(hdrs_f,1):
                                 _ec(ws_out,6,ci_t,h_t,f_t,True,cor_t,8,True,True)
                                 ws_out.column_dimensions[get_column_letter(ci_t)].width=largs_t[ci_t-1]
                             for mi_t,mod_t in enumerate(modelos_xl_t):
-                                ci_t=19+mi_t
+                                ci_t=20+mi_t
                                 _ec(ws_out,6,ci_t,mod_t,_F_CINZA,True,"000000",7,True,True)
                                 ws_out.column_dimensions[get_column_letter(ci_t)].width=7
                             ws_out.row_dimensions[6].height=42
@@ -3160,13 +3160,15 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                     vi_inp = float(_dist_row.iloc[0].vol_int)
                                     dv_inp = float(_dist_row.iloc[0].div_volume)
                                     di_inp = float(_dist_row.iloc[0].disponib)
+                                    po_inp = float(_dist_row.iloc[0].perf_op) if hasattr(_dist_row.iloc[0], "perf_op") else 1.0
                                 else:
                                     dc_inp = float(dc_xl_t or 0)
                                     vi_inp = float(vi_xl_t or 1)
                                     dv_inp = float(dv_xl_t or 0)
                                     di_inp = float(di_xl_t or 1)
+                                    po_inp = 1.0
                                 tc_inp = float(tc_xl_t or 0)
-                                idx_app_t = (tc_inp * dc_inp * dv_inp * vi_inp) / di_inp if di_inp else 0.0
+                                idx_app_t = (tc_inp * dc_inp * dv_inp * vi_inp) / (di_inp * po_inp) if (di_inp and po_inp) else 0.0
                                 div_idx_t = abs(float(idx_xl_t or 0) - float(idx_app_t or 0)) > 0.5
 
                                 # Vermelho = valor no arquivo mensal difere do INPUT
@@ -3199,15 +3201,17 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                 _ec(ws_out,ri_t,9,vi_inp,_fill_vi,False,"000000",8)
                                 _ec(ws_out,ri_t,10,dv_inp,_fill_dv,False,"000000",8)
                                 _ec(ws_out,ri_t,11,di_inp,_fill_di,False,"000000",8)
-                                _ec(ws_out,ri_t,12,float(idx_app_t),_F_VERM_S if div_idx_t else _F_BRANCO,False,"000000",8)
-                                _ec_pct(ws_out,ri_t,13,pA_t,_F_VERM if div_A_t else _cor_pct(pA_t))
-                                _ec_pct(ws_out,ri_t,14,pB_t,_F_VERM if div_B_t else _cor_pct(pB_t))
-                                _ec_pct(ws_out,ri_t,15,pC_t,_cor_pct(pC_t))
-                                _ec(ws_out,ri_t,16,mc_t,_F_VERM_S if div_c_t else _F_BRANCO,False,"000000",8)
-                                _ec(ws_out,ri_t,17,ml_t,_F_BRANCO,False,"000000",8)
-                                _ec(ws_out,ri_t,18,app_tot_t,_F_VERM_S if div_p_t else _F_BRANCO,False,"000000",8)
+                                _fill_po = _F_VERM if abs(po_inp-1.0)>0.001 else _F_BRANCO
+                                _ec(ws_out,ri_t,12,po_inp,_fill_po,False,"000000",8)
+                                _ec(ws_out,ri_t,13,float(idx_app_t),_F_VERM_S if div_idx_t else _F_BRANCO,False,"000000",8)
+                                _ec_pct(ws_out,ri_t,14,pA_t,_F_VERM if div_A_t else _cor_pct(pA_t))
+                                _ec_pct(ws_out,ri_t,15,pB_t,_F_VERM if div_B_t else _cor_pct(pB_t))
+                                _ec_pct(ws_out,ri_t,16,pC_t,_cor_pct(pC_t))
+                                _ec(ws_out,ri_t,17,mc_t,_F_VERM_S if div_c_t else _F_BRANCO,False,"000000",8)
+                                _ec(ws_out,ri_t,18,ml_t,_F_BRANCO,False,"000000",8)
+                                _ec(ws_out,ri_t,19,app_tot_t,_F_VERM_S if div_p_t else _F_BRANCO,False,"000000",8)
                                 for mi_t2,mod_t2 in enumerate(modelos_xl_t):
-                                    ci_t2=19+mi_t2
+                                    ci_t2=20+mi_t2
                                     v_app_t=app_mod_v.get(mod_t2,0)
                                     col_idx=modelo_col_idx.get(mod_t2, mi_t2)
                                     v_xl_t=vrow_t[col_idx] if vrow_t and col_idx<len(vrow_t) else None
