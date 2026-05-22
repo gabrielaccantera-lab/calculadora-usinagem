@@ -1997,11 +1997,18 @@ def df_to_xlsx_cached(df_hash, _df):
     b = BytesIO(); _df.to_excel(b, index=False); b.seek(0); return b.read()
 
 def comparar_com_excel(res_app, file_bytes, tempo, dist, aplic, pmp, dias, horas_turno, thresholds, suporte_cfg):
-    MAPA={"Novembro":"NovFY26","Dezembro":"DezFY26","Janeiro":"JanFY26","Fevereiro":"FevFY26","Março":"MarFY26","Abril":"AbrFY26","Maio":"MaiFY26","Junho":"JunFY26","Julho":"JulFY26","Agosto":"AgoFY26","Setembro":"SetFY26","Outubro":"OutFY26"}
+    _CANDS={"Novembro":["NovFY26","NOV","Nov","NOVEMBRO"],"Dezembro":["DezFY26","DEZ","Dez","DEZEMBRO"],
+            "Janeiro":["JanFY26","JAN","Jan","JANEIRO"],"Fevereiro":["FevFY26","FEV","Fev","FEVEREIRO"],
+            "Março":["MarFY26","MAR","Mar","MARÇO"],"Abril":["AbrFY26","ABR","Abr","ABRIL"],
+            "Maio":["MaiFY26","MAI","Mai","MAIO"],"Junho":["JunFY26","JUN","Jun","JUNHO"],
+            "Julho":["JulFY26","JUL","Jul","JULHO"],"Agosto":["AgoFY26","AGO","Ago","AGOSTO"],
+            "Setembro":["SetFY26","SET","Set","SETEMBRO"],"Outubro":["OutFY26","OUT","Out","OUTUBRO"]}
     try:
         wb=openpyxl.load_workbook(BytesIO(file_bytes),read_only=True,data_only=True); abas=wb.sheetnames
     except Exception as e:
         return None,None,f"Erro ao abrir: {e}"
+    MAPA={m: find_aba(abas, cands) for m, cands in _CANDS.items()}
+    MAPA={m: a for m, a in MAPA.items() if a}
     thr_A=thresholds["A"]/100; thr_B=thresholds["B"]/100; thr_C=thresholds["C"]/100
     hA=horas_turno["A"]; hB=horas_turno["B"]
     try:
@@ -2980,10 +2987,12 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                         return _F_BRANCO
                     except: return _F_BRANCO
 
-                MAPA_T={"Novembro":"NovFY26","Dezembro":"DezFY26","Janeiro":"JanFY26",
-                        "Fevereiro":"FevFY26","Março":"MarFY26","Abril":"AbrFY26",
-                        "Maio":"MaiFY26","Junho":"JunFY26","Julho":"JulFY26",
-                        "Agosto":"AgoFY26","Setembro":"SetFY26","Outubro":"OutFY26"}
+                _CANDS_T={"Novembro":["NovFY26","NOV","Nov","NOVEMBRO"],"Dezembro":["DezFY26","DEZ","Dez","DEZEMBRO"],
+                          "Janeiro":["JanFY26","JAN","Jan","JANEIRO"],"Fevereiro":["FevFY26","FEV","Fev","FEVEREIRO"],
+                          "Março":["MarFY26","MAR","Mar","MARÇO"],"Abril":["AbrFY26","ABR","Abr","ABRIL"],
+                          "Maio":["MaiFY26","MAI","Mai","MAIO"],"Junho":["JunFY26","JUN","Jun","JUNHO"],
+                          "Julho":["JulFY26","JUL","Jul","JULHO"],"Agosto":["AgoFY26","AGO","Ago","AGOSTO"],
+                          "Setembro":["SetFY26","SET","Set","SETEMBRO"],"Outubro":["OutFY26","OUT","Out","OUTUBRO"]}
 
                 hA_t=horas_turno["A"]; hB_t=horas_turno["B"]; hC_t=horas_turno["C"]
                 thr_A_t=thresholds["A"]/100; thr_B_t=thresholds["B"]/100; thr_C_t=thresholds["C"]/100
@@ -3006,11 +3015,11 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
 
                 try:
                     wb_r=_opx.load_workbook(BytesIO(file_bytes),read_only=True,data_only=True)
-                    _aba_ref_t=next((a for a in ["NovFY26","DezFY26","JanFY26","FevFY26","MarFY26","AbrFY26",
-                                                  "MaiFY26","JunFY26","JulFY26","AgoFY26","SetFY26","OutFY26"]
-                                     if a in wb_r.sheetnames), None)
+                    MAPA_T={m: find_aba(wb_r.sheetnames, cands) for m, cands in _CANDS_T.items()}
+                    MAPA_T={m: a for m, a in MAPA_T.items() if a}
+                    _aba_ref_t=next((a for a in MAPA_T.values() if a), None)
                     if _aba_ref_t is None:
-                        st.error("❌ Nenhuma aba mensal (NovFY26, DezFY26 etc.) encontrada no arquivo. "
+                        st.error("❌ Nenhuma aba mensal (NovFY26, DEZ, JAN etc.) encontrada no arquivo. "
                                  "A exportação precisa de pelo menos uma aba mensal para ler o layout de referência.")
                         wb_r.close()
                     else:
