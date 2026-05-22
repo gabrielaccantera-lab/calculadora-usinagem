@@ -3172,6 +3172,14 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                 tc_inp = float(tc_xl_t or 0)
                                 idx_app_t = (tc_inp * dc_inp * dv_inp * vi_inp) / (di_inp * po_inp) if (di_inp and po_inp) else 0.0
                                 div_idx_t = abs(float(idx_xl_t or 0) - float(idx_app_t or 0)) > 0.5
+                                # Recompute mc_t consistente com idx_app_t e app_tot_t
+                                # (agg_cp_t pode inflar por duplicatas no JOIN)
+                                mc_t = idx_app_t * app_tot_t
+                                pA_t = mc_t/minA_t if minA_t>0 else 0
+                                pB_t = mc_t/minB_t if minB_t>0 else 0
+                                pC_t = mc_t/minC_t if minC_t>0 else 0
+                                div_A_t=_df(pA_t,xl_pA_t,0.02); div_B_t=_df(pB_t,xl_pB_t,0.02)
+                                div_c_t=_df(mc_t,xl_ciclo_t,1)
 
                                 # Vermelho = valor no arquivo mensal difere do INPUT
                                 def _dif_val(xl_val, inp_val, tol=0.001):
