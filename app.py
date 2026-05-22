@@ -204,19 +204,31 @@ def read_pmp(fb, log):
     except Exception as e:
         raise ValueError(f"Não foi possível ler '{aba}': {e}\n\n{ABA_FORMATOS['INPUTPMP']}")
     log.append(f"✅ INPUTPMP lido (aba: '{aba}'): {df.shape[0]}L × {df.shape[1]}C")
+    # Detectar layout: linha 0 pode ter os dias OU ter "DIAS TRABALHADOS" (texto), com dias na linha 1
+    def _is_num(v):
+        try: int(float(v)); return True
+        except: return False
+    if df.shape[1] > 1 and _is_num(df.iloc[0, 1]):
+        dias_row, data_start = 0, 2
+    elif df.shape[0] > 1 and df.shape[1] > 1 and _is_num(df.iloc[1, 1]):
+        dias_row, data_start = 1, 3
+    else:
+        dias_row, data_start = 0, 2
+    log.append(f"   Layout INPUTPMP: linha de dias={dias_row+1}, dados a partir da linha={data_start+1}")
     dias = {}
     for i, m in enumerate(MESES, 1):
-        v = df.iloc[0, i] if i < df.shape[1] else None
-        try: dias[m] = int(v) if pd.notna(v) else 0
+        v = df.iloc[dias_row, i] if i < df.shape[1] else None
+        try: dias[m] = int(float(v)) if pd.notna(v) else 0
         except: dias[m] = 0
     log.append(f"   Dias: { {m:d for m,d in dias.items() if d>0} }")
     rows = []
-    for r in range(2, len(df)):
+    for r in range(data_start, len(df)):
         modelo = df.iloc[r, 0]
         if pd.isna(modelo): continue
+        if str(modelo).strip().upper() in ("MODELO", "TOTAL", ""): continue
         for i, m in enumerate(MESES, 1):
             v = df.iloc[r, i] if i < df.shape[1] else None
-            try: qtd = int(v) if pd.notna(v) else 0
+            try: qtd = int(float(v)) if pd.notna(v) else 0
             except: qtd = 0
             if qtd > 0:
                 rows.append({"modelo": str(modelo).strip(), "mes": m, "qtd": qtd})
@@ -2837,6 +2849,25 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
 
         st.markdown("---")
         if st.session_state.cenarios:
+            st.markdown('<div class="jd-sub">📥 Baixar cenários</div>',unsafe_allow_html=True)
+            for nm_dl, v_dl in st.session_state.cenarios.items():
+                _eh_ano_dl = v_dl.get("eh_ano") and v_dl.get("res_ano_fy26") is not None
+                _meses_dl = [m for m in MESES if res_base.get(m)] if v_dl.get("eh_ano") else [m for m in v_dl.get("meses_configurados",[v_dl.get("mes","")]) if m and not m.startswith("📅")]
+                if not _meses_dl: _meses_dl = [m for m in MESES if res_base.get(m)]
+                _hash_dl = hash(str(v_dl["resultados"]) + str(res_base) + nm_dl + str(_meses_dl) + "cen")
+                st.download_button(
+                    f"📥 {nm_dl} vs Base",
+                    data=exportar_cenario_vs_base_cached(
+                        _hash_dl, res_base, v_dl["resultados"], _meses_dl, nm_dl,
+                        _res_ano_fy26_b=res_base if _eh_ano_dl else None,
+                        _res_ano_fy26_c=v_dl.get("res_ano_fy26") if _eh_ano_dl else None,
+                        _file_bytes_ano=file_bytes
+                    ),
+                    file_name=f"cenario_vs_base_{nm_dl.replace(' ','_')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"cen_dl_{nm_dl}"
+                )
+            st.markdown("---")
             dn = st.selectbox("Remover cenário", list(st.session_state.cenarios.keys()), key="del_c")
             if st.button("🗑️ Remover", type="secondary", key="btn_del_cen"):
                 del st.session_state.cenarios[dn]; st.rerun()
@@ -3328,5 +3359,19 @@ Inclui totais de minutos/horas/dias, bloco de DADOS AUTOMÁTICOS e aba ANO.
         if st.session_state.get("cenarios"):
             st.markdown('<div class="jd-sub">Cenários salvos</div>',unsafe_allow_html=True)
             for nm,v in st.session_state.cenarios.items():
-                _cen_hash = hash(str(v["resultados"]) + nm)
-                st.download_button(f"📥 Cenário: {nm}",data=exportar_cached(_cen_hash, v["resultados"],tempo,dist,aplic,pmp,_eh_cenario=True),file_name=f"cenario_{nm.replace(' ','_')}.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key=f"exp_{nm}")
+                _eh_ano_e = v.get("eh_ano") and v.get("res_ano_fy26") is not None
+                _meses_e = [m for m in MESES if res_base.get(m)] if v.get("eh_ano") else [m for m in v.get("meses_configurados",[v.get("mes","")]) if m and not m.startswith("📅")]
+                if not _meses_e: _meses_e = [m for m in MESES if res_base.get(m)]
+                _cen_hash = hash(str(v["resultados"]) + str(res_base) + nm + str(_meses_e))
+                st.download_button(
+                    f"📥 Cenário vs Base: {nm}",
+                    data=exportar_cenario_vs_base_cached(
+                        _cen_hash, res_base, v["resultados"], _meses_e, nm,
+                        _res_ano_fy26_b=res_base if _eh_ano_e else None,
+                        _res_ano_fy26_c=v.get("res_ano_fy26") if _eh_ano_e else None,
+                        _file_bytes_ano=file_bytes
+                    ),
+                    file_name=f"cenario_vs_base_{nm.replace(' ','_')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"exp_vsb_{nm}"
+                )
