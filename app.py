@@ -3204,6 +3204,8 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                     df_all_t["min_ciclo"]=df_all_t.indice_ciclo*df_all_t.qtd
                     df_all_t["min_labor"]=df_all_t.t_labor*df_all_t.div_carga*df_all_t.qtd*df_all_t.pc_trat
                     agg_cp_t=df_all_t.groupby(["centro","peca","mes"])[["min_ciclo","min_labor"]].sum()
+                    # Índice por (centro,peca) usando INPUTTEMPO — fonte única da verdade para t_ciclo/t_labor/pc_trat
+                    _tempo_idx_t = {(r.centro, r.peca): r for r in tempo.itertuples()}
                 except Exception as _e_merge:
                     st.error(f"Erro ao preparar dados: {_e_merge}"); st.stop()
 
@@ -3363,13 +3365,16 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                     dv_inp = float(dv_xl_t or 0)
                                     di_inp = float(di_xl_t or 1)
                                     po_inp = 1.0
-                                tc_inp = float(tc_xl_t or 0)
+                                # Usa INPUTTEMPO como fonte única da verdade — fallback para referência se ausente
+                                _tr_t = _tempo_idx_t.get((cen_t, peca_t))
+                                tc_inp = float(_tr_t.t_ciclo) if _tr_t is not None else float(tc_xl_t or 0)
+                                tl_inp = float(_tr_t.t_labor) if _tr_t is not None else float(tl_xl_t or 0)
+                                pc_trat_t = (float(_tr_t.pc_trat) if _tr_t is not None and hasattr(_tr_t,"pc_trat") else None) or (float(base_row_t[3]) if base_row_t[3] else 1.0)
                                 idx_app_t = (tc_inp * dc_inp * dv_inp * vi_inp) / (di_inp * po_inp) if (di_inp and po_inp) else 0.0
                                 div_idx_t = abs(float(idx_xl_t or 0) - float(idx_app_t or 0)) > 0.5
-                                # Recompute mc_t e ml_t consistentes com os inputs (evita inflação do JOIN)
+                                # Recompute mc_t e ml_t com t_ciclo/t_labor do INPUTTEMPO (evita inflação e outdated ref)
                                 mc_t = idx_app_t * app_tot_t
-                                pc_trat_t = float(base_row_t[3]) if base_row_t[3] else 1.0
-                                ml_t = float(tl_xl_t or 0) * dc_inp * pc_trat_t * app_tot_t
+                                ml_t = tl_inp * dc_inp * pc_trat_t * app_tot_t
                                 pA_t = mc_t/minA_t if minA_t>0 else 0
                                 pB_t = mc_t/minB_t if minB_t>0 else 0
                                 pC_t = mc_t/minC_t if minC_t>0 else 0
@@ -3399,8 +3404,13 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                 _ec(ws_out,ri_t,3,base_row_t[2],_F_BRANCO,False,"000000",8,False)
                                 _ec(ws_out,ri_t,4,base_row_t[3],_F_BRANCO,False,"000000",8)
                                 _ec(ws_out,ri_t,5,base_row_t[4],_F_BRANCO,False,"000000",8)
-                                _ec(ws_out,ri_t,6,float(tc_xl_t) if tc_xl_t else tc_xl_t,_F_PRETO,False,"FFFFFF",8)
-                                _ec(ws_out,ri_t,7,float(tl_xl_t) if tl_xl_t else tl_xl_t,_F_PRETO,False,"FFFFFF",8)
+                                # Col 6-7: mostra valor do INPUTTEMPO; vermelho se diferir do arquivo de referência
+                                _fill_tc = _F_VERM if _dif_val(tc_xl_t, tc_inp, 0.01) else _F_PRETO
+                                _fill_tl = _F_VERM if _dif_val(tl_xl_t, tl_inp, 0.01) else _F_PRETO
+                                _tc_color = "000000" if _fill_tc == _F_VERM else "FFFFFF"
+                                _tl_color = "000000" if _fill_tl == _F_VERM else "FFFFFF"
+                                _ec(ws_out,ri_t,6,tc_inp,_fill_tc,False,_tc_color,8)
+                                _ec(ws_out,ri_t,7,tl_inp,_fill_tl,False,_tl_color,8)
                                 # Colunas 8-11: SEMPRE valor do INPUT — branco=correto, vermelho=difere do mês
                                 _ec(ws_out,ri_t,8,dc_inp,_fill_dc,False,"000000",8)
                                 _ec(ws_out,ri_t,9,vi_inp,_fill_vi,False,"000000",8)
@@ -3431,7 +3441,7 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
 
                             nota_rt=7+len(base_rows_t)+1
                             ws_out.merge_cells(f"A{nota_rt}:{get_column_letter(18+len(modelos_xl_t))}{nota_rt}")
-                            nt=ws_out.cell(nota_rt,1,"🔴 VERMELHO (células): valor no arquivo mensal difere do INPUT — cálculo usa sempre o INPUT  |  🔴 JA.A/JA.B vermelho = % ocupação difere do Excel  |  🔴 Rosa = total de ciclos ou peças difere  |  Cinza = presente no App")
+                            nt=ws_out.cell(nota_rt,1,"🔴 VERMELHO (células): valor no arquivo de referência difere do INPUTTEMPO/INPUTDISTRIBUIÇÃO — cálculo usa sempre o INPUT  |  🔴 JA.A/JA.B vermelho = % ocupação difere do Excel  |  🔴 Rosa = total de ciclos ou peças difere  |  Cinza = presente no App")
                             nt.font=_Ft(name="Arial",bold=True,size=8,color="CC0000")
                             nt.fill=_PF("solid",fgColor="FFEEEE")
                             nt.alignment=_Al(horizontal="left",vertical="center")
