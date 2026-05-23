@@ -2425,7 +2425,7 @@ with tab_inp:
     aba_inp=st.radio("Qual dado conferir?",["INPUTPMP","INPUTTEMPO","INPUTDISTRIBUIÇÃO","INPUTAPLICAÇÃO"],horizontal=True)
     def _zebra(row):
         bg = "#C6EFCE" if row.name % 2 == 0 else "#FFC7CE"
-        return [f"background-color:{bg}"] * len(row)
+        return [f"background-color:{bg};color:#000000"] * len(row)
     if aba_inp=="INPUTPMP":
         st.dataframe(pmp.head(100).style.apply(_zebra,axis=1),use_container_width=True,hide_index=True)
     elif aba_inp=="INPUTTEMPO":
