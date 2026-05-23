@@ -3278,25 +3278,27 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
                                                horas_efetivas=horas_efetivas, overrides=_ov_meses)
                         # ANO FY26: calcular visão anual consolidada com o override do ANO
                         _res_ano_fy26 = None
+                        _cp_data_ano  = None
                         if eh_ano_novo:
+                            _dias_map = {m: res_base[m]["dias"] for m in MESES if res_base.get(m)}
+                            # Sempre calcula cp_data (necessário para layout da aba ANO no export)
+                            _cp_data_ano, _res_ano_fy26_meses = build_cp_data_from_meses(
+                                res_base, tempo, dist, aplic, pmp, _dias_map,
+                                horas_turno, horas_efetivas,
+                                overrides_ano=_ov_ano_direto, suporte_cfg=suporte_cfg
+                            )
+                            # Preferir aba AnoFY26 do Excel; fallback = cálculo dos meses
                             _res_ano_fy26 = calcular_ano_fy26(
                                 st.session_state.get("_fb_anual"),
-                                _ov_ano_direto,
-                                horas_efetivas, suporte_cfg, horas_turno
-                            )
-                            if _res_ano_fy26 is None:
-                                _dias_map = {m: res_base[m]["dias"] for m in MESES if res_base.get(m)}
-                                _, _res_ano_fy26 = build_cp_data_from_meses(
-                                    res_base, tempo, dist, aplic, pmp, _dias_map,
-                                    horas_turno, horas_efetivas,
-                                    overrides_ano=_ov_ano_direto, suporte_cfg=suporte_cfg
-                                )
+                                _ov_ano_direto, horas_efetivas, suporte_cfg, horas_turno
+                            ) or _res_ano_fy26_meses
                     _label_periodo = ("ANO FY26" if eh_ano_novo and not meses_sel else
                                       f"ANO FY26 + {','.join(m[:3].upper() for m in meses_sel)}" if eh_ano_novo else
                                       f"{len(meses_sel)} mês(es)")
                     st.session_state.cenarios[novo_nome] = {
                         "resultados": res_cen,
                         "res_ano_fy26": _res_ano_fy26,
+                        "cp_data_ano": _cp_data_ano,
                         "mes": ("__ano__" if eh_ano_novo and not meses_sel else
                                 meses_sel[0] if meses_sel else _meses_disponiveis[0]),
                         "meses_configurados": list(meses_sel_raw),
@@ -3499,9 +3501,13 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
         if st.session_state.cenarios:
             st.markdown('<div class="jd-sub">📥 Baixar cenários</div>',unsafe_allow_html=True)
             for nm_dl, v_dl in st.session_state.cenarios.items():
+                _is_ano_only_dl = v_dl.get("eh_ano") and not [m for m in v_dl.get("meses_configurados",[]) if not m.startswith("📅")]
                 _eh_ano_dl = v_dl.get("eh_ano") and v_dl.get("res_ano_fy26") is not None
-                _meses_dl = [m for m in MESES if res_base.get(m)] if v_dl.get("eh_ano") else [m for m in v_dl.get("meses_configurados",[v_dl.get("mes","")]) if m and not m.startswith("📅")]
-                if not _meses_dl: _meses_dl = [m for m in MESES if res_base.get(m)]
+                if _is_ano_only_dl:
+                    _meses_dl = []
+                else:
+                    _meses_dl = [m for m in v_dl.get("meses_configurados",[v_dl.get("mes","")]) if m and not m.startswith("📅")]
+                    if not _meses_dl: _meses_dl = [m for m in MESES if res_base.get(m)]
                 _hash_dl = hash(str(v_dl["resultados"]) + str(res_base) + nm_dl + str(_meses_dl) + "cen")
                 st.download_button(
                     f"📥 {nm_dl} vs Base",
@@ -3509,6 +3515,7 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
                         _hash_dl, res_base, v_dl["resultados"], _meses_dl, nm_dl,
                         _res_ano_fy26_b=res_base if _eh_ano_dl else None,
                         _res_ano_fy26_c=v_dl.get("res_ano_fy26") if _eh_ano_dl else None,
+                        _cp_data_fallback=v_dl.get("cp_data_ano"),
                         _file_bytes_ano=file_bytes
                     ),
                     file_name=f"cenario_vs_base_{nm_dl.replace(' ','_')}.xlsx",
@@ -4039,9 +4046,13 @@ Inclui totais de minutos/horas/dias, bloco de DADOS AUTOMÁTICOS e aba ANO.
         if st.session_state.get("cenarios"):
             st.markdown('<div class="jd-sub">Cenários salvos</div>',unsafe_allow_html=True)
             for nm,v in st.session_state.cenarios.items():
+                _is_ano_only_e = v.get("eh_ano") and not [m for m in v.get("meses_configurados",[]) if not m.startswith("📅")]
                 _eh_ano_e = v.get("eh_ano") and v.get("res_ano_fy26") is not None
-                _meses_e = [m for m in MESES if res_base.get(m)] if v.get("eh_ano") else [m for m in v.get("meses_configurados",[v.get("mes","")]) if m and not m.startswith("📅")]
-                if not _meses_e: _meses_e = [m for m in MESES if res_base.get(m)]
+                if _is_ano_only_e:
+                    _meses_e = []
+                else:
+                    _meses_e = [m for m in v.get("meses_configurados",[v.get("mes","")]) if m and not m.startswith("📅")]
+                    if not _meses_e: _meses_e = [m for m in MESES if res_base.get(m)]
                 _cen_hash = hash(str(v["resultados"]) + str(res_base) + nm + str(_meses_e))
                 st.download_button(
                     f"📥 Cenário vs Base: {nm}",
@@ -4049,6 +4060,7 @@ Inclui totais de minutos/horas/dias, bloco de DADOS AUTOMÁTICOS e aba ANO.
                         _cen_hash, res_base, v["resultados"], _meses_e, nm,
                         _res_ano_fy26_b=res_base if _eh_ano_e else None,
                         _res_ano_fy26_c=v.get("res_ano_fy26") if _eh_ano_e else None,
+                        _cp_data_fallback=v.get("cp_data_ano"),
                         _file_bytes_ano=file_bytes
                     ),
                     file_name=f"cenario_vs_base_{nm.replace(' ','_')}.xlsx",
