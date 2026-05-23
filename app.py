@@ -2423,17 +2423,14 @@ with tab_vis:
 with tab_inp:
     st.markdown('<div class="jd-section">Dados carregados</div>',unsafe_allow_html=True)
     aba_inp=st.radio("Qual dado conferir?",["INPUTPMP","INPUTTEMPO","INPUTDISTRIBUIÇÃO","INPUTAPLICAÇÃO"],horizontal=True)
-    def _zebra(row):
-        bg = "#C6EFCE" if row.name % 2 == 0 else "#FFC7CE"
-        return [f"background-color:{bg};color:#000000"] * len(row)
     if aba_inp=="INPUTPMP":
-        st.dataframe(pmp.head(100).style.apply(_zebra,axis=1),use_container_width=True,hide_index=True)
+        st.dataframe(pmp.head(100),use_container_width=True,hide_index=True)
     elif aba_inp=="INPUTTEMPO":
-        st.dataframe(tempo.head(100).style.apply(_zebra,axis=1),use_container_width=True,hide_index=True)
+        st.dataframe(tempo.head(100),use_container_width=True,hide_index=True)
     elif aba_inp=="INPUTDISTRIBUIÇÃO":
-        st.dataframe(dist.head(100).style.apply(_zebra,axis=1),use_container_width=True,hide_index=True)
+        st.dataframe(dist.head(100),use_container_width=True,hide_index=True)
     elif aba_inp=="INPUTAPLICAÇÃO":
-        st.dataframe(aplic.head(200).style.apply(_zebra,axis=1),use_container_width=True,hide_index=True)
+        st.dataframe(aplic.head(200),use_container_width=True,hide_index=True)
     log_html="".join([f'<div class="log-line {"log-ok" if "✅" in l else "log-warn" if "⚠️" in l else ""}">{l}</div>' for l in st.session_state.get("log_leitura",[])])
     st.markdown(f'<div style="background:#1A1A1A;padding:12px;border-radius:8px;max-height:180px;overflow-y:auto">{log_html}</div>',unsafe_allow_html=True)
     def to_xlsx(df): b=BytesIO(); df.to_excel(b,index=False); b.seek(0); return b
