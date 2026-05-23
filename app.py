@@ -266,8 +266,12 @@ def read_tempo(fb, log):
     out = df[[c["centro"], c["peca"], c["t_ciclo"], c["t_labor"]]].copy()
     out.columns = ["centro", "peca", "t_ciclo", "t_labor"]
     if pc_col is not None:
-        out["pc_trat"] = pd.to_numeric(df[pc_col], errors="coerce").fillna(1.0).clip(lower=1.0)
-        log.append(f"   PÇ/TRAT lido de '{pc_col}' (INPUTTEMPO)")
+        _raw_pc = pd.to_numeric(df[pc_col], errors="coerce")
+        _blank_pc = _raw_pc.isna().sum()
+        out["pc_trat"] = _raw_pc.fillna(1.0).clip(lower=1.0)
+        _acima1 = (out["pc_trat"] > 1.0).sum()
+        log.append(f"   PÇ/TRAT lido de '{pc_col}' (INPUTTEMPO): {_acima1} linha(s) com valor >1" +
+                   (f" ⚠️ {_blank_pc} célula(s) em branco → padrão 1.0" if _blank_pc else ""))
     out = out.dropna(subset=["centro"])
     verificar_prefixo_centro(out, aba, log)
     log.append(f"   {len(out)} combinações centro+peça")
@@ -2139,25 +2143,39 @@ def gerar_template_input():
         return cell
 
     MESES_A = ["NOV","DEZ","JAN","FEV","MAR","ABR","MAI","JUN","JUL","AGO","SET","OUT"]
+    MESES_EX = ["Novembro","Dezembro","Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro"]
+
+    # Paleta de cores das linhas de dados
+    _FY  = _PF("solid", fgColor="FFFF00")  # amarelo — DIAS TRABALHADOS
+    _FG1 = _PF("solid", fgColor="C6EFCE")  # verde claro — linhas ímpares
+    _FG2 = _PF("solid", fgColor="FFC7CE")  # rosa claro — linhas pares
+    _FW  = _PF("solid", fgColor="FFFFFF")  # branco — linhas neutras
 
     # ── INPUTPMP ──────────────────────────────────────────
     ws = wb.active; ws.title = "INPUTPMP"
-    ws.column_dimensions["A"].width = 14
-    for i in range(2, 14): ws.column_dimensions[chr(64+i)].width = 7
-    # Linha 1: dias trabalhados (lida pelo app)
-    _h(ws,1,1,"DIAS TRABALHADOS",_FH,True,center=False,color="FFFFFF")
+    ws.column_dimensions["A"].width = 16
+    for i in range(2, 15): ws.column_dimensions[get_column_letter(i)].width = 8
+    # Linha 1: dias trabalhados — amarelo (lida pelo app)
+    _h(ws,1,1,"DIAS TRABALHADOS",_FY,True,center=False,color="000000")
     for i,d in enumerate([17,20,19,20,22,20,21,22,21,22,20,21],2):
-        _h(ws,1,i,d,_FH,True,color="FFFFFF")
+        _h(ws,1,i,d,_FY,True,color="000000")
     ws.row_dimensions[1].height = 16
-    # Linha 2: labels dos meses (informativo)
-    _h(ws,2,1,"MODELO",_FA,italic=True,center=False,color="666666")
-    for i,m in enumerate(MESES_A,2):
-        _h(ws,2,i,m,_FA,italic=True,color="666666")
+    # Linha 2: labels dos meses + Total
+    _h(ws,2,1,"MODELO",_FH,True,center=False,color="FFFFFF")
+    for i,m in enumerate(MESES_EX,2):
+        _h(ws,2,i,m,_FH,True,color="FFFFFF")
+    _h(ws,2,14,"Total",_FY,True,color="000000")
     ws.row_dimensions[2].height = 14
-    # Linha 3: exemplo de modelo
-    for i,v in enumerate(["6155M",50,45,60,55,50,48,52,53,51,49,55,50],1):
-        _h(ws,3,i,v,_FD)
-    ws.row_dimensions[3].height = 14
+    # Linhas de exemplo — alternando verde/rosa (col N = soma)
+    for row_idx, (mod, vals) in enumerate([
+        ("MODELO 1", [42,45,0,38,45,55,41,42,58,46,43,55]),
+        ("MODELO 2", [7,8,0,7,7,10,8,7,10,8,8,10]),
+    ], 3):
+        fill = _FG1 if (row_idx % 2 == 1) else _FG2
+        _h(ws,row_idx,1,mod,fill,center=False)
+        for ci,v in enumerate(vals,2): _h(ws,row_idx,ci,v,fill)
+        _h(ws,row_idx,14,sum(vals),_FY,True,color="000000")
+        ws.row_dimensions[row_idx].height = 14
 
     # ── INPUTTURNOS ───────────────────────────────────────
     ws2 = wb.create_sheet("INPUTTURNOS")
@@ -2165,9 +2183,9 @@ def gerar_template_input():
     for c in ["B","C","D"]: ws2.column_dimensions[c].width = 14
     # Linha 1: valores lidos pelo app (B1=hA, C1=hB, D1=hC)
     _h(ws2,1,1,"HORAS ACUMULADAS",_FH,True,center=False,color="FFFFFF")
-    _h(ws2,1,2,7.5,  _FD, center=True)
-    _h(ws2,1,3,14.25,_FD, center=True)
-    _h(ws2,1,4,19.5, _FD, center=True)
+    _h(ws2,1,2,7.5,  _FG1, center=True)
+    _h(ws2,1,3,14.25,_FG1, center=True)
+    _h(ws2,1,4,19.5, _FG1, center=True)
     ws2.row_dimensions[1].height = 16
     # Linha 2: labels descritivos (ignorados pelo app)
     _h(ws2,2,1,"",_FA)
@@ -2182,9 +2200,14 @@ def gerar_template_input():
     for i,h in enumerate(["Máquina","PEÇA","Descrição","Quantidade por Veículo","Tempo Ciclo (min)","Tempo Labor (min)"],1):
         _h(ws3,1,i,h,_FH,True,color="FFFFFF")
     ws3.row_dimensions[1].height = 16
-    for i,v in enumerate(["CEN005","R182470","REDUÇÃO FINAL",1,25.0,12.5],1):
-        _h(ws3,2,i,v,_FD)
-    ws3.row_dimensions[2].height = 14
+    for row_idx, row_vals in enumerate([
+        ["CEN005","R182470","REDUÇÃO FINAL",1,25.0,12.5],
+        ["CEN005","R182471","PINHÃO",2,18.0,9.0],
+        ["CEN006","P123456","ENGRENAGEM",1,22.5,11.0],
+    ], 2):
+        fill = _FG1 if (row_idx % 2 == 0) else _FG2
+        for i,v in enumerate(row_vals,1): _h(ws3,row_idx,i,v,fill)
+        ws3.row_dimensions[row_idx].height = 14
 
     # ── INPUTDISTRIBUIÇÃO ─────────────────────────────────
     ws4 = wb.create_sheet("INPUTDISTRIBUIÇÃO")
@@ -2193,21 +2216,30 @@ def gerar_template_input():
     for i,h in enumerate(["Máquina","PEÇA","Div Carga","Vol. Interna","Div Volume","Disponibilidade","Performance Operador X Máquina"],1):
         _h(ws4,1,i,h,_FH,True,color="FFFFFF")
     ws4.row_dimensions[1].height = 16
-    for i,v in enumerate(["CEN005","R182470",0.5,1.0,1.0,0.9,1.0],1):
-        _h(ws4,2,i,v,_FD)
-    ws4.row_dimensions[2].height = 14
+    for row_idx, row_vals in enumerate([
+        ["CEN005","R182470",1.0,1.0,1.0,0.9,1.0],
+        ["CEN005","R182471",0.5,1.0,1.0,0.95,1.0],
+        ["CEN006","P123456",1.0,1.0,1.0,0.9,0.95],
+    ], 2):
+        fill = _FG1 if (row_idx % 2 == 0) else _FG2
+        for i,v in enumerate(row_vals,1): _h(ws4,row_idx,i,v,fill)
+        ws4.row_dimensions[row_idx].height = 14
 
     # ── INPUTAPLICAÇÃO ────────────────────────────────────
     ws5 = wb.create_sheet("INPUTAPLICAÇÃO")
-    for c,w in zip(["A","B","C","D","E","F"],[10,14,6,8,10,10]):
+    for c,w in zip(["A","B","C","D","E","F"],[10,14,22,8,10,10]):
         ws5.column_dimensions[c].width = w
-    for i,h in enumerate(["Máquina","PEÇA","Descrição","PÇ/TRAT","6155M","7215R"],1):
+    for i,h in enumerate(["Máquina","PEÇA","Descrição","PÇ/TRAT","MODELO 1","MODELO 2"],1):
         _h(ws5,1,i,h,_FH,True,color="FFFFFF")
     ws5.row_dimensions[1].height = 16
-    # ativo=1 → peça é produzida nesse modelo; ativo=0 → não
-    for i,v in enumerate(["CEN005","R182470","REDUÇÃO FINAL",1,1,0],1):
-        _h(ws5,2,i,v,_FD)
-    ws5.row_dimensions[2].height = 14
+    for row_idx, row_vals in enumerate([
+        ["CEN005","R182470","REDUÇÃO FINAL",1,1,0],
+        ["CEN005","R182471","PINHÃO",2,1,1],
+        ["CEN006","P123456","ENGRENAGEM",1,0,1],
+    ], 2):
+        fill = _FG1 if (row_idx % 2 == 0) else _FG2
+        for i,v in enumerate(row_vals,1): _h(ws5,row_idx,i,v,fill)
+        ws5.row_dimensions[row_idx].height = 14
 
     buf = BytesIO(); wb.save(buf); buf.seek(0)
     return buf.read()
@@ -2370,10 +2402,17 @@ with tab_vis:
 with tab_inp:
     st.markdown('<div class="jd-section">Dados carregados</div>',unsafe_allow_html=True)
     aba_inp=st.radio("Qual dado conferir?",["INPUTPMP","INPUTTEMPO","INPUTDISTRIBUIÇÃO","INPUTAPLICAÇÃO"],horizontal=True)
-    if aba_inp=="INPUTPMP": st.dataframe(pmp.head(100),use_container_width=True,hide_index=True)
-    elif aba_inp=="INPUTTEMPO": st.dataframe(tempo.head(100),use_container_width=True,hide_index=True)
-    elif aba_inp=="INPUTDISTRIBUIÇÃO": st.dataframe(dist.head(100),use_container_width=True,hide_index=True)
-    elif aba_inp=="INPUTAPLICAÇÃO": st.dataframe(aplic.head(200),use_container_width=True,hide_index=True)
+    def _zebra(row):
+        bg = "#C6EFCE" if row.name % 2 == 0 else "#FFC7CE"
+        return [f"background-color:{bg}"] * len(row)
+    if aba_inp=="INPUTPMP":
+        st.dataframe(pmp.head(100).style.apply(_zebra,axis=1),use_container_width=True,hide_index=True)
+    elif aba_inp=="INPUTTEMPO":
+        st.dataframe(tempo.head(100).style.apply(_zebra,axis=1),use_container_width=True,hide_index=True)
+    elif aba_inp=="INPUTDISTRIBUIÇÃO":
+        st.dataframe(dist.head(100).style.apply(_zebra,axis=1),use_container_width=True,hide_index=True)
+    elif aba_inp=="INPUTAPLICAÇÃO":
+        st.dataframe(aplic.head(200).style.apply(_zebra,axis=1),use_container_width=True,hide_index=True)
     log_html="".join([f'<div class="log-line {"log-ok" if "✅" in l else "log-warn" if "⚠️" in l else ""}">{l}</div>' for l in st.session_state.get("log_leitura",[])])
     st.markdown(f'<div style="background:#1A1A1A;padding:12px;border-radius:8px;max-height:180px;overflow-y:auto">{log_html}</div>',unsafe_allow_html=True)
     def to_xlsx(df): b=BytesIO(); df.to_excel(b,index=False); b.seek(0); return b
