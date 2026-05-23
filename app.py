@@ -3180,20 +3180,20 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
     _meses_disponiveis = [m for m in MESES if res_base.get(m)]
 
     with st.expander("➕ Criar novo cenário", expanded=st.session_state.pop("_cen_criar_open", len(st.session_state.cenarios) == 0)):
+        _cen_form_id = st.session_state.get("_cen_form_id", 0)
         col_nome, col_btn = st.columns([4, 1])
         novo_nome = col_nome.text_input("Nome do cenário", placeholder="Ex: Redução B nov + Aumento A mar",
-                                         key="cen_novo_nome")
+                                         key=f"cen_novo_nome_{_cen_form_id}")
         _btn_criar = col_btn.button("✅ Criar", type="primary", use_container_width=True,
                                     key="btn_criar_cenario",
                                     help="Clique para criar o cenário com o nome digitado")
 
-        # "ANO FY26" aparece como opção junto com os meses — igual a selecionar um mês
-        _opcoes_periodo = _meses_disponiveis
+        _opcoes_periodo = _meses_disponiveis + ["📅 ANO FY26"]
         meses_sel_raw = st.multiselect(
             "Período(s) a configurar", _opcoes_periodo,
             default=[],
-            key="cen_meses_sel",
-            help="Selecione ANO FY26 para simular o consolidado anual, ou meses individuais."
+            key=f"cen_meses_sel_{_cen_form_id}",
+            help="Selecione ANO FY26 para configurar apenas a visão anual consolidada, ou meses individuais."
         )
         eh_ano_novo  = "📅 ANO FY26" in meses_sel_raw
         meses_sel    = [m for m in meses_sel_raw if m != "📅 ANO FY26"]  # meses reais selecionados
@@ -3248,9 +3248,7 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
                     st.markdown(f"**Configurando: {_p}**")
                     if _p == "📅 ANO FY26":
                         _ov_ano = _render_grade_form(_refs["__ano__"], f"fa_{novo_nome}")
-                        # Aplica o mesmo override em todos os meses para cálculo
-                        for _m in _meses_disponiveis:
-                            novo_ov_por_mes[_m] = _ov_ano
+                        novo_ov_por_mes["__ano__"] = _ov_ano
                     else:
                         novo_ov_por_mes[_p] = _render_grade_form(_refs[_p], f"fm_{novo_nome}_{_p}")
                 else:
@@ -3259,8 +3257,7 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
                         with _tab:
                             if _p == "📅 ANO FY26":
                                 _ov_ano = _render_grade_form(_refs["__ano__"], f"fa_{novo_nome}")
-                                for _m in _meses_disponiveis:
-                                    novo_ov_por_mes[_m] = _ov_ano
+                                novo_ov_por_mes["__ano__"] = _ov_ano
                             else:
                                 novo_ov_por_mes[_p] = _render_grade_form(_refs[_p], f"fm_{novo_nome}_{_p}")
 
@@ -3271,27 +3268,26 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
                     st.warning(f"Já existe um cenário chamado '{novo_nome}'. Escolha outro nome.")
                 else:
                     with st.spinner(f"Calculando '{novo_nome}'..."):
-                        res_cen = calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg,
-                                           horas_efetivas=horas_efetivas, overrides=novo_ov_por_mes)
-                        # ANO FY26: calcular como período único a partir da aba AnoFY26
-                        _res_ano_fy26 = None
+                        _ov_ano_direto = novo_ov_por_mes.get("__ano__", {})
+                        _ov_meses = {k: v for k, v in novo_ov_por_mes.items() if k != "__ano__"}
+                        # ANO-only: meses não mudam, só o cálculo anual usa o override
                         if eh_ano_novo and not meses_sel:
-                            # Override do ANO: mesmo para todos os meses, pegar do primeiro disponível
-                            _ov_ano_direto = next(
-                                (ov for ov in novo_ov_por_mes.values() if isinstance(ov, dict)),
-                                {}
-                            )
-                            # Tenta usar a aba AnoFY26 se existir
+                            res_cen = res_base
+                        else:
+                            res_cen = calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg,
+                                               horas_efetivas=horas_efetivas, overrides=_ov_meses)
+                        # ANO FY26: calcular visão anual consolidada com o override do ANO
+                        _res_ano_fy26 = None
+                        if eh_ano_novo:
                             _res_ano_fy26 = calcular_ano_fy26(
                                 st.session_state.get("_fb_anual"),
                                 _ov_ano_direto,
                                 horas_efetivas, suporte_cfg, horas_turno
                             )
-                            # Fallback: sem AnoFY26, calcula dos meses com os overrides aplicados
                             if _res_ano_fy26 is None:
                                 _dias_map = {m: res_base[m]["dias"] for m in MESES if res_base.get(m)}
                                 _, _res_ano_fy26 = build_cp_data_from_meses(
-                                    res_cen, tempo, dist, aplic, pmp, _dias_map,
+                                    res_base, tempo, dist, aplic, pmp, _dias_map,
                                     horas_turno, horas_efetivas,
                                     overrides_ano=_ov_ano_direto, suporte_cfg=suporte_cfg
                                 )
@@ -3309,9 +3305,7 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
                     }
                     st.success(f"✅ '{novo_nome}' salvo — {_label_periodo} configurado(s)!")
                     st.session_state["_cen_criar_open"] = True
-                    for _k in ["cen_novo_nome", "cen_meses_sel"]:
-                        if _k in st.session_state:
-                            del st.session_state[_k]
+                    st.session_state["_cen_form_id"] = _cen_form_id + 1
                     st.rerun()
 
     if st.session_state.cenarios:
