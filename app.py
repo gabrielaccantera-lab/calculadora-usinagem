@@ -67,6 +67,7 @@ COL_MAP = {
         "peca":     ["PEÇA","Peça","peca","PECA","REFERÊNCIA","Referência","referencia","REFERENCIA","REF"],
         "pc_trat":  ["Quantidade por Veículo","Quantidade por Veiculo","QTD POR VEÍCULO","QTD POR VEICULO",
                      "QTD/VEÍCULO","QTD/VEICULO","QUANTIDADE POR VEICULO","Qtd/Veículo","Qtd por Veículo",
+                     "PEÇA/TRATOR","PEÇA TRATOR","PECA TRATOR","PEÇA\nTRATOR","PECA\nTRATOR",
                      "PÇ/TRAT","PC/TRAT","pc_trat","Qtd Veículo","Qtd Veiculo"],
         "t_ciclo":  ["Tempo\nCiclo\n(min)","Tempo Ciclo (min)","T.CICLO","t_ciclo","CICLO"],
         "t_labor":  ["Tempo\nLabor\n(min)","Tempo Labor (min)","T.LABOR","t_labor","LABOR"],
@@ -94,9 +95,9 @@ COL_MAP = {
 
 ABA_FORMATOS = {
     "INPUTPMP": "**INPUTPMP** — Linha 1: dias trabalhados (colunas B→M = Nov→Out). Linhas 3+: modelos, colunas B→M = qtd peças.",
-    "INPUTTEMPO": "**INPUTTEMPO** — Cabeçalho linha 1. Colunas: `Máquina`, `REFERÊNCIA` (ou `PEÇA`), `Tempo Ciclo (min)`, `Tempo Labor (min)`.",
-    "INPUTDISTRIBUIÇÃO": "**INPUTDISTRIBUIÇÃO** — Cabeçalho linha 1. Colunas: `Máquina`, `REFERÊNCIA` (ou `PEÇA`), `Divisão Carga`, `Vol. Interna`, `Divisão de Volume`, `Disponibilidade`, `Performance Operador X Máquina`.",
-    "INPUTAPLICAÇÃO": "**INPUTAPLICAÇÃO** — Cabeçalho linha 1. Col A=Centro, Col B=REFERÊNCIA (ou PEÇA), depois colunas por modelo (qualquer nome).",
+    "INPUTTEMPO": "**INPUTTEMPO** — Cabeçalho linha 1. Colunas obrigatórias: `Máquina`, `PEÇA` (ou `REFERÊNCIA`), `PEÇA/TRATOR` (ou `Quantidade por Veículo`), `Tempo Ciclo (min)`, `Tempo Labor (min)`. Coluna opcional: `UM`.",
+    "INPUTDISTRIBUIÇÃO": "**INPUTDISTRIBUIÇÃO** — Cabeçalho linha 1. Colunas obrigatórias: `Máquina`, `PEÇA` (ou `REFERÊNCIA`), `Div Carga`, `Vol. Interna`, `Div Volume`, `Disponibilidade`, `Performance Operador X Máquina`. Colunas opcionais: `PEÇA/TRATOR`, `UM`, `Tempo Ciclo (min)`, `Tempo Labor (min)`, `Índice Ciclo`.",
+    "INPUTAPLICAÇÃO": "**INPUTAPLICAÇÃO** — Cabeçalho linha 1. Col A=Centro, Col B=PEÇA (ou REFERÊNCIA), Col C=Descrição, Col D=PÇ/TRAT, Col E=UM (opcional), Col F+=modelos (valor 1=ativo, 0=inativo).",
     "INPUTTURNOS": "**INPUTTURNOS** — Linha 1: horas acumuladas. B1=Turno A, C1=Turno B, D1=Turno C.",
 }
 
@@ -118,7 +119,7 @@ def find_col(df, candidates, aba, campo):
             return norm_map[nc]
     # 3) fallback por índice posicional
     idx_fallback = {
-        "centro":0,"peca":1,"pc_trat":3,"t_ciclo":4,"t_labor":5,
+        "centro":0,"peca":1,"pc_trat":3,"t_ciclo":5,"t_labor":6,
         "div_carga":7,"vol_int":8,"div_volume":9,"disponib":10,"perf_op":11
     }
     if campo in idx_fallback:
@@ -326,7 +327,23 @@ def read_aplic(fb, log):
     if pc_trat_col:
         colunas_ignorar.add(pc_trat_col)
 
+    # Ignorar colunas "UM" / unidade de medida — não são colunas de modelo
+    _UM_NORMS = {"um","u.m.","unidade","unid","unidade de medida","unit","und"}
+    for _c in df.columns:
+        if _norm(str(_c)) in _UM_NORMS:
+            colunas_ignorar.add(_c)
+
     # Aceita qualquer coluna a partir do índice 4 como modelo (qualquer nome)
+    # Também ignora colunas de tempo/distribuição que não pertencem a INPUTAPLICAÇÃO
+    _NAO_MODELO_NORMS = {
+        "tempo ciclo (min)","tempo labor (min)","t.ciclo","t.labor","ciclo","labor",
+        "div carga","vol. interna","div volume","disponibilidade","performance",
+        "descricao","descrição","description",
+    }
+    for _c in df.columns:
+        if _norm(str(_c)) in _NAO_MODELO_NORMS:
+            colunas_ignorar.add(_c)
+
     mcols = [
         c for i, c in enumerate(df.columns)
         if i >= 4
@@ -2195,15 +2212,15 @@ def gerar_template_input():
 
     # ── INPUTTEMPO ────────────────────────────────────────
     ws3 = wb.create_sheet("INPUTTEMPO")
-    for c,w in zip(["A","B","C","D","E","F"],[10,14,22,14,18,18]):
+    for c,w in zip(["A","B","C","D","E","F","G"],[10,14,22,14,6,18,18]):
         ws3.column_dimensions[c].width = w
-    for i,h in enumerate(["Máquina","PEÇA","Descrição","Quantidade por Veículo","Tempo Ciclo (min)","Tempo Labor (min)"],1):
+    for i,h in enumerate(["Máquina","PEÇA","Descrição","PEÇA/TRATOR","UM","Tempo Ciclo (min)","Tempo Labor (min)"],1):
         _h(ws3,1,i,h,_FH,True,color="FFFFFF")
     ws3.row_dimensions[1].height = 16
     for row_idx, row_vals in enumerate([
-        ["CEN005","R182470","REDUÇÃO FINAL",1,25.0,12.5],
-        ["CEN005","R182471","PINHÃO",2,18.0,9.0],
-        ["CEN006","P123456","ENGRENAGEM",1,22.5,11.0],
+        ["CEN005","R182470","REDUÇÃO FINAL",1,"PC",25.0,12.5],
+        ["CEN005","R182471","PINHÃO",2,"PC",18.0,9.0],
+        ["CEN006","P123456","ENGRENAGEM",1,"PC",22.5,11.0],
     ], 2):
         fill = _FG1 if (row_idx % 2 == 0) else _FG2
         for i,v in enumerate(row_vals,1): _h(ws3,row_idx,i,v,fill)
@@ -2211,31 +2228,35 @@ def gerar_template_input():
 
     # ── INPUTDISTRIBUIÇÃO ─────────────────────────────────
     ws4 = wb.create_sheet("INPUTDISTRIBUIÇÃO")
-    for c,w in zip(["A","B","C","D","E","F","G","H"],[10,14,22,10,11,11,14,26]):
+    for c,w in zip(["A","B","C","D","E","F","G","H","I","J","K","M","N"],[10,14,22,10,6,18,18,10,11,11,14,26,14]):
         ws4.column_dimensions[c].width = w
-    for i,h in enumerate(["Máquina","PEÇA","Descrição","Div Carga","Vol. Interna","Div Volume","Disponibilidade","Performance Operador X Máquina"],1):
+    _dist_hdrs = ["Máquina","PEÇA","Descrição","PEÇA/TRATOR","UM","Tempo Ciclo (min)","Tempo Labor (min)",
+                  "Div Carga","Vol. Interna","Div Volume","Disponibilidade","Performance Operador X Máquina","Índice Ciclo"]
+    for i,h in enumerate(_dist_hdrs,1):
         _h(ws4,1,i,h,_FH,True,color="FFFFFF")
     ws4.row_dimensions[1].height = 16
     for row_idx, row_vals in enumerate([
-        ["CEN005","R182470","REDUÇÃO FINAL",1.0,1.0,1.0,0.9,1.0],
-        ["CEN005","R182471","PINHÃO",0.5,1.0,1.0,0.95,1.0],
-        ["CEN006","P123456","ENGRENAGEM",1.0,1.0,1.0,0.9,0.95],
+        ["CEN005","R182470","REDUÇÃO FINAL",1,"PC",25.0,12.5,1.0,1.0,1.0,0.9,1.0,"=F{r}*H{r}*J{r}*I{r}/(K{r}*L{r})"],
+        ["CEN005","R182471","PINHÃO",2,"PC",18.0,9.0,0.5,1.0,1.0,0.95,1.0,"=F{r}*H{r}*J{r}*I{r}/(K{r}*L{r})"],
+        ["CEN006","P123456","ENGRENAGEM",1,"PC",22.5,11.0,1.0,1.0,1.0,0.9,0.95,"=F{r}*H{r}*J{r}*I{r}/(K{r}*L{r})"],
     ], 2):
         fill = _FG1 if (row_idx % 2 == 0) else _FG2
-        for i,v in enumerate(row_vals,1): _h(ws4,row_idx,i,v,fill)
+        for i,v in enumerate(row_vals,1):
+            _v = v.replace("{r}", str(row_idx)) if isinstance(v, str) and "{r}" in v else v
+            _h(ws4,row_idx,i,_v,fill)
         ws4.row_dimensions[row_idx].height = 14
 
     # ── INPUTAPLICAÇÃO ────────────────────────────────────
     ws5 = wb.create_sheet("INPUTAPLICAÇÃO")
-    for c,w in zip(["A","B","C","D","E","F"],[10,14,22,8,10,10]):
+    for c,w in zip(["A","B","C","D","E","F","G","H"],[10,14,22,8,6,10,10,10]):
         ws5.column_dimensions[c].width = w
-    for i,h in enumerate(["Máquina","PEÇA","Descrição","PÇ/TRAT","MODELO 1","MODELO 2"],1):
+    for i,h in enumerate(["Máquina","PEÇA","Descrição","PÇ/TRAT","UM","MODELO 1","MODELO 2","MODELO 3"],1):
         _h(ws5,1,i,h,_FH,True,color="FFFFFF")
     ws5.row_dimensions[1].height = 16
     for row_idx, row_vals in enumerate([
-        ["CEN005","R182470","REDUÇÃO FINAL",1,1,0],
-        ["CEN005","R182471","PINHÃO",2,1,1],
-        ["CEN006","P123456","ENGRENAGEM",1,0,1],
+        ["CEN005","R182470","REDUÇÃO FINAL",1,"PC",1,0,0],
+        ["CEN005","R182471","PINHÃO",2,"PC",1,1,0],
+        ["CEN006","P123456","ENGRENAGEM",1,"PC",0,1,1],
     ], 2):
         fill = _FG1 if (row_idx % 2 == 0) else _FG2
         for i,v in enumerate(row_vals,1): _h(ws5,row_idx,i,v,fill)
