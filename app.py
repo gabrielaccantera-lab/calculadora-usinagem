@@ -3301,7 +3301,8 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
                     }
                     st.success(f"✅ '{novo_nome}' salvo — {_label_periodo} configurado(s)!")
                     st.session_state["_cen_criar_open"] = True
-                    st.session_state["cen_novo_nome"] = ""
+                    if "cen_novo_nome" in st.session_state:
+                        del st.session_state["cen_novo_nome"]
                     st.rerun()
 
     if st.session_state.cenarios:
