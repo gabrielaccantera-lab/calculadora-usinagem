@@ -63,10 +63,13 @@ MESES_ABREV = ["NOV","DEZ","JAN","FEV","MAR","ABR","MAI","JUN","JUL","AGO","SET"
 
 COL_MAP = {
     "INPUTTEMPO": {
-        "centro":  ["Máquina","MÁQUINA","maquina","Centro","CENTRO"],
-        "peca":    ["PEÇA","Peça","peca","PECA","REFERÊNCIA","Referência","referencia","REFERENCIA","REF"],
-        "t_ciclo": ["Tempo\nCiclo\n(min)","Tempo Ciclo (min)","T.CICLO","t_ciclo","CICLO"],
-        "t_labor": ["Tempo\nLabor\n(min)","Tempo Labor (min)","T.LABOR","t_labor","LABOR"],
+        "centro":   ["Máquina","MÁQUINA","maquina","Centro","CENTRO"],
+        "peca":     ["PEÇA","Peça","peca","PECA","REFERÊNCIA","Referência","referencia","REFERENCIA","REF"],
+        "pc_trat":  ["Quantidade por Veículo","Quantidade por Veiculo","QTD POR VEÍCULO","QTD POR VEICULO",
+                     "QTD/VEÍCULO","QTD/VEICULO","QUANTIDADE POR VEICULO","Qtd/Veículo","Qtd por Veículo",
+                     "PÇ/TRAT","PC/TRAT","pc_trat","Qtd Veículo","Qtd Veiculo"],
+        "t_ciclo":  ["Tempo\nCiclo\n(min)","Tempo Ciclo (min)","T.CICLO","t_ciclo","CICLO"],
+        "t_labor":  ["Tempo\nLabor\n(min)","Tempo Labor (min)","T.LABOR","t_labor","LABOR"],
     },
     "INPUTDISTRIBUIÇÃO": {
         "centro":     ["Máquina","MÁQUINA","maquina","Centro","CENTRO"],
@@ -115,7 +118,7 @@ def find_col(df, candidates, aba, campo):
             return norm_map[nc]
     # 3) fallback por índice posicional
     idx_fallback = {
-        "centro":0,"peca":1,"t_ciclo":5,"t_labor":6,
+        "centro":0,"peca":1,"pc_trat":3,"t_ciclo":4,"t_labor":5,
         "div_carga":7,"vol_int":8,"div_volume":9,"disponib":10,"perf_op":11
     }
     if campo in idx_fallback:
@@ -254,9 +257,17 @@ def read_tempo(fb, log):
         raise ValueError(f"Não foi possível ler '{aba}': {e}\n\n{ABA_FORMATOS['INPUTTEMPO']}")
     log.append(f"✅ INPUTTEMPO lido (aba: '{aba}'): {df.shape[0]}L")
     mp = COL_MAP["INPUTTEMPO"]
-    c = {k: find_col(df, v, aba, k) for k,v in mp.items()}
-    out = df[[c["centro"],c["peca"],c["t_ciclo"],c["t_labor"]]].copy()
-    out.columns = ["centro","peca","t_ciclo","t_labor"]
+    # pc_trat is optional — try to find it, fall back to None
+    try:
+        pc_col = find_col(df, mp["pc_trat"], aba, "pc_trat")
+    except (ValueError, KeyError):
+        pc_col = None
+    c = {k: find_col(df, v, aba, k) for k, v in mp.items() if k != "pc_trat"}
+    out = df[[c["centro"], c["peca"], c["t_ciclo"], c["t_labor"]]].copy()
+    out.columns = ["centro", "peca", "t_ciclo", "t_labor"]
+    if pc_col is not None:
+        out["pc_trat"] = pd.to_numeric(df[pc_col], errors="coerce").fillna(1.0).clip(lower=1.0)
+        log.append(f"   PÇ/TRAT lido de '{pc_col}' (INPUTTEMPO)")
     out = out.dropna(subset=["centro"])
     verificar_prefixo_centro(out, aba, log)
     log.append(f"   {len(out)} combinações centro+peça")
@@ -444,6 +455,17 @@ def calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg
     df = (aplic.merge(pmp, on="modelo")
                .merge(tempo, on=["centro","peca"])
                .merge(dist,  on=["centro","peca"]))
+    # Resolve pc_trat: tempo's value (from "Quantidade por Veículo") takes precedence over aplic's
+    if "pc_trat_x" in df.columns and "pc_trat_y" in df.columns:
+        df["pc_trat"] = df["pc_trat_y"].fillna(df["pc_trat_x"]).fillna(1.0)
+        df.drop(columns=["pc_trat_x","pc_trat_y"], inplace=True)
+    elif "pc_trat_y" in df.columns:
+        df.rename(columns={"pc_trat_y": "pc_trat"}, inplace=True)
+    elif "pc_trat_x" in df.columns:
+        df.rename(columns={"pc_trat_x": "pc_trat"}, inplace=True)
+    if "pc_trat" not in df.columns:
+        df["pc_trat"] = 1.0
+    df["pc_trat"] = pd.to_numeric(df["pc_trat"], errors="coerce").fillna(1.0).clip(lower=1.0)
     if "vol_int" not in df.columns: df["vol_int"] = 1.0
     df["vol_int"]    = pd.to_numeric(df["vol_int"],    errors="coerce").fillna(1.0)
     df["div_carga"]  = pd.to_numeric(df["div_carga"],  errors="coerce").fillna(0.0)
@@ -452,7 +474,7 @@ def calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg
     df["perf_op"]    = pd.to_numeric(df["perf_op"],    errors="coerce").fillna(1.0) if "perf_op" in df.columns else 1.0
     df["indice_ciclo"] = (df.t_ciclo * df.div_carga * df.div_volume * df.vol_int) / (df.disponib * df.perf_op)
     df["min_ciclo"]    = df.indice_ciclo * df.qtd
-    df["min_labor"]    = df.t_labor * df.div_carga * df.qtd * df.pc_trat.fillna(1.0)
+    df["min_labor"]    = df.t_labor * df.div_carga * df.qtd * df.pc_trat
     agg = df.groupby(["centro","mes"])[["min_ciclo","min_labor"]].sum().reset_index()
     thr_A = thresholds["A"] / 100
     thr_B = thresholds["B"] / 100
@@ -732,6 +754,13 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
     heA_t=horas_efetivas["A"]; heB_t=horas_efetivas["B"]; heC_t=horas_efetivas["C"]
     try:
         df_all_t=(aplic.merge(pmp,on="modelo").merge(tempo,on=["centro","peca"]).merge(dist,on=["centro","peca"]))
+        if "pc_trat_x" in df_all_t.columns and "pc_trat_y" in df_all_t.columns:
+            df_all_t["pc_trat"]=df_all_t["pc_trat_y"].fillna(df_all_t["pc_trat_x"]).fillna(1.0)
+            df_all_t.drop(columns=["pc_trat_x","pc_trat_y"],inplace=True)
+        elif "pc_trat_y" in df_all_t.columns: df_all_t.rename(columns={"pc_trat_y":"pc_trat"},inplace=True)
+        elif "pc_trat_x" in df_all_t.columns: df_all_t.rename(columns={"pc_trat_x":"pc_trat"},inplace=True)
+        if "pc_trat" not in df_all_t.columns: df_all_t["pc_trat"]=1.0
+        df_all_t["pc_trat"]=pd.to_numeric(df_all_t["pc_trat"],errors="coerce").fillna(1.0).clip(lower=1.0)
         if "vol_int" not in df_all_t.columns: df_all_t["vol_int"] = 1.0
         df_all_t["vol_int"]    = pd.to_numeric(df_all_t["vol_int"],    errors="coerce").fillna(1.0)
         df_all_t["div_carga"]  = pd.to_numeric(df_all_t["div_carga"],  errors="coerce").fillna(0.0)
@@ -740,7 +769,7 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
         df_all_t["perf_op"]    = pd.to_numeric(df_all_t["perf_op"],    errors="coerce").fillna(1.0) if "perf_op" in df_all_t.columns else 1.0
         df_all_t["indice_ciclo"]=(df_all_t.t_ciclo*df_all_t.div_carga*df_all_t.div_volume*df_all_t.vol_int)/(df_all_t.disponib*df_all_t.perf_op)
         df_all_t["min_ciclo"]=df_all_t.indice_ciclo*df_all_t.qtd
-        df_all_t["min_labor"]=df_all_t.t_labor*df_all_t.div_carga*df_all_t.qtd*df_all_t.pc_trat.fillna(1.0)
+        df_all_t["min_labor"]=df_all_t.t_labor*df_all_t.div_carga*df_all_t.qtd*df_all_t.pc_trat
         agg_cp_t=df_all_t.groupby(["centro","peca","mes"])[["min_ciclo","min_labor"]].sum()
     except: agg_cp_t=pd.DataFrame()
     pares_cp = list(dist[["centro","peca"]].drop_duplicates().itertuples(index=False, name=None))
@@ -750,7 +779,9 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
     _tempo_idx = {(r.centro, r.peca): r for r in tempo.itertuples()}
     _aplic_set = set(zip(aplic.centro, aplic.peca, aplic.modelo))
     _pmp_pivot = pmp.pivot_table(index=["modelo","mes"], values="qtd", aggfunc="sum").to_dict()
-    _aplic_pc_idx = {(r.centro, r.peca): float(r.pc_trat) if hasattr(r, "pc_trat") else 1.0 for r in aplic.drop_duplicates(["centro","peca"]).itertuples()}
+    # Prefer pc_trat from tempo ("Quantidade por Veículo"), fall back to aplic
+    _tempo_pc_idx = {(r.centro, r.peca): float(r.pc_trat) for r in tempo.itertuples() if hasattr(r, "pc_trat") and pd.notna(r.pc_trat)}
+    _aplic_pc_idx = {(r.centro, r.peca): _tempo_pc_idx.get((r.centro, r.peca), float(r.pc_trat) if hasattr(r, "pc_trat") else 1.0) for r in aplic.drop_duplicates(["centro","peca"]).itertuples()}
 
     wb_out = _opx.Workbook(); primeira_t = True
     for mes_t in MESES:
@@ -925,16 +956,20 @@ def build_cp_data_anual(resultados, tempo, dist, aplic, pmp, file_bytes=None):
     if not meses_c: return None
     try:
         df = (aplic.merge(pmp, on="modelo").merge(tempo, on=["centro","peca"]).merge(dist, on=["centro","peca"]))
+        if "pc_trat_x" in df.columns and "pc_trat_y" in df.columns:
+            df["pc_trat"]=df["pc_trat_y"].fillna(df["pc_trat_x"]).fillna(1.0); df.drop(columns=["pc_trat_x","pc_trat_y"],inplace=True)
+        elif "pc_trat_y" in df.columns: df.rename(columns={"pc_trat_y":"pc_trat"},inplace=True)
+        elif "pc_trat_x" in df.columns: df.rename(columns={"pc_trat_x":"pc_trat"},inplace=True)
+        df["pc_trat"] = pd.to_numeric(df.get("pc_trat",1.0), errors="coerce").fillna(1.0).clip(lower=1.0)
         if "vol_int" not in df.columns: df["vol_int"] = 1.0
         df["vol_int"]    = pd.to_numeric(df["vol_int"],    errors="coerce").fillna(1.0)
         df["div_carga"]  = pd.to_numeric(df["div_carga"],  errors="coerce").fillna(0.0)
         df["div_volume"] = pd.to_numeric(df["div_volume"], errors="coerce").fillna(0.0)
         df["disponib"]   = pd.to_numeric(df["disponib"],   errors="coerce").fillna(1.0)
         df["perf_op"]    = pd.to_numeric(df["perf_op"],    errors="coerce").fillna(1.0) if "perf_op" in df.columns else 1.0
-        df["pc_trat"]      = pd.to_numeric(df["pc_trat"],    errors="coerce").fillna(1.0) if "pc_trat" in df.columns else 1.0
         df["indice_ciclo"] = (df.t_ciclo*df.div_carga*df.div_volume*df.vol_int)/(df.disponib*df.perf_op)
         df["min_ciclo"] = df.indice_ciclo * df.qtd
-        df["min_labor"] = df.t_labor * df.div_carga * df.qtd * df.pc_trat.fillna(1.0)
+        df["min_labor"] = df.t_labor * df.div_carga * df.qtd * df.pc_trat
         df_ano = df[df.mes.isin(meses_c)]
         agg = df_ano.groupby(["centro","peca"])[["min_ciclo","min_labor","qtd"]].sum().reset_index()
         attrs = df_ano.drop_duplicates(["centro","peca"])[
@@ -1092,6 +1127,11 @@ def build_cp_data_from_meses(resultados, tempo, dist, aplic, pmp, dias_por_mes, 
     if not meses_com_dados: return None, None
     try:
         df = (aplic.merge(pmp, on="modelo").merge(tempo, on=["centro","peca"]).merge(dist, on=["centro","peca"]))
+        if "pc_trat_x" in df.columns and "pc_trat_y" in df.columns:
+            df["pc_trat"]=df["pc_trat_y"].fillna(df["pc_trat_x"]).fillna(1.0); df.drop(columns=["pc_trat_x","pc_trat_y"],inplace=True)
+        elif "pc_trat_y" in df.columns: df.rename(columns={"pc_trat_y":"pc_trat"},inplace=True)
+        elif "pc_trat_x" in df.columns: df.rename(columns={"pc_trat_x":"pc_trat"},inplace=True)
+        df["pc_trat"] = pd.to_numeric(df.get("pc_trat",1.0), errors="coerce").fillna(1.0).clip(lower=1.0)
         df["vol_int"]    = pd.to_numeric(df.get("vol_int",1),    errors="coerce").fillna(1.0)
         df["div_carga"]  = pd.to_numeric(df["div_carga"],  errors="coerce").fillna(0.0)
         df["div_volume"] = pd.to_numeric(df["div_volume"], errors="coerce").fillna(0.0)
@@ -2011,6 +2051,11 @@ def comparar_com_excel(res_app, file_bytes, tempo, dist, aplic, pmp, dias, horas
     hA=horas_turno["A"]; hB=horas_turno["B"]
     try:
         df_all=(aplic.merge(pmp,on="modelo").merge(tempo,on=["centro","peca"]).merge(dist,on=["centro","peca"]))
+        if "pc_trat_x" in df_all.columns and "pc_trat_y" in df_all.columns:
+            df_all["pc_trat"]=df_all["pc_trat_y"].fillna(df_all["pc_trat_x"]).fillna(1.0); df_all.drop(columns=["pc_trat_x","pc_trat_y"],inplace=True)
+        elif "pc_trat_y" in df_all.columns: df_all.rename(columns={"pc_trat_y":"pc_trat"},inplace=True)
+        elif "pc_trat_x" in df_all.columns: df_all.rename(columns={"pc_trat_x":"pc_trat"},inplace=True)
+        df_all["pc_trat"]=pd.to_numeric(df_all.get("pc_trat",1.0),errors="coerce").fillna(1.0).clip(lower=1.0)
         if "vol_int" not in df_all.columns: df_all["vol_int"]=1.0
         df_all["vol_int"]    = pd.to_numeric(df_all["vol_int"],    errors="coerce").fillna(1.0)
         df_all["div_carga"]  = pd.to_numeric(df_all["div_carga"],  errors="coerce").fillna(0.0)
@@ -2132,12 +2177,12 @@ def gerar_template_input():
 
     # ── INPUTTEMPO ────────────────────────────────────────
     ws3 = wb.create_sheet("INPUTTEMPO")
-    ws3.column_dimensions["A"].width = 10; ws3.column_dimensions["B"].width = 14
-    ws3.column_dimensions["C"].width = 18; ws3.column_dimensions["D"].width = 18
-    for i,h in enumerate(["Máquina","PEÇA","Tempo Ciclo (min)","Tempo Labor (min)"],1):
+    for c,w in zip(["A","B","C","D","E","F"],[10,14,22,14,18,18]):
+        ws3.column_dimensions[c].width = w
+    for i,h in enumerate(["Máquina","PEÇA","Descrição","Quantidade por Veículo","Tempo Ciclo (min)","Tempo Labor (min)"],1):
         _h(ws3,1,i,h,_FH,True,color="FFFFFF")
     ws3.row_dimensions[1].height = 16
-    for i,v in enumerate(["CEN005","R182470",25.0,12.5],1):
+    for i,v in enumerate(["CEN005","R182470","REDUÇÃO FINAL",1,25.0,12.5],1):
         _h(ws3,2,i,v,_FD)
     ws3.row_dimensions[2].height = 14
 
@@ -2156,11 +2201,11 @@ def gerar_template_input():
     ws5 = wb.create_sheet("INPUTAPLICAÇÃO")
     for c,w in zip(["A","B","C","D","E","F"],[10,14,6,8,10,10]):
         ws5.column_dimensions[c].width = w
-    for i,h in enumerate(["Máquina","PEÇA","UM","PÇ/TRAT","6155M","7215R"],1):
+    for i,h in enumerate(["Máquina","PEÇA","Descrição","PÇ/TRAT","6155M","7215R"],1):
         _h(ws5,1,i,h,_FH,True,color="FFFFFF")
     ws5.row_dimensions[1].height = 16
     # ativo=1 → peça é produzida nesse modelo; ativo=0 → não
-    for i,v in enumerate(["CEN005","R182470","PC",1,1,0],1):
+    for i,v in enumerate(["CEN005","R182470","REDUÇÃO FINAL",1,1,0],1):
         _h(ws5,2,i,v,_FD)
     ws5.row_dimensions[2].height = 14
 
@@ -3104,6 +3149,11 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
 
                 try:
                     df_all_t=(aplic.merge(pmp,on="modelo").merge(tempo,on=["centro","peca"]).merge(dist,on=["centro","peca"]))
+                    if "pc_trat_x" in df_all_t.columns and "pc_trat_y" in df_all_t.columns:
+                        df_all_t["pc_trat"]=df_all_t["pc_trat_y"].fillna(df_all_t["pc_trat_x"]).fillna(1.0); df_all_t.drop(columns=["pc_trat_x","pc_trat_y"],inplace=True)
+                    elif "pc_trat_y" in df_all_t.columns: df_all_t.rename(columns={"pc_trat_y":"pc_trat"},inplace=True)
+                    elif "pc_trat_x" in df_all_t.columns: df_all_t.rename(columns={"pc_trat_x":"pc_trat"},inplace=True)
+                    df_all_t["pc_trat"]=pd.to_numeric(df_all_t.get("pc_trat",1.0),errors="coerce").fillna(1.0).clip(lower=1.0)
                     if "vol_int" not in df_all_t.columns: df_all_t["vol_int"] = 1.0
                     df_all_t["vol_int"]    = pd.to_numeric(df_all_t["vol_int"],    errors="coerce").fillna(1.0)
                     df_all_t["div_carga"]  = pd.to_numeric(df_all_t["div_carga"],  errors="coerce").fillna(0.0)
@@ -3113,7 +3163,7 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                     df_all_t["perf_op"]=pd.to_numeric(df_all_t["perf_op"],errors="coerce").fillna(1.0)
                     df_all_t["indice_ciclo"]=(df_all_t.t_ciclo*df_all_t.div_carga*df_all_t.div_volume*df_all_t.vol_int)/(df_all_t.disponib*df_all_t["perf_op"])
                     df_all_t["min_ciclo"]=df_all_t.indice_ciclo*df_all_t.qtd
-                    df_all_t["min_labor"]=df_all_t.t_labor*df_all_t.div_carga*df_all_t.qtd*df_all_t.pc_trat.fillna(1.0)
+                    df_all_t["min_labor"]=df_all_t.t_labor*df_all_t.div_carga*df_all_t.qtd*df_all_t.pc_trat
                     agg_cp_t=df_all_t.groupby(["centro","peca","mes"])[["min_ciclo","min_labor"]].sum()
                 except Exception as _e_merge:
                     st.error(f"Erro ao preparar dados: {_e_merge}"); st.stop()
