@@ -1311,10 +1311,13 @@ def build_cp_data_from_meses(resultados, tempo, dist, aplic, pmp, dias_por_mes, 
     if not meses_com_dados: return None, None
     try:
         df = (aplic.merge(pmp, on="modelo").merge(tempo, on=["centro","peca"]).merge(dist, on=["centro","peca"]))
-        if "pc_trat_x" in df.columns and "pc_trat_y" in df.columns:
-            df["pc_trat"]=df["pc_trat_y"].fillna(df["pc_trat_x"]).fillna(1.0); df.drop(columns=["pc_trat_x","pc_trat_y"],inplace=True)
-        elif "pc_trat_y" in df.columns: df.rename(columns={"pc_trat_y":"pc_trat"},inplace=True)
-        elif "pc_trat_x" in df.columns: df.rename(columns={"pc_trat_x":"pc_trat"},inplace=True)
+        # Resolver conflitos de colunas _x/_y gerados por overlaps entre tempo e dist
+        for _col in ["pc_trat","div_carga","vol_int","div_volume","disponib","perf_op","t_ciclo","t_labor"]:
+            if f"{_col}_y" in df.columns:
+                df[_col] = df[f"{_col}_y"]
+                df.drop(columns=[c for c in [f"{_col}_x", f"{_col}_y"] if c in df.columns], inplace=True)
+            elif f"{_col}_x" in df.columns:
+                df.rename(columns={f"{_col}_x": _col}, inplace=True)
         df["pc_trat"] = pd.to_numeric(df.get("pc_trat",1.0), errors="coerce").fillna(1.0).clip(lower=1.0)
         df["vol_int"]    = pd.to_numeric(df.get("vol_int",1),    errors="coerce").fillna(1.0)
         df["div_carga"]  = pd.to_numeric(df["div_carga"],  errors="coerce").fillna(0.0)
@@ -3508,7 +3511,7 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
                     _cp_fb_dl = v_dl.get("cp_data_ano")
                     if _res_ano_c_dl is None or _cp_fb_dl is None:
                         _ck = f"_ano_exp_{nm_dl}_{_file_id}"
-                        if _ck not in st.session_state:
+                        if _ck not in st.session_state or st.session_state[_ck][1] is None:
                             _dm = {m: res_base[m]["dias"] for m in MESES if res_base.get(m)}
                             _ov = v_dl.get("overrides", {}).get("__ano__", {})
                             st.session_state[_ck] = build_cp_data_from_meses(
@@ -4070,7 +4073,7 @@ Inclui totais de minutos/horas/dias, bloco de DADOS AUTOMÁTICOS e aba ANO.
                     _cp_fb_e = v.get("cp_data_ano")
                     if _res_ano_c_e is None or _cp_fb_e is None:
                         _ck_e = f"_ano_exp_{nm}_{_file_id}"
-                        if _ck_e not in st.session_state:
+                        if _ck_e not in st.session_state or st.session_state[_ck_e][1] is None:
                             _dm_e = {m: res_base[m]["dias"] for m in MESES if res_base.get(m)}
                             _ov_e = v.get("overrides", {}).get("__ano__", {})
                             st.session_state[_ck_e] = build_cp_data_from_meses(
