@@ -2211,15 +2211,15 @@ def gerar_template_input():
 
     # ── INPUTDISTRIBUIÇÃO ─────────────────────────────────
     ws4 = wb.create_sheet("INPUTDISTRIBUIÇÃO")
-    for c,w in zip(["A","B","C","D","E","F","G"],[10,14,10,11,11,14,26]):
+    for c,w in zip(["A","B","C","D","E","F","G","H"],[10,14,22,10,11,11,14,26]):
         ws4.column_dimensions[c].width = w
-    for i,h in enumerate(["Máquina","PEÇA","Div Carga","Vol. Interna","Div Volume","Disponibilidade","Performance Operador X Máquina"],1):
+    for i,h in enumerate(["Máquina","PEÇA","Descrição","Div Carga","Vol. Interna","Div Volume","Disponibilidade","Performance Operador X Máquina"],1):
         _h(ws4,1,i,h,_FH,True,color="FFFFFF")
     ws4.row_dimensions[1].height = 16
     for row_idx, row_vals in enumerate([
-        ["CEN005","R182470",1.0,1.0,1.0,0.9,1.0],
-        ["CEN005","R182471",0.5,1.0,1.0,0.95,1.0],
-        ["CEN006","P123456",1.0,1.0,1.0,0.9,0.95],
+        ["CEN005","R182470","REDUÇÃO FINAL",1.0,1.0,1.0,0.9,1.0],
+        ["CEN005","R182471","PINHÃO",0.5,1.0,1.0,0.95,1.0],
+        ["CEN006","P123456","ENGRENAGEM",1.0,1.0,1.0,0.9,0.95],
     ], 2):
         fill = _FG1 if (row_idx % 2 == 0) else _FG2
         for i,v in enumerate(row_vals,1): _h(ws4,row_idx,i,v,fill)
