@@ -2239,13 +2239,14 @@ def _localizar_dados_xl(ws_r):
     def _nv(v):
         return re.sub(r'\s+', ' ', str(v).upper().strip()) if v is not None else ""
 
-    # Carregar planilha em memória (apenas células não-nulas)
+    # Carregar planilha em memória via iter_rows (bulk — muito mais rápido que cell-by-cell)
     grid = {}
-    for r in range(1, MAX_R + 1):
-        for c in range(1, MAX_C + 1):
-            v = ws_r.cell(r, c).value
+    for r_idx, row in enumerate(
+        ws_r.iter_rows(min_row=1, max_row=MAX_R, max_col=MAX_C, values_only=True), 1
+    ):
+        for c_idx, v in enumerate(row, 1):
             if v is not None:
-                grid[(r, c)] = v
+                grid[(r_idx, c_idx)] = v
 
     result = {"op_A": 0, "op_B": 0, "op_C": 0, "total": 0, "labor": None, "centros": {}}
 
@@ -2627,13 +2628,10 @@ if st.session_state.get("_file_id")!=_file_id:
                "cmp_cache_key","cmp_cache_resumo","cmp_cache_detalhe","cmp_cache_err",
                "base_tratada_cache","_base_cache_key","mem_base_ano"]:
         st.session_state.pop(_k,None)
-    # Limpar caches de memória por mês
     for _k in list(st.session_state.keys()):
-        if _k.startswith("mem_base_"):
+        if _k.startswith("mem_base_") or _k.startswith("_inputs_read_"):
             st.session_state.pop(_k, None)
     st.session_state["_file_id"]=_file_id
-if "log_leitura" not in st.session_state: st.session_state.log_leitura=[]
-st.session_state.log_leitura=[]
 
 _abas_status=verificar_abas(file_bytes)
 st.session_state["_abas_map"] = {k: v for k, v in _abas_status.items() if v}
@@ -2642,20 +2640,39 @@ if _abas_falt:
     st.error(f"🔴 Abas obrigatórias não encontradas: {', '.join(_abas_falt)}")
     st.stop()
 
-with st.spinner("Lendo planilha..."):
-    try:
-        log=st.session_state.log_leitura
-        pmp,dias=read_pmp(file_bytes,log)
-        tempo=read_tempo(file_bytes,log)
-        dist=read_dist(file_bytes,log)
-        aplic=read_aplic(file_bytes,log)
-        turnos_arq,_turnos_ok=read_turnos(file_bytes)
-        st.session_state["turnos_arq"]=turnos_arq
-        log.append(f"✅ Leitura concluída em {datetime.now().strftime('%H:%M:%S')}")
-    except ValueError as e:
-        st.error(f"🔴 Erro de formato: {e}"); st.stop()
-    except Exception as e:
-        st.error(f"🔴 Erro inesperado: {e}"); st.stop()
+# Cache de leitura por hash de arquivo — relê só quando o arquivo mudar
+_read_cache_key = f"_inputs_read_{_file_id}"
+if _read_cache_key not in st.session_state:
+    with st.spinner("Lendo planilha..."):
+        try:
+            _rlog = []
+            st.session_state.log_leitura = _rlog
+            pmp,  dias       = read_pmp(file_bytes, _rlog)
+            tempo            = read_tempo(file_bytes, _rlog)
+            dist             = read_dist(file_bytes, _rlog)
+            aplic            = read_aplic(file_bytes, _rlog)
+            turnos_arq, _turnos_ok = read_turnos(file_bytes)
+            _rlog.append(f"✅ Leitura concluída em {datetime.now().strftime('%H:%M:%S')}")
+            st.session_state[_read_cache_key] = (pmp, dias, tempo, dist, aplic,
+                                                  turnos_arq, _turnos_ok, list(_rlog))
+            st.session_state["turnos_arq"] = turnos_arq
+            st.session_state[f"_hashes_{_file_id}"] = {
+                "pmp":   hash(pmp.to_json()),
+                "tempo": hash(tempo.to_json()),
+                "dist":  hash(dist.to_json()),
+                "aplic": hash(aplic.to_json()),
+                "dias":  hash(str(dias)),
+            }
+        except ValueError as e:
+            st.error(f"🔴 Erro de formato: {e}"); st.stop()
+        except Exception as e:
+            st.error(f"🔴 Erro inesperado: {e}"); st.stop()
+else:
+    pmp, dias, tempo, dist, aplic, turnos_arq, _turnos_ok, _rlog = st.session_state[_read_cache_key]
+    st.session_state.log_leitura = list(_rlog)
+    st.session_state["turnos_arq"] = turnos_arq
+
+if "log_leitura" not in st.session_state: st.session_state.log_leitura = []
 
 # ── Card de resumo de leitura ─────────────────────────────────────────────
 _norm_warns = [l for l in st.session_state.get("log_leitura",[]) if "via normalização" in l or "via norm" in l]
@@ -2699,7 +2716,10 @@ st.markdown(f'''<div style="background:#0D1F0D;border:1px solid #2A4A2A;border-r
   {_rows_html}
   {_extra_html}
 </div>''', unsafe_allow_html=True)
-erros,alertas,oks=validar(pmp,tempo,dist,aplic,dias)
+_validar_key = f"_validar_{_file_id}"
+if _validar_key not in st.session_state:
+    st.session_state[_validar_key] = validar(pmp, tempo, dist, aplic, dias)
+erros,alertas,oks = st.session_state[_validar_key]
 n_prob=len(erros)+len(alertas)
 
 # Peças excluídas do cálculo — mostrar fora do expander para não passar despercebido
@@ -2779,7 +2799,10 @@ tab_vis,tab_inp,tab_mem,tab_res,tab_cen,tab_cmp,tab_exp=st.tabs(["🏠 Visão Ge
 def calcular_cached(pmp_hash,_pmp,_tempo,_dist,_aplic,aplic_hash,dias_hash,dias,hA,hB,hC,heA,heB,heC,tA,tB,tC,_sup):
     return calcular(_pmp,_tempo,_dist,_aplic,dias,{"A":hA,"B":hB,"C":hC},{"A":tA,"B":tB,"C":tC},_sup,horas_efetivas={"A":heA,"B":heB,"C":heC},retornar_intermediarios=True)
 
-pmp_hash=hash(pmp.to_json()); dias_hash=hash(str(dias)); aplic_hash=hash(aplic.to_json())
+_h = st.session_state.get(f"_hashes_{_file_id}", {})
+pmp_hash  = _h.get("pmp",  hash(pmp.to_json()))
+dias_hash = _h.get("dias", hash(str(dias)))
+aplic_hash= _h.get("aplic",hash(aplic.to_json()))
 res_base,df_interm,agg_interm=calcular_cached(pmp_hash,pmp,tempo,dist,aplic,aplic_hash,dias_hash,dias,horas_turno["A"],horas_turno["B"],horas_turno["C"],horas_efetivas["A"],horas_efetivas["B"],horas_efetivas["C"],thresholds["A"],thresholds["B"],thresholds["C"],suporte_cfg)
 st.session_state["last_res_base"]=res_base
 
@@ -2813,10 +2836,15 @@ with tab_inp:
     st.markdown(f'<div style="background:#1A1A1A;padding:12px;border-radius:8px;max-height:180px;overflow-y:auto">{log_html}</div>',unsafe_allow_html=True)
     def to_xlsx(df): b=BytesIO(); df.to_excel(b,index=False); b.seek(0); return b
     c1,c2,c3,c4=st.columns(4)
-    c1.download_button("📥 INPUTPMP",data=df_to_xlsx_cached(hash(pmp.to_json()),pmp),file_name="pmp.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_inp_pmp")
-    c2.download_button("📥 INPUTTEMPO",data=df_to_xlsx_cached(hash(tempo.to_json()),tempo),file_name="tempo.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_inp_tempo")
-    c3.download_button("📥 INPUTDIST.",data=df_to_xlsx_cached(hash(dist.to_json()),dist),file_name="dist.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_inp_dist")
-    c4.download_button("📥 INPUTAPLIC.",data=df_to_xlsx_cached(hash(aplic.to_json()),aplic),file_name="aplic.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_inp_aplic")
+    _h = st.session_state.get(f"_hashes_{_file_id}", {})
+    _ph  = _h.get("pmp",   hash(pmp.to_json()))
+    _th  = _h.get("tempo", hash(tempo.to_json()))
+    _dh  = _h.get("dist",  hash(dist.to_json()))
+    _ah  = _h.get("aplic", hash(aplic.to_json()))
+    c1.download_button("📥 INPUTPMP",data=df_to_xlsx_cached(_ph,pmp),file_name="pmp.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_inp_pmp")
+    c2.download_button("📥 INPUTTEMPO",data=df_to_xlsx_cached(_th,tempo),file_name="tempo.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_inp_tempo")
+    c3.download_button("📥 INPUTDIST.",data=df_to_xlsx_cached(_dh,dist),file_name="dist.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_inp_dist")
+    c4.download_button("📥 INPUTAPLIC.",data=df_to_xlsx_cached(_ah,aplic),file_name="aplic.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_inp_aplic")
 
 # ── GLOSSÁRIO (reutilizado em tab_mem e tab_res)
 def _render_glossario():
@@ -3143,7 +3171,7 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
 
     _meses_disponiveis = [m for m in MESES if res_base.get(m)]
 
-    with st.expander("➕ Criar novo cenário", expanded=len(st.session_state.cenarios) == 0):
+    with st.expander("➕ Criar novo cenário", expanded=st.session_state.pop("_cen_criar_open", len(st.session_state.cenarios) == 0)):
         col_nome, col_btn = st.columns([4, 1])
         novo_nome = col_nome.text_input("Nome do cenário", placeholder="Ex: Redução B nov + Aumento A mar",
                                          key="cen_novo_nome")
@@ -3272,6 +3300,8 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
                         "eh_ano": eh_ano_novo,
                     }
                     st.success(f"✅ '{novo_nome}' salvo — {_label_periodo} configurado(s)!")
+                    st.session_state["_cen_criar_open"] = True
+                    st.session_state["cen_novo_nome"] = ""
                     st.rerun()
 
     if st.session_state.cenarios:
