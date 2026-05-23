@@ -3318,7 +3318,14 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
                     st.rerun()
 
     if st.session_state.cenarios:
-        todos={"📌 Base":res_base}
+        _has_ano_cen = any(_v.get("eh_ano") for _v in st.session_state.cenarios.values())
+        _res_base_chart = res_base
+        if _has_ano_cen:
+            _all_m_base = [m for m in MESES if res_base.get(m)]
+            _base_ano = agregar_ano(res_base, _all_m_base)
+            if _base_ano:
+                _res_base_chart = dict(res_base); _res_base_chart["__ANO__"] = _base_ano
+        todos={"📌 Base":_res_base_chart}
         for _k,_v in st.session_state.cenarios.items():
             _res=_v["resultados"]
             if _v.get("eh_ano"):
