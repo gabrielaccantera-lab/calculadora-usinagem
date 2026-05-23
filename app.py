@@ -820,6 +820,10 @@ def grafico_cenarios(cenarios_dict):
             if not r: continue
             mv.append(abr); tA.append(r["tot_A"]); tB.append(r["tot_B"])
             tC.append(r["tot_C"]); prod.append(r["prod_labor_tot"]*100)
+        if res.get("__ANO__"):
+            r=res["__ANO__"]
+            mv.append("ANO"); tA.append(r["tot_A"]); tB.append(r["tot_B"])
+            tC.append(r["tot_C"]); prod.append(r["prod_labor_tot"]*100)
         op=0.9 if i==0 else 0.65
         fig.add_trace(go.Bar(name=f"A—{nome}",x=mv,y=tA,marker_color=cores_A[i%4],opacity=op,
             offsetgroup=i,legendgroup=nome,text=tA,textposition="inside",textfont=dict(color="white",size=9)),secondary_y=False)
@@ -1351,7 +1355,7 @@ def build_cp_data_from_meses(resultados, tempo, dist, aplic, pmp, dias_por_mes, 
         heA = horas_efetivas.get("A", hA); heB = horas_efetivas.get("B", hB); heC = horas_efetivas.get("C", hC)
         minA = dias_total * hA * 60; minB = dias_total * hB * 60; minC = dias_total * hC * 60
         cen_mc = defaultdict(float); cen_ml = defaultdict(float)
-        for (_cen,_peca,_pct,_tc,_tl,_dc,_vi,_dv,_di,_idx,_mc,_ml,_qt) in cp_data:
+        for (_cen,_peca,_pct,_tc,_tl,_dc,_vi,_dv,_di,_po,_idx,_mc,_ml,_qt) in cp_data:
             cen_mc[_cen]+=_mc; cen_ml[_cen]+=_ml
         cen_ativos = defaultdict(lambda: {"aA":0,"aB":0,"aC":0})
         for m in meses_com_dados:
@@ -3315,7 +3319,23 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
 
     if st.session_state.cenarios:
         todos={"📌 Base":res_base}
-        todos.update({k:v["resultados"] for k,v in st.session_state.cenarios.items()})
+        for _k,_v in st.session_state.cenarios.items():
+            _res=_v["resultados"]
+            if _v.get("eh_ano"):
+                if _v.get("res_ano_fy26") is None:
+                    _ck_a=f"_ano_exp_{_k}_{_file_id}"
+                    if _ck_a not in st.session_state or st.session_state[_ck_a][1] is None:
+                        _dm_a={m:res_base[m]["dias"] for m in MESES if res_base.get(m)}
+                        _ov_a=_v.get("overrides",{}).get("__ano__",{})
+                        st.session_state[_ck_a]=build_cp_data_from_meses(
+                            res_base,tempo,dist,aplic,pmp,_dm_a,
+                            horas_turno,horas_efetivas,overrides_ano=_ov_a,suporte_cfg=suporte_cfg)
+                    if st.session_state.get(_ck_a) and st.session_state[_ck_a][1] is not None:
+                        _v["res_ano_fy26"]=st.session_state[_ck_a][1]
+                        _v["cp_data_ano"]=st.session_state[_ck_a][0]
+                if _v.get("res_ano_fy26"):
+                    _res=dict(_res); _res["__ANO__"]=_v["res_ano_fy26"]
+            todos[_k]=_res
         st.plotly_chart(grafico_cenarios(todos),use_container_width=True)
 
         # ── Resumo dos cenários salvos
@@ -3352,12 +3372,16 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
 
         if _opcoes_cmp and meses_cmp_lista:
             r_base_agg = agregar_ano(res_base, meses_cmp_lista)
-            sufixo = " (méd.)" if eh_ano_cmp else ""
+            sufixo = " (ANO)" if eh_ano_cmp else ""
             cmp_rows = []
             for nm, res in todos.items():
-                r_agg = agregar_ano(res, meses_cmp_lista)
-                if not r_agg or not r_base_agg: continue
                 is_base = "Base" in nm
+                dados_c = st.session_state.cenarios.get(nm, {})
+                if eh_ano_cmp and not is_base and dados_c.get("eh_ano") and dados_c.get("res_ano_fy26"):
+                    r_agg = dados_c["res_ano_fy26"]
+                else:
+                    r_agg = agregar_ano(res, meses_cmp_lista)
+                if not r_agg or not r_base_agg: continue
                 # Verifica se este cenário tem override no(s) mês(es) selecionado(s)
                 if not is_base:
                     dados_c = st.session_state.cenarios.get(nm, {})
