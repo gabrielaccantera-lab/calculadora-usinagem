@@ -2434,10 +2434,11 @@ with tab_inp:
     log_html="".join([f'<div class="log-line {"log-ok" if "✅" in l else "log-warn" if "⚠️" in l else ""}">{l}</div>' for l in st.session_state.get("log_leitura",[])])
     st.markdown(f'<div style="background:#1A1A1A;padding:12px;border-radius:8px;max-height:180px;overflow-y:auto">{log_html}</div>',unsafe_allow_html=True)
     def to_xlsx(df): b=BytesIO(); df.to_excel(b,index=False); b.seek(0); return b
-    c1,c2,c3=st.columns(3)
-    c1.download_button("📥 INPUTTEMPO",data=df_to_xlsx_cached(hash(tempo.to_json()),tempo),file_name="tempo.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_inp_tempo")
-    c2.download_button("📥 INPUTDIST.",data=df_to_xlsx_cached(hash(dist.to_json()),dist),file_name="dist.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_inp_dist")
-    c3.download_button("📥 INPUTAPLIC.",data=df_to_xlsx_cached(hash(aplic.to_json()),aplic),file_name="aplic.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_inp_aplic")
+    c1,c2,c3,c4=st.columns(4)
+    c1.download_button("📥 INPUTPMP",data=df_to_xlsx_cached(hash(pmp.to_json()),pmp),file_name="pmp.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_inp_pmp")
+    c2.download_button("📥 INPUTTEMPO",data=df_to_xlsx_cached(hash(tempo.to_json()),tempo),file_name="tempo.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_inp_tempo")
+    c3.download_button("📥 INPUTDIST.",data=df_to_xlsx_cached(hash(dist.to_json()),dist),file_name="dist.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_inp_dist")
+    c4.download_button("📥 INPUTAPLIC.",data=df_to_xlsx_cached(hash(aplic.to_json()),aplic),file_name="aplic.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_inp_aplic")
 
 # ── TAB 3 MEMÓRIA
 with tab_mem:
