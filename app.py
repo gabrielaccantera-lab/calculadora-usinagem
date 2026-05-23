@@ -1737,6 +1737,32 @@ def exportar(resultados, _tempo=None, _dist=None, _aplic=None, _pmp=None, _file_
         _cp_ano=None
     _horas_ano=read_horas_anual(_fb_ano)
     gerar_aba_anual(wb,resultados,cp_data=_cp_ano,horas_anual=_horas_ano,eh_cenario=_eh_cenario)
+    # ── Aba de metadados ──────────────────────────────────────────────────────
+    ws_meta = wb.create_sheet("METADADOS")
+    ws_meta.column_dimensions["A"].width = 32
+    ws_meta.column_dimensions["B"].width = 48
+    _FMH = PatternFill("solid", fgColor=JD_VERDE_ESC.replace("#",""))
+    _FML = PatternFill("solid", fgColor="F0F4F0")
+    def _mc(r, c, v, header=False):
+        cell = ws_meta.cell(r, c, v)
+        cell.font = Font(name="Arial", bold=header, color="FFFFFF" if header else "000000", size=9)
+        cell.fill = _FMH if header else _FML
+        cell.alignment = Alignment(horizontal="left", vertical="center")
+    _mc(1,1,"METADADOS DO CÁLCULO", header=True); _mc(1,2,"", header=True)
+    ws_meta.row_dimensions[1].height = 16
+    _meta_rows = [
+        ("Data/hora do cálculo", datetime.now().strftime("%d/%m/%Y %H:%M:%S")),
+        ("Arquivo de input (hash)", str(abs(hash(_fb_ano))) if _fb_ano else "não disponível"),
+        ("Meses calculados", ", ".join(m for m in MESES if resultados.get(m))),
+        ("Total combinações ativas (aplic)", str(len(_aplic)) if _aplic is not None else "—"),
+        ("Total linhas INPUTTEMPO", str(len(_tempo)) if _tempo is not None else "—"),
+        ("Total linhas INPUTDISTRIBUIÇÃO", str(len(_dist)) if _dist is not None else "—"),
+        ("Modelos únicos (PMP)", str(_pmp.modelo.nunique()) if _pmp is not None else "—"),
+        ("Gerado por", "Calculadora de Recursos — Usinagem · John Deere"),
+    ]
+    for i,(k,v) in enumerate(_meta_rows, 2):
+        _mc(i, 1, k); _mc(i, 2, v)
+        ws_meta.row_dimensions[i].height = 14
     wb.save(out); out.seek(0); return out
 
 def exportar_cenario_vs_base(res_base, res_cenario, meses_lista, nome_cenario, res_ano_fy26_b=None, res_ano_fy26_c=None, _file_bytes_ano=None, _cp_data_fallback=None):
@@ -2343,11 +2369,31 @@ with st.spinner("Lendo planilha..."):
 st.success(f"✅ {len(aplic)} combinações · {pmp.modelo.nunique()} modelos · {pmp.mes.nunique()} meses")
 erros,alertas,oks=validar(pmp,tempo,dist,aplic,dias)
 n_prob=len(erros)+len(alertas)
+
+# Peças excluídas do cálculo — mostrar fora do expander para não passar despercebido
+_chaves_tempo = set(zip(tempo.centro, tempo.peca))
+_chaves_aplic = set(zip(aplic.centro, aplic.peca))
+_chaves_dist  = set(zip(dist.centro,  dist.peca))
+_excl_aplic = _chaves_tempo - _chaves_aplic
+_excl_dist  = _chaves_tempo - _chaves_dist
+_total_excl = len(_excl_aplic | _excl_dist)
+if _total_excl > 0:
+    _ex_aplic_str = f"{len(_excl_aplic)} sem INPUTAPLICAÇÃO" if _excl_aplic else ""
+    _ex_dist_str  = f"{len(_excl_dist)} sem INPUTDISTRIBUIÇÃO" if _excl_dist else ""
+    _detalhes = " · ".join(filter(None,[_ex_aplic_str,_ex_dist_str]))
+    st.warning(f"⚠️ **{_total_excl} combinação(ões) centro+peça excluída(s) do cálculo** ({_detalhes}) — o headcount dessas peças não será computado. Expanda a validação abaixo para ver quais.")
+
 label_exp=(f"🔴 {len(erros)} erro(s)  " if erros else "")+(f"⚠️ {len(alertas)} aviso(s)" if alertas else "")+("✅ Inputs validados sem problemas" if not n_prob else "")
-with st.expander(label_exp,expanded=bool(erros)):
+with st.expander(label_exp,expanded=bool(erros or _total_excl > 0)):
     for e in erros: st.markdown(f'<div class="aviso-erro">🔴 <b>ERRO:</b> {e} — <i>o cálculo continuará com os dados disponíveis, mas o resultado pode ser parcial.</i></div>',unsafe_allow_html=True)
     for a in alertas: st.markdown(f'<div class="aviso-warn">⚠️ {a}</div>',unsafe_allow_html=True)
     for o in oks: st.markdown(f'<div class="aviso-ok">✅ {o}</div>',unsafe_allow_html=True)
+    if _excl_aplic:
+        _ex_list = sorted(_excl_aplic)[:10]
+        st.markdown(f'<div class="aviso-warn">⚠️ <b>Sem INPUTAPLICAÇÃO ({len(_excl_aplic)}):</b> {", ".join(f"{c}/{p}" for c,p in _ex_list)}{"..." if len(_excl_aplic)>10 else ""}</div>',unsafe_allow_html=True)
+    if _excl_dist:
+        _ex_list2 = sorted(_excl_dist)[:10]
+        st.markdown(f'<div class="aviso-warn">⚠️ <b>Sem INPUTDISTRIBUIÇÃO ({len(_excl_dist)}):</b> {", ".join(f"{c}/{p}" for c,p in _ex_list2)}{"..." if len(_excl_dist)>10 else ""}</div>',unsafe_allow_html=True)
 # Não bloqueamos mais — apenas avisamos. O app calcula com o que tiver.
 
 # ── SIDEBAR
@@ -2440,9 +2486,29 @@ with tab_inp:
     c3.download_button("📥 INPUTDIST.",data=df_to_xlsx_cached(hash(dist.to_json()),dist),file_name="dist.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_inp_dist")
     c4.download_button("📥 INPUTAPLIC.",data=df_to_xlsx_cached(hash(aplic.to_json()),aplic),file_name="aplic.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_inp_aplic")
 
+# ── GLOSSÁRIO (reutilizado em tab_mem e tab_res)
+def _render_glossario():
+    with st.expander("📖 O que significa cada métrica?", expanded=False):
+        st.markdown("""
+| Métrica | O que é | Fórmula resumida |
+|---|---|---|
+| **Índice de Ciclo** | Minutos que a máquina precisa rodar por peça produzida, considerando distribuição e disponibilidade | `(T.Ciclo × Div.Carga × Div.Volume × Vol.Interna) ÷ (Disponib. × Perf.Operador)` |
+| **Min.Ciclo** | Total de minutos-máquina necessários no mês | `Índice de Ciclo × Qtd produzida` |
+| **Min.Labor** | Total de minutos-operador necessários no mês | `T.Labor × Div.Carga × PÇ/TRAT × Qtd produzida` |
+| **H.Ciclo / H.Labor** | Horas totais convertidas de minutos | `Min ÷ 60` |
+| **Ocup. A/B/C** | Quanto % do turno está ocupado (>100% = sobrecarga) | `H.necessárias ÷ H.disponíveis no turno` |
+| **Prod. Ciclo Operacional** | % das horas de ciclo vs horas dos turnos com operadores ativos | `H.Ciclo ÷ H.ativos` |
+| **Prod. Labor Operacional** | % das horas de labor vs horas dos turnos com operadores ativos | `H.Labor ÷ H.ativos` |
+| **Prod. Labor Total ★** | Métrica principal — labor sobre todos os turnos disponíveis | `H.Labor ÷ H.todos` |
+| **Div.Carga** | Fração da demanda que passa por este centro (ex: 0.5 = 50% das peças) | Input INPUTDISTRIBUIÇÃO |
+| **Vol.Interna** | Percentual produzido internamente (1.0 = 100% interno) | Input INPUTDISTRIBUIÇÃO |
+| **PÇ/TRAT** | Quantas peças por veículo/tratamento (ex: 2 = uma ordem produz 2 peças) | Input INPUTTEMPO |
+""")
+
 # ── TAB 3 MEMÓRIA
 with tab_mem:
     st.markdown('<div class="jd-section">Como foi calculado</div>', unsafe_allow_html=True)
+    _render_glossario()
     st.markdown('<div class="aviso-ok">💡 Selecione <b>📅 ANO FY26</b> para ver a memória consolidada do período anual, ou escolha um mês específico para detalhar aquele período.</div>', unsafe_allow_html=True)
     _opcoes_mem = ["📅 ANO (visão consolidada)"] + [m for m in MESES if res_base.get(m)]
     mes_mem = st.selectbox("Período de análise", _opcoes_mem, key="mes_mem")
@@ -2454,6 +2520,7 @@ with tab_mem:
 # ── TAB 4 RESULTADOS
 with tab_res:
     st.markdown('<div class="jd-section">Resultado por mês</div>',unsafe_allow_html=True)
+    _render_glossario()
     st.markdown('<div class="aviso-ok">💡 Selecione <b>📅 ANO</b> para ver o resumo consolidado anual, ou escolha um mês específico.</div>', unsafe_allow_html=True)
     _opcoes_res=["📅 ANO (resumo anual)"] + [m for m in MESES if res_base.get(m)]
     mes_r=st.selectbox("Período",_opcoes_res,key="mes_r")
