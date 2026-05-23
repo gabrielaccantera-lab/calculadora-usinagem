@@ -10,6 +10,7 @@ from openpyxl.utils import get_column_letter
 from datetime import datetime
 import math
 import re
+import unicodedata
 
 st.set_page_config(page_title="Calculadora de Recursos — Usinagem", layout="wide", page_icon="🏭")
 
@@ -63,22 +64,51 @@ MESES_ABREV = ["NOV","DEZ","JAN","FEV","MAR","ABR","MAI","JUN","JUL","AGO","SET"
 
 COL_MAP = {
     "INPUTTEMPO": {
-        "centro":   ["Máquina","MÁQUINA","maquina","Centro","CENTRO"],
-        "peca":     ["PEÇA","Peça","peca","PECA","REFERÊNCIA","Referência","referencia","REFERENCIA","REF"],
+        "centro":   ["Máquina","MÁQUINA","maquina","Maquina","Centro","CENTRO","centro",
+                     "Estação","Estacao","ESTACAO","Posto","POSTO","Célula","Celula","CELULA",
+                     "Centro de Trabalho","Centro de Usinagem","CEN","Cen"],
+        "peca":     ["PEÇA","Peça","peca","PECA","REFERÊNCIA","Referência","referencia","REFERENCIA",
+                     "REF","Ref.","Ref","N. PEÇA","N. PECA","N.PECA","Código","Codigo","CODIGO",
+                     "COD. PEÇA","COD PECA","Cod. Peça","Part Number","PN","SKU","ITEM"],
         "pc_trat":  ["Quantidade por Veículo","Quantidade por Veiculo","QTD POR VEÍCULO","QTD POR VEICULO",
                      "QTD/VEÍCULO","QTD/VEICULO","QUANTIDADE POR VEICULO","Qtd/Veículo","Qtd por Veículo",
                      "PEÇA/TRATOR","PEÇA TRATOR","PECA TRATOR","PEÇA\nTRATOR","PECA\nTRATOR",
+                     "Quantidade Trator","QTD TRATOR","QTD/TRAT","PEÇA POR TRATOR","PCS POR TRATOR",
                      "PÇ/TRAT","PC/TRAT","pc_trat","Qtd Veículo","Qtd Veiculo"],
-        "t_ciclo":  ["Tempo\nCiclo\n(min)","Tempo Ciclo (min)","T.CICLO","t_ciclo","CICLO"],
-        "t_labor":  ["Tempo\nLabor\n(min)","Tempo Labor (min)","T.LABOR","t_labor","LABOR"],
+        "t_ciclo":  ["Tempo\nCiclo\n(min)","Tempo Ciclo (min)","Tempo Ciclo","Tempo de Ciclo",
+                     "TEMPO CICLO","TEMPO DE CICLO","T.CICLO","T_CICLO","T CICLO","t_ciclo",
+                     "Ciclo (min)","Ciclo (min.)","CICLO","TC","TC (min)","Cycle Time","Cycle Time (min)"],
+        "t_labor":  ["Tempo\nLabor\n(min)","Tempo Labor (min)","Tempo Labor","Tempo de Labor",
+                     "TEMPO LABOR","TEMPO DE LABOR","T.LABOR","T_LABOR","T LABOR","t_labor",
+                     "Labor (min)","Labor (min.)","LABOR","TL","TL (min)",
+                     "Tempo Operador","Tempo Mão de Obra","Tempo Mao de Obra",
+                     "Manuseio (min)","Tempo Manuseio","Tempo Assistência","Tempo Assistencia",
+                     "Handling Time","Operator Time"],
     },
     "INPUTDISTRIBUIÇÃO": {
-        "centro":     ["Máquina","MÁQUINA","maquina","Centro","CENTRO"],
-        "peca":       ["PEÇA","Peça","peca","PECA","REFERÊNCIA","Referência","referencia","REFERENCIA","REF"],
-        "div_carga":  ["Divisão\nCarga\nENTRE\nMÁQUINAS","Div Carga","DIV_CARGA","div_carga"],
-        "vol_int":    ["Vol.\nInterna","Vol. Interna","VOL_INT","vol_int","VOL. INTERNA","Volume Interna","Volume de \nProdução\nInterna","Volume de\nProdução\nInterna","Volume Produção Interna","Vol Produção Interna"],
-        "div_volume": ["Divisão \nde\nVolume\nENTRE\nPEÇAS","Divisão\nde\nVolume\nENTRE\nPEÇAS","Div Volume","DIV_VOLUME","div_volume","Divisão de Volume"],
-        "disponib":   ["Disponi-\nbilidade","Disponibilidade","DISPONIB","disponib"],
+        "centro":     ["Máquina","MÁQUINA","maquina","Maquina","Centro","CENTRO","centro",
+                       "Estação","Estacao","ESTACAO","Posto","POSTO","Célula","Celula","CELULA",
+                       "Centro de Trabalho","Centro de Usinagem","CEN","Cen"],
+        "peca":       ["PEÇA","Peça","peca","PECA","REFERÊNCIA","Referência","referencia","REFERENCIA",
+                       "REF","Ref.","Ref","N. PEÇA","N. PECA","N.PECA","Código","Codigo","CODIGO",
+                       "COD. PEÇA","COD PECA","Cod. Peça","Part Number","PN","SKU","ITEM"],
+        "div_carga":  ["Divisão\nCarga\nENTRE\nMÁQUINAS","Div Carga","DIV_CARGA","div_carga",
+                       "Divisão de Carga","Divisão Carga","DIVISAO CARGA","Divisão Entre Máquinas",
+                       "Divisão Entre Maquinas","Distribuição Carga","Distribuicao Carga",
+                       "DIV CARGA","DC","Fator Carga","% Carga","Proporção Carga"],
+        "vol_int":    ["Vol.\nInterna","Vol. Interna","VOL_INT","vol_int","VOL. INTERNA",
+                       "Volume Interna","Volume Interno","Vol. Interno","Vol Interno","VOLUME INTERNO",
+                       "Volume de \nProdução\nInterna","Volume de\nProdução\nInterna",
+                       "Volume Produção Interna","Vol Produção Interna",
+                       "Produção Interna","VI","% Volume Interno","% Vol. Interno"],
+        "div_volume": ["Divisão \nde\nVolume\nENTRE\nPEÇAS","Divisão\nde\nVolume\nENTRE\nPEÇAS",
+                       "Div Volume","DIV_VOLUME","div_volume","Divisão de Volume","Divisão Volume",
+                       "DIVISAO VOLUME","Divisão Volume Peças","Distribuição de Volume",
+                       "Divisão Entre Peças","Divisão Entre Pecas","DIV VOLUME","DV",
+                       "Proporção de Volume","% Volume por Peça","% Vol. Peça"],
+        "disponib":   ["Disponi-\nbilidade","Disponibilidade","DISPONIB","disponib",
+                       "DISPONIBILIDADE","Disponib.","Disp.","DISP","% Disponibilidade",
+                       "Tempo Disponível","Tempo Disponivel","Availability","Avail."],
         "perf_op":    ["Performance\nOperador X\nMáquina","Performance Operador X Máquina",
                        "Performance\nOperador X\nMaquina","Performance Operador X Maquina",
                        "Performance\nOperador X\n Máquina","Performance\nOperador X\n Maquina",
@@ -89,6 +119,8 @@ COL_MAP = {
                        "Perf Operador Máquina","Perf Operador Maquina",
                        "Perf. Op. Máquina","Perf. Op. Maquina",
                        "Performance Operador","PERF_OP","perf_op","PERFORMANCE",
+                       "Fator Operador","Fator Performance","% Performance",
+                       "Eficiência Operador","Eficiencia Operador","Índice Operador",
                        "NOVO","Performance\nOperador\nX\nMáquina","Performance\nOperador\nX\nMaquina"],
     },
 }
@@ -102,7 +134,32 @@ ABA_FORMATOS = {
 }
 
 def _norm(s):
-    return re.sub(r'\s+', ' ', str(s).lower().replace("\n"," ").replace("\r"," ")).strip()
+    s = re.sub(r'\s+', ' ', str(s).lower().replace("\n"," ").replace("\r"," ")).strip()
+    return unicodedata.normalize('NFD', s).encode('ascii', 'ignore').decode('ascii')
+
+def _find_header_row(df, all_candidates, max_scan=10):
+    """
+    Varre as primeiras linhas do DataFrame (lido com header=None) e retorna
+    o índice da primeira linha que contém pelo menos uma célula reconhecida
+    como nome de coluna esperado. Ignora linhas completamente em branco.
+    """
+    known = {_norm(c) for cands in all_candidates for c in cands}
+    for r in range(min(max_scan, len(df))):
+        row_vals = [str(v) for v in df.iloc[r] if pd.notna(v) and str(v).strip() != ""]
+        if not row_vals:
+            continue  # linha em branco — pula
+        row_norms = {_norm(v) for v in row_vals}
+        if row_norms & known:
+            return r
+    return 0  # fallback: assume linha 0
+
+def _apply_header(df, hdr_row, log, aba):
+    """Usa hdr_row como cabeçalho, descarta linhas anteriores, loga se pulou algo."""
+    if hdr_row > 0:
+        log.append(f"   ℹ️ [{aba}] {hdr_row} linha(s) em branco/extras ignorada(s) antes do cabeçalho")
+    df.columns = df.iloc[hdr_row].astype(str)
+    df = df.iloc[hdr_row + 1:].reset_index(drop=True)
+    return df
 
 def find_col(df, candidates, aba, campo):
     # 1) busca exata
@@ -208,30 +265,69 @@ def read_pmp(fb, log):
     except Exception as e:
         raise ValueError(f"Não foi possível ler '{aba}': {e}\n\n{ABA_FORMATOS['INPUTPMP']}")
     log.append(f"✅ INPUTPMP lido (aba: '{aba}'): {df.shape[0]}L × {df.shape[1]}C")
-    # Detectar layout: linha 0 pode ter os dias OU ter "DIAS TRABALHADOS" (texto), com dias na linha 1
     def _is_num(v):
         try: int(float(v)); return True
         except: return False
-    if df.shape[1] > 1 and _is_num(df.iloc[0, 1]):
-        dias_row, data_start = 0, 2
-    elif df.shape[0] > 1 and df.shape[1] > 1 and _is_num(df.iloc[1, 1]):
-        dias_row, data_start = 1, 3
-    else:
-        dias_row, data_start = 0, 2
+    def _row_has_content(r):
+        return any(pd.notna(df.iloc[r, c]) and str(df.iloc[r, c]).strip() != "" for c in range(df.shape[1]))
+    # Pular linhas em branco no topo — encontrar primeira linha com conteúdo
+    first_content = 0
+    for r in range(min(10, len(df))):
+        if _row_has_content(r):
+            first_content = r; break
+    # A partir daí, detectar qual linha tem os dias trabalhados
+    dias_row, data_start = first_content, first_content + 2
+    for r in range(first_content, min(first_content + 5, len(df))):
+        if df.shape[1] > 1 and _is_num(df.iloc[r, 1]):
+            dias_row = r
+            data_start = r + 2
+            break
+        elif df.shape[1] > 1 and not _is_num(df.iloc[r, 1]) and r + 1 < len(df) and _is_num(df.iloc[r + 1, 1]):
+            dias_row = r + 1
+            data_start = r + 3
+            break
+    if first_content > 0:
+        log.append(f"   ℹ️ [INPUTPMP] {first_content} linha(s) em branco ignorada(s) no topo")
     log.append(f"   Layout INPUTPMP: linha de dias={dias_row+1}, dados a partir da linha={data_start+1}")
+    # Mapear colunas pelos nomes dos meses (se existir linha de cabeçalho entre dias e dados)
+    _MES_NORMS = {}
+    for m, abr in zip(MESES, MESES_ABREV):
+        for v in [m, m.upper(), abr, abr.lower()]:
+            _MES_NORMS[_norm(v)] = m
+    mes_col = {}  # mes → índice de coluna
+    if data_start > dias_row + 1:
+        hdr_r = data_start - 1
+        for c in range(df.shape[1]):
+            v = df.iloc[hdr_r, c]
+            if pd.notna(v):
+                k = _norm(str(v))
+                if k in _MES_NORMS:
+                    mes_col[_MES_NORMS[k]] = c
+    if mes_col:
+        log.append(f"   Colunas de mês encontradas por nome: {list(mes_col.keys())[:4]}...")
+    else:
+        # Fallback: posicional — meses nas colunas 1..12 em ordem de MESES
+        mes_col = {m: i for i, m in enumerate(MESES, 1)}
     dias = {}
-    for i, m in enumerate(MESES, 1):
-        v = df.iloc[dias_row, i] if i < df.shape[1] else None
+    for m, col in mes_col.items():
+        v = df.iloc[dias_row, col] if col < df.shape[1] else None
         try: dias[m] = int(float(v)) if pd.notna(v) else 0
         except: dias[m] = 0
     log.append(f"   Dias: { {m:d for m,d in dias.items() if d>0} }")
+    # Detectar coluna de modelos (primeira coluna, ou pela label "MODELO")
+    col_modelo = 0
+    if data_start > 0:
+        for c in range(min(3, df.shape[1])):
+            v = df.iloc[data_start - 1, c]
+            if pd.notna(v) and _norm(str(v)) in {"modelo","modelos","model","models","equipamento","trator"}:
+                col_modelo = c; break
     rows = []
     for r in range(data_start, len(df)):
-        modelo = df.iloc[r, 0]
+        modelo = df.iloc[r, col_modelo]
         if pd.isna(modelo): continue
         if str(modelo).strip().upper() in ("MODELO", "TOTAL", ""): continue
-        for i, m in enumerate(MESES, 1):
-            v = df.iloc[r, i] if i < df.shape[1] else None
+        for m, col in mes_col.items():
+            v = df.iloc[r, col] if col < df.shape[1] else None
             try: qtd = int(float(v)) if pd.notna(v) else 0
             except: qtd = 0
             if qtd > 0:
@@ -241,21 +337,62 @@ def read_pmp(fb, log):
 
 def read_turnos(fb):
     aba = _get_aba("INPUTTURNOS")
+    _DEFAULTS = {"A": 7.5, "B": 14.25, "C": 19.5}
     try:
         df = pd.read_excel(BytesIO(fb), sheet_name=aba, header=None)
-        hA = float(df.iloc[0,1]) if pd.notna(df.iloc[0,1]) else 7.5
-        hB = float(df.iloc[0,2]) if pd.notna(df.iloc[0,2]) else 14.25
-        hC = float(df.iloc[0,3]) if pd.notna(df.iloc[0,3]) else 19.5
+    except:
+        return _DEFAULTS, False
+    try:
+        # 1) Busca por label de turno: procura linha com "TURNO A" ou "A" nas colunas
+        _CANDS_A = {"turno a","a","ta","t.a","turno_a","horas a","h a","h.a"}
+        _CANDS_B = {"turno b","b","tb","t.b","turno_b","horas b","h b","h.b"}
+        _CANDS_C = {"turno c","c","tc","t.c","turno_c","horas c","h c","h.c"}
+        col_A = col_B = col_C = None
+        hdr_row = None
+        for r in range(min(5, len(df))):
+            for c in range(min(10, df.shape[1])):
+                v = _norm(str(df.iloc[r, c])) if pd.notna(df.iloc[r, c]) else ""
+                if v in _CANDS_A and col_A is None: col_A = c; hdr_row = r
+                elif v in _CANDS_B and col_B is None: col_B = c
+                elif v in _CANDS_C and col_C is None: col_C = c
+        if col_A is not None and col_B is not None and col_C is not None and hdr_row is not None:
+            val_row = hdr_row + 1 if hdr_row + 1 < len(df) else hdr_row
+            def _rv(r, c):
+                v = df.iloc[r, c]
+                return float(v) if pd.notna(v) else None
+            hA = _rv(val_row, col_A) or _DEFAULTS["A"]
+            hB = _rv(val_row, col_B) or _DEFAULTS["B"]
+            hC = _rv(val_row, col_C) or _DEFAULTS["C"]
+            return {"A": hA, "B": hB, "C": hC}, True
+        # 2) Fallback posicional: procura primeira linha com 3+ valores numéricos >= 1
+        for r in range(min(5, len(df))):
+            nums = []
+            for c in range(1, min(8, df.shape[1])):
+                v = df.iloc[r, c]
+                if pd.notna(v):
+                    try:
+                        f = float(v)
+                        if f >= 1: nums.append((c, f))
+                    except: pass
+            if len(nums) >= 3:
+                return {"A": nums[0][1], "B": nums[1][1], "C": nums[2][1]}, True
+        # 3) Fallback original: linha 0, colunas 1/2/3
+        hA = float(df.iloc[0,1]) if df.shape[1] > 1 and pd.notna(df.iloc[0,1]) else _DEFAULTS["A"]
+        hB = float(df.iloc[0,2]) if df.shape[1] > 2 and pd.notna(df.iloc[0,2]) else _DEFAULTS["B"]
+        hC = float(df.iloc[0,3]) if df.shape[1] > 3 and pd.notna(df.iloc[0,3]) else _DEFAULTS["C"]
         return {"A": hA, "B": hB, "C": hC}, True
     except:
-        return {"A": 7.5, "B": 14.25, "C": 19.5}, False
+        return _DEFAULTS, False
 
 def read_tempo(fb, log):
     aba = _get_aba("INPUTTEMPO")
     try:
-        df = pd.read_excel(BytesIO(fb), sheet_name=aba, header=0)
+        df = pd.read_excel(BytesIO(fb), sheet_name=aba, header=None)
     except Exception as e:
         raise ValueError(f"Não foi possível ler '{aba}': {e}\n\n{ABA_FORMATOS['INPUTTEMPO']}")
+    mp = COL_MAP["INPUTTEMPO"]
+    hdr = _find_header_row(df, list(mp.values()))
+    df = _apply_header(df, hdr, log, aba)
     log.append(f"✅ INPUTTEMPO lido (aba: '{aba}'): {df.shape[0]}L")
     mp = COL_MAP["INPUTTEMPO"]
     # pc_trat is optional — try to find it, fall back to None
@@ -281,9 +418,12 @@ def read_tempo(fb, log):
 def read_dist(fb, log):
     aba = _get_aba("INPUTDISTRIBUIÇÃO")
     try:
-        df = pd.read_excel(BytesIO(fb), sheet_name=aba, header=0)
+        df = pd.read_excel(BytesIO(fb), sheet_name=aba, header=None)
     except Exception as e:
         raise ValueError(f"Não foi possível ler '{aba}': {e}\n\n{ABA_FORMATOS['INPUTDISTRIBUIÇÃO']}")
+    mp = COL_MAP["INPUTDISTRIBUIÇÃO"]
+    hdr = _find_header_row(df, list(mp.values()))
+    df = _apply_header(df, hdr, log, aba)
     log.append(f"✅ INPUTDISTRIBUIÇÃO lido (aba: '{aba}'): {df.shape[0]}L")
     log.append(f"   Colunas brutas: {list(df.columns)}")
     mp = COL_MAP["INPUTDISTRIBUIÇÃO"]
@@ -307,12 +447,28 @@ def read_dist(fb, log):
 def read_aplic(fb, log):
     aba = _get_aba("INPUTAPLICAÇÃO")
     try:
-        df = pd.read_excel(BytesIO(fb), sheet_name=aba, header=0)
+        df = pd.read_excel(BytesIO(fb), sheet_name=aba, header=None)
     except Exception as e:
         raise ValueError(f"Não foi possível ler '{aba}': {e}\n\n{ABA_FORMATOS['INPUTAPLICAÇÃO']}")
+    # Para INPUTAPLICAÇÃO os candidatos de cabeçalho são: centro, peça e pc_trat
+    _aplic_cands = COL_MAP["INPUTTEMPO"]["centro"] + COL_MAP["INPUTTEMPO"]["peca"] + \
+                   ["PÇ/TRAT","PC/TRAT","PEÇA\nTRATOR","PEÇA TRATOR","Descrição","Descricao","DESCRICAO"]
+    hdr = _find_header_row(df, [_aplic_cands])
+    df = _apply_header(df, hdr, log, aba)
     log.append(f"✅ INPUTAPLICAÇÃO lido (aba: '{aba}'): {df.shape[0]}L")
-    # Sempre usa índice posicional: coluna 0 = centro, coluna 1 = peça/referência
-    df = df.rename(columns={df.columns[0]: "centro", df.columns[1]: "peca"})
+    # Busca centro e peça por nome primeiro; fallback posicional (col 0 / col 1)
+    _cen_cands = COL_MAP["INPUTTEMPO"]["centro"]
+    _pec_cands = COL_MAP["INPUTTEMPO"]["peca"]
+    _norm_map = {_norm(str(c)): c for c in df.columns}
+    _col_cen = next((c for c in _cen_cands if c in df.columns), None) or \
+               next((_norm_map[_norm(c)] for c in _cen_cands if _norm(c) in _norm_map), None) or \
+               df.columns[0]
+    _col_pec = next((c for c in _pec_cands if c in df.columns and c != _col_cen), None) or \
+               next((_norm_map[_norm(c)] for c in _pec_cands if _norm(c) in _norm_map and _norm_map[_norm(c)] != _col_cen), None) or \
+               df.columns[1]
+    if _col_cen != df.columns[0] or _col_pec != df.columns[1]:
+        log.append(f"   Centro='{_col_cen}' Peça='{_col_pec}' encontrados por nome")
+    df = df.rename(columns={_col_cen: "centro", _col_pec: "peca"})
 
     pc_trat_candidates = ["PEÇA\nTRATOR","PÇ/TRAT","PC/TRAT","PCTRAT","Peça Trator","pc_trat",
                           "ERA PEÇA\nTRATOR","ERA PEÇA TRATOR","ERA PECA TRATOR","ERA PECA\nTRATOR",
@@ -2073,6 +2229,145 @@ def exportar_cenario_vs_base(res_base, res_cenario, meses_lista, nome_cenario, r
     # Sheet padrão já foi renomeada para "ANO Base" — nada a remover
     wb.save(out); out.seek(0); return out
 
+def _localizar_dados_xl(ws_r):
+    """
+    Extrai dados de uma aba do Excel de referência buscando por labels,
+    sem depender de posições fixas de linha/coluna.
+    Retorna: {"op_A", "op_B", "op_C", "total", "labor", "centros": {cen: {...}}}
+    """
+    MAX_R, MAX_C = 160, 55
+    def _nv(v):
+        return re.sub(r'\s+', ' ', str(v).upper().strip()) if v is not None else ""
+
+    # Carregar planilha em memória (apenas células não-nulas)
+    grid = {}
+    for r in range(1, MAX_R + 1):
+        for c in range(1, MAX_C + 1):
+            v = ws_r.cell(r, c).value
+            if v is not None:
+                grid[(r, c)] = v
+
+    result = {"op_A": 0, "op_B": 0, "op_C": 0, "total": 0, "labor": None, "centros": {}}
+
+    # ── 1. Encontrar colunas de % ocupação e turno ativo via sub-cabeçalhos ──
+    col_ocup_A = col_ativo_A = None
+    for (r, c), v in sorted(grid.items()):
+        n = _nv(v)
+        if "OCUP" in n and col_ocup_A is None:
+            # Confirma que há "TURNO A/B/C" na linha anterior ou mesma linha
+            for dc in range(0, 4):
+                if _nv(grid.get((r - 1, c + dc))) == "TURNO A" or _nv(grid.get((r, c + dc))) == "TURNO A":
+                    col_ocup_A = c + dc
+                    break
+        if ("ATIVO" in n or "TURNO ATIVO" in n) and col_ativo_A is None:
+            for dc in range(0, 4):
+                if _nv(grid.get((r - 1, c + dc))) == "TURNO A" or _nv(grid.get((r, c + dc))) == "TURNO A":
+                    col_ativo_A = c + dc
+                    break
+        if col_ocup_A and col_ativo_A:
+            break
+
+    # Fallback: inferir pelas linhas de dados (ocup = decimal 0-3, ativo = 0 ou 1)
+    if col_ocup_A is None or col_ativo_A is None:
+        for (r, c), v in sorted(grid.items()):
+            if c > 5 or not (v and re.match(r'^CEN\d+', str(v).strip().upper())):
+                continue
+            row_nums = {cc: grid.get((r, cc)) for cc in range(c + 1, c + 15) if grid.get((r, cc)) is not None}
+            pct_cols = [cc for cc, vv in row_nums.items() if _is_pct(vv)]
+            bin_cols = [cc for cc, vv in row_nums.items() if _is_bin(vv) and cc not in pct_cols]
+            if pct_cols and bin_cols:
+                col_ocup_A = col_ocup_A or min(pct_cols)
+                col_ativo_A = col_ativo_A or min(bin_cols)
+                break
+
+    # ── 2. Ler dados dos centros ──────────────────────────────────────────────
+    for (r, c), v in sorted(grid.items()):
+        if c > 5 or not (v and re.match(r'^CEN\d+', str(v).strip().upper())):
+            continue
+        cen = str(v).strip()
+        if col_ocup_A and col_ativo_A:
+            result["centros"][cen] = {
+                "ocup_A":  safe_float(grid.get((r, col_ocup_A))),
+                "ocup_B":  safe_float(grid.get((r, col_ocup_A + 1))),
+                "ativo_A": safe_int(grid.get((r, col_ativo_A))),
+                "ativo_B": safe_int(grid.get((r, col_ativo_A + 1))),
+                "ativo_C": safe_int(grid.get((r, col_ativo_A + 2))),
+            }
+        else:
+            # Último recurso: varrer colunas à direita separando por tipo
+            pcts, bins = [], []
+            for dc in range(1, 20):
+                vv = grid.get((r, c + dc))
+                if vv is None: continue
+                if _is_pct(vv): pcts.append(safe_float(vv))
+                elif _is_bin(vv) and len(pcts) >= 2: bins.append(safe_int(vv))
+            result["centros"][cen] = {
+                "ocup_A":  pcts[0] if pcts else 0.0,
+                "ocup_B":  pcts[1] if len(pcts) > 1 else 0.0,
+                "ativo_A": bins[0] if bins else 0,
+                "ativo_B": bins[1] if len(bins) > 1 else 0,
+                "ativo_C": bins[2] if len(bins) > 2 else 0,
+            }
+
+    # ── 3. TOTAL DE OPERADORES ────────────────────────────────────────────────
+    for (r, c), v in sorted(grid.items()):
+        if "TOTAL DE OPERADORES" not in _nv(v) and "TOTAL OPERADORES" not in _nv(v):
+            continue
+        if col_ativo_A:
+            result["op_A"] = safe_int(grid.get((r, col_ativo_A)))
+            result["op_B"] = safe_int(grid.get((r, col_ativo_A + 1)))
+            result["op_C"] = safe_int(grid.get((r, col_ativo_A + 2)))
+        else:
+            nums = []
+            for dc in range(1, 25):
+                vv = grid.get((r, c + dc))
+                if vv is not None:
+                    try: nums.append(int(float(vv)))
+                    except: pass
+                if len(nums) >= 3: break
+            if len(nums) >= 3:
+                result["op_A"], result["op_B"], result["op_C"] = nums[0], nums[1], nums[2]
+        break
+
+    # ── 4. TOTAL FUNCIONÁRIOS ─────────────────────────────────────────────────
+    for (r, c), v in sorted(grid.items()):
+        n = _nv(v)
+        if "TOTAL FUNCIONÁRIOS" in n or "TOTAL FUNCIONARIOS" in n:
+            for dc in range(1, 30):
+                vv = grid.get((r, c + dc))
+                if vv is not None:
+                    try: result["total"] = int(float(vv)); break
+                    except: pass
+            break
+
+    # ── 5. PROD. LABOR TOTAL ──────────────────────────────────────────────────
+    for (r, c), v in sorted(grid.items()):
+        n = _nv(v)
+        if "LABOR TOTAL" in n or "PROD. LABOR TOTAL" in n or "PROD LABOR TOTAL" in n:
+            for dc in range(1, 15):
+                vv = grid.get((r, c + dc))
+                if vv is not None:
+                    try:
+                        f = float(vv)
+                        result["labor"] = f if f <= 1.5 else f / 100.0
+                        break
+                    except: pass
+            break
+
+    return result
+
+def _is_pct(v):
+    """Retorna True se o valor parece ser % de ocupação (decimal 0–3, não inteiro 0/1)."""
+    try:
+        f = float(v)
+        return 0.0 <= f <= 3.0 and f not in (0.0, 1.0)
+    except: return False
+
+def _is_bin(v):
+    """Retorna True se o valor é 0 ou 1 (flag ativo/inativo)."""
+    try: return int(float(v)) in (0, 1) and float(v) == int(float(v))
+    except: return False
+
 @st.cache_data(show_spinner=False)
 def comparar_com_excel_cached(res_hash, _res_app, file_hash, _file_bytes, _tempo, _dist, _aplic, _pmp, _dias, _horas_turno, _thresholds, _suporte_cfg):
     return comparar_com_excel(_res_app, _file_bytes, _tempo, _dist, _aplic, _pmp, _dias, _horas_turno, _thresholds, _suporte_cfg)
@@ -2125,9 +2420,9 @@ def comparar_com_excel(res_app, file_bytes, tempo, dist, aplic, pmp, dias, horas
         ws_r=wb[aba]; d=dias.get(mes,0)
         if d==0: continue
         minA=d*hA*60; minB=d*hB*60
-        xl_opA=safe_int(ws_r.cell(89,27).value); xl_opB=safe_int(ws_r.cell(89,28).value)
-        xl_opC=safe_int(ws_r.cell(89,29).value); xl_tot=safe_int(ws_r.cell(96,27).value)
-        xl_labor=safe_float(ws_r.cell(101,30).value)
+        _xl = _localizar_dados_xl(ws_r)
+        xl_opA=_xl["op_A"]; xl_opB=_xl["op_B"]; xl_opC=_xl["op_C"]
+        xl_tot=_xl["total"]; xl_labor=_xl["labor"]
         dA=r_app["op_A"]-xl_opA; dB=r_app["op_B"]-xl_opB; dC=r_app["op_C"]-xl_opC; dT=r_app["total"]-xl_tot
         if dT==0 and dA==0 and dB==0 and dC==0: status="✅ Igual"
         elif abs(dT)<=2: status="🟡 Pequena diferença"
@@ -2135,11 +2430,7 @@ def comparar_com_excel(res_app, file_bytes, tempo, dist, aplic, pmp, dias, horas
         resumo_rows.append({"Mês":mes,"Status":status,"CEN A App":r_app["op_A"],"CEN A Excel":xl_opA,"Δ A":f"{dA:+d}","CEN B App":r_app["op_B"],"CEN B Excel":xl_opB,"Δ B":f"{dB:+d}","CEN C App":r_app["op_C"],"CEN C Excel":xl_opC,"Δ C":f"{dC:+d}","Total App":r_app["total"],"Total Excel":xl_tot,"Δ Total":f"{dT:+d}","Labor App":f"{r_app['prod_labor_tot']:.1%}","Labor Excel":f"{xl_labor:.1%}" if xl_labor else "—"})
         if status=="✅ Igual": continue
         agg_mes=agg_all[agg_all.mes==mes].copy()
-        centros_xl={}
-        for r_row in range(69,89):
-            cen_val=ws_r.cell(r_row,23).value
-            if not cen_val: continue
-            centros_xl[str(cen_val).strip()]={"ocup_A":safe_float(ws_r.cell(r_row,24).value),"ocup_B":safe_float(ws_r.cell(r_row,25).value),"ativo_A":safe_int(ws_r.cell(r_row,27).value),"ativo_B":safe_int(ws_r.cell(r_row,28).value),"ativo_C":safe_int(ws_r.cell(r_row,29).value)}
+        centros_xl=_xl["centros"]
         for _,row in agg_mes.iterrows():
             try:
                 cen=row.centro; mc=row.min_ciclo; qtd_app=row.qtd_total; idx_medio=row.indice_medio
@@ -2366,7 +2657,48 @@ with st.spinner("Lendo planilha..."):
     except Exception as e:
         st.error(f"🔴 Erro inesperado: {e}"); st.stop()
 
-st.success(f"✅ {len(aplic)} combinações · {pmp.modelo.nunique()} modelos · {pmp.mes.nunique()} meses")
+# ── Card de resumo de leitura ─────────────────────────────────────────────
+_norm_warns = [l for l in st.session_state.get("log_leitura",[]) if "via normalização" in l or "via norm" in l]
+_blank_warns = [l for l in st.session_state.get("log_leitura",[]) if "linha(s) em branco" in l]
+_pc_warn = next((l for l in st.session_state.get("log_leitura",[]) if "PÇ/TRAT lido" in l and "INPUTTEMPO" in l), None)
+
+def _leitura_row(icon, aba, detalhe, aviso=""):
+    av_html = f'<span style="color:#FFD600;font-size:10px;margin-left:6px">{aviso}</span>' if aviso else ""
+    return f'''<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #2A2A2A">
+  <span style="font-size:14px">{icon}</span>
+  <span style="font-size:11px;font-weight:700;color:#7BC67A;min-width:130px">{aba}</span>
+  <span style="font-size:11px;color:#CCCCCC">{detalhe}</span>{av_html}
+</div>'''
+
+_meses_com_demanda = pmp.mes.nunique()
+_dias_ok = sum(1 for d in dias.values() if d > 0)
+_pc_info = ""
+if _pc_warn:
+    _m = re.search(r'(\d+) linha\(s\) com valor >1', _pc_warn)
+    if _m: _pc_info = f"· {_m.group(1)} peça(s) com PÇ/TRAT>1"
+
+_turnos_info = f"A={turnos_arq.get('A',7.5):.2f}h · B={turnos_arq.get('B',14.25):.2f}h · C={turnos_arq.get('C',19.5):.2f}h"
+_turnos_aviso = "" if _turnos_ok else "⚠️ usando padrão"
+
+_rows_html = "".join([
+    _leitura_row("✅","INPUTPMP",       f"{pmp.modelo.nunique()} modelos · {_meses_com_demanda} meses com demanda · {_dias_ok} meses com dias >0"),
+    _leitura_row("✅","INPUTTEMPO",     f"{len(tempo)} combinações centro+peça {_pc_info}"),
+    _leitura_row("✅","INPUTDISTRIBUIÇÃO", f"{len(dist)} combinações"),
+    _leitura_row("✅","INPUTAPLICAÇÃO", f"{len(aplic)} combinações ativas · {aplic.modelo.nunique()} modelos"),
+    _leitura_row("✅" if _turnos_ok else "⚠️","INPUTTURNOS", _turnos_info, _turnos_aviso),
+])
+
+_extra_html = ""
+if _norm_warns:
+    _extra_html += f'<div style="margin-top:6px;font-size:10px;color:#FFD600">ℹ️ {len(_norm_warns)} coluna(s) encontrada(s) via nome aproximado (acento/espaço diferente) — verifique aba Dados de Input se quiser confirmar</div>'
+if _blank_warns:
+    _extra_html += f'<div style="font-size:10px;color:#FFD600">ℹ️ Linhas em branco ignoradas em: {", ".join(w.split("[")[1].split("]")[0] for w in _blank_warns if "[" in w)}</div>'
+
+st.markdown(f'''<div style="background:#0D1F0D;border:1px solid #2A4A2A;border-radius:10px;padding:12px 16px;margin:8px 0">
+  <div style="font-size:12px;font-weight:700;color:#FFDE00;margin-bottom:8px">📋 Dados carregados</div>
+  {_rows_html}
+  {_extra_html}
+</div>''', unsafe_allow_html=True)
 erros,alertas,oks=validar(pmp,tempo,dist,aplic,dias)
 n_prob=len(erros)+len(alertas)
 
