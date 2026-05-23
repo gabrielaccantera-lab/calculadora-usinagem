@@ -55,6 +55,13 @@ st.markdown("""
 .tp{display:inline-block;border-radius:20px;padding:1px 8px;font-size:10px;font-weight:700;margin:0 1px;}
 .tpA{background:#1F4D19;color:#92D050;} .tpB{background:#3D2D00;color:#FFDE00;} .tpC{background:#0D2040;color:#00B0F0;}
 .gauge-wrap{text-align:center;padding:6px 0;}
+/* ── Tab-nav via radio ── */
+div[data-testid="stRadio"]:has(div[role="radiogroup"]>label:nth-child(5)){margin-bottom:0!important;}
+div[data-testid="stRadio"]:has(div[role="radiogroup"]>label:nth-child(5)) div[role="radiogroup"]{gap:0!important;flex-wrap:nowrap;border-bottom:2px solid #2a2a2a;padding-bottom:0;}
+div[data-testid="stRadio"]:has(div[role="radiogroup"]>label:nth-child(5)) div[role="radiogroup"]>label{background:transparent;border:1px solid transparent;border-bottom:2px solid transparent;border-radius:4px 4px 0 0;padding:9px 15px!important;margin-bottom:-2px;cursor:pointer;font-size:13px;color:#777;transition:color .15s;}
+div[data-testid="stRadio"]:has(div[role="radiogroup"]>label:nth-child(5)) div[role="radiogroup"]>label:hover{color:#ccc;background:#151515;}
+div[data-testid="stRadio"]:has(div[role="radiogroup"]>label:nth-child(5)) div[role="radiogroup"]>label:has(input:checked){color:#FFDE00;border-color:#2a2a2a #2a2a2a transparent;border-bottom:2px solid #FFDE00;background:#0d1a0d;}
+div[data-testid="stRadio"]:has(div[role="radiogroup"]>label:nth-child(5)) div[role="radiogroup"]>label>div:first-child{display:none!important;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -2793,7 +2800,8 @@ with st.sidebar:
                 vA=c1.number_input("A",0,10,defs["A"],key=f"s_{key}_A"); vB=c2.number_input("B",0,10,defs["B"],key=f"s_{key}_B"); vC=c3.number_input("C",0,10,defs["C"],key=f"s_{key}_C")
                 suporte_cfg[key]={"modo":"manual","A":vA,"B":vB,"C":vC}
 
-tab_vis,tab_inp,tab_mem,tab_res,tab_cen,tab_cmp,tab_exp=st.tabs(["🏠 Visão Geral","📂 Dados de Input","🔬 Como foi Calculado","📊 Resultado por Mês","🎯 Cenários","🔄 Comparar com Excel","📥 Exportar"])
+_ABA_NAMES = ["🏠 Visão Geral","📂 Dados de Input","🔬 Como foi Calculado","📊 Resultado por Mês","🎯 Cenários","🔄 Comparar com Excel","📥 Exportar"]
+_aba = st.radio("", _ABA_NAMES, horizontal=True, key="aba_ativa", label_visibility="collapsed")
 
 @st.cache_data(show_spinner=False)
 def calcular_cached(pmp_hash,_pmp,_tempo,_dist,_aplic,aplic_hash,dias_hash,dias,hA,hB,hC,heA,heB,heC,tA,tB,tC,_sup):
@@ -2807,7 +2815,7 @@ res_base,df_interm,agg_interm=calcular_cached(pmp_hash,pmp,tempo,dist,aplic,apli
 st.session_state["last_res_base"]=res_base
 
 # ── TAB 1 VISÃO GERAL
-with tab_vis:
+if _aba == "🏠 Visão Geral":
     st.plotly_chart(grafico_cenarios({"Base":res_base}),use_container_width=True)
     meses_ok=[m for m in MESES if res_base.get(m)]
     if meses_ok:
@@ -2821,7 +2829,7 @@ with tab_vis:
         c4.metric("Variação anual",f"{max_total-min_total} func.")
 
 # ── TAB 2 INPUTS
-with tab_inp:
+if _aba == "📂 Dados de Input":
     st.markdown('<div class="jd-section">Dados carregados</div>',unsafe_allow_html=True)
     aba_inp=st.radio("Qual dado conferir?",["INPUTPMP","INPUTTEMPO","INPUTDISTRIBUIÇÃO","INPUTAPLICAÇÃO"],horizontal=True)
     if aba_inp=="INPUTPMP":
@@ -2866,7 +2874,7 @@ def _render_glossario():
 """)
 
 # ── TAB 3 MEMÓRIA
-with tab_mem:
+if _aba == "🔬 Como foi Calculado":
     st.markdown('<div class="jd-section">Como foi calculado</div>', unsafe_allow_html=True)
     _render_glossario()
     st.markdown('<div class="aviso-ok">💡 Selecione <b>📅 ANO FY26</b> para ver a memória consolidada do período anual, ou escolha um mês específico para detalhar aquele período.</div>', unsafe_allow_html=True)
@@ -2878,7 +2886,7 @@ with tab_mem:
         show_memoria(res_base[mes_mem], mes_mem, df_interm, agg_interm, horas_turno, thresholds)
 
 # ── TAB 4 RESULTADOS
-with tab_res:
+if _aba == "📊 Resultado por Mês":
     st.markdown('<div class="jd-section">Resultado por mês</div>',unsafe_allow_html=True)
     _render_glossario()
     st.markdown('<div class="aviso-ok">💡 Selecione <b>📅 ANO</b> para ver o resumo consolidado anual, ou escolha um mês específico.</div>', unsafe_allow_html=True)
@@ -3013,7 +3021,7 @@ with tab_res:
         show_tabela(r)
 
 # ── TAB 5 CENÁRIOS
-with tab_cen:
+if _aba == "🎯 Cenários":
     if "cenarios" not in st.session_state: st.session_state.cenarios={}
     st.markdown('<div class="jd-section">Simulador de cenários</div>',unsafe_allow_html=True)
     st.markdown('<div class="aviso-ok">🎯 <b>Como usar:</b> dê um nome, escolha mês ou ANO, ajuste os turnos por centro à vontade (sem travar a tela) e clique em <b>Salvar</b>. Até 4 cenários podem ser comparados no gráfico ao mesmo tempo.</div>', unsafe_allow_html=True)
@@ -3301,8 +3309,9 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
                     }
                     st.success(f"✅ '{novo_nome}' salvo — {_label_periodo} configurado(s)!")
                     st.session_state["_cen_criar_open"] = True
-                    if "cen_novo_nome" in st.session_state:
-                        del st.session_state["cen_novo_nome"]
+                    for _k in ["cen_novo_nome", "cen_meses_sel"]:
+                        if _k in st.session_state:
+                            del st.session_state[_k]
                     st.rerun()
 
     if st.session_state.cenarios:
@@ -3520,7 +3529,7 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
         st.info("Nenhum cenário criado ainda.")
 
 # ── TAB 6 COMPARAÇÃO
-with tab_cmp:
+if _aba == "🔄 Comparar com Excel":
     st.markdown('<div class="jd-section">Comparação com o Excel atual</div>',unsafe_allow_html=True)
     st.markdown('<div class="aviso-warn">🔄 Esta aba compara automaticamente os resultados calculados pelo app com as abas mensais do seu arquivo Excel (ex: <b>NovFY26, DezFY26…</b>). A comparação usa cache — só recalcula quando você muda thresholds, horas de turno ou sobe um novo arquivo.</div>', unsafe_allow_html=True)
     cache_key=f"cmp_{hash(str(dias))}_{hash(str(thresholds))}_{hash(str(horas_turno))}"
@@ -3574,7 +3583,7 @@ with tab_cmp:
         st.warning("Nenhuma aba mensal encontrada (NovFY26, DezFY26…)")
 
 # ── TAB 7 EXPORTAR
-with tab_exp:
+if _aba == "📥 Exportar":
     st.markdown('<div class="jd-section">Exportação</div>',unsafe_allow_html=True)
 
     sub_tab, sub_res = st.tabs(["📋 Tabelona completa — layout INPUTDISTRIBUIÇÃO", "📊 Resultados"])
