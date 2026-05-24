@@ -1404,9 +1404,11 @@ def build_cp_data_from_meses(resultados, tempo, dist, aplic, pmp, dias_por_mes, 
                    for k in ["lavadora","gravacao","preset","coringa","facilitador"]}
             sup_tot_A=sum(sup_d[k]["A"] for k in sup_d); sup_tot_B=sum(sup_d[k]["B"] for k in sup_d); sup_tot_C=sum(sup_d[k]["C"] for k in sup_d)
         else:
-            sup_d={"lavadora":{"A":1,"B":1,"C":0},"gravacao":{"A":1,"B":1,"C":0},
+            _defs={"lavadora":{"A":1,"B":1,"C":0},"gravacao":{"A":1,"B":1,"C":0},
                    "preset":{"A":2,"B":1,"C":1},"coringa":{"A":1,"B":0,"C":0},"facilitador":{"A":1,"B":1,"C":0}}
-            sup_tot_A=1+1+2+1+1; sup_tot_B=1+1+1+0+1; sup_tot_C=0+0+1+0+0
+            _ops={"A":op_A,"B":op_B,"C":op_C}
+            sup_d={k:{t:(_defs[k][t] if _ops[t]>0 else 0) for t in "ABC"} for k in _defs}
+            sup_tot_A=sum(sup_d[k]["A"] for k in sup_d); sup_tot_B=sum(sup_d[k]["B"] for k in sup_d); sup_tot_C=sum(sup_d[k]["C"] for k in sup_d)
         tot_A=op_A+sup_tot_A; tot_B=op_B+sup_tot_B; tot_C=op_C+sup_tot_C
         h_todos=tot_A*dias_total*heA+tot_B*dias_total*heB+tot_C*dias_total*heC
         res_ano = {"centros":df_c,"op_A":op_A,"op_B":op_B,"op_C":op_C,
@@ -2811,14 +2813,15 @@ _ABA_NAMES = ["🏠 Visão Geral","📂 Dados de Input","🔬 Como foi Calculado
 _aba = st.radio("", _ABA_NAMES, horizontal=True, key="aba_ativa", label_visibility="collapsed")
 
 @st.cache_data(show_spinner=False)
-def calcular_cached(pmp_hash,_pmp,_tempo,_dist,_aplic,aplic_hash,dias_hash,dias,hA,hB,hC,heA,heB,heC,tA,tB,tC,_sup):
+def calcular_cached(pmp_hash,_pmp,_tempo,_dist,_aplic,aplic_hash,dias_hash,dias,hA,hB,hC,heA,heB,heC,tA,tB,tC,sup_hash,_sup):
     return calcular(_pmp,_tempo,_dist,_aplic,dias,{"A":hA,"B":hB,"C":hC},{"A":tA,"B":tB,"C":tC},_sup,horas_efetivas={"A":heA,"B":heB,"C":heC},retornar_intermediarios=True)
 
 _h = st.session_state.get(f"_hashes_{_file_id}", {})
 pmp_hash  = _h.get("pmp",  hash(pmp.to_json()))
 dias_hash = _h.get("dias", hash(str(dias)))
 aplic_hash= _h.get("aplic",hash(aplic.to_json()))
-res_base,df_interm,agg_interm=calcular_cached(pmp_hash,pmp,tempo,dist,aplic,aplic_hash,dias_hash,dias,horas_turno["A"],horas_turno["B"],horas_turno["C"],horas_efetivas["A"],horas_efetivas["B"],horas_efetivas["C"],thresholds["A"],thresholds["B"],thresholds["C"],suporte_cfg)
+_sup_hash = hash(str(suporte_cfg))
+res_base,df_interm,agg_interm=calcular_cached(pmp_hash,pmp,tempo,dist,aplic,aplic_hash,dias_hash,dias,horas_turno["A"],horas_turno["B"],horas_turno["C"],horas_efetivas["A"],horas_efetivas["B"],horas_efetivas["C"],thresholds["A"],thresholds["B"],thresholds["C"],_sup_hash,suporte_cfg)
 st.session_state["last_res_base"]=res_base
 
 # ── TAB 1 VISÃO GERAL
@@ -4088,7 +4091,7 @@ Inclui totais de minutos/horas/dias, bloco de DADOS AUTOMÁTICOS e aba ANO.
             st.download_button("📥 Baixar resultado base",data=exportar_cached(_exp_hash, res_base, tempo, dist, aplic, pmp, _file_bytes=file_bytes),file_name="resultado_usinagem.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_res_base")
         with c2:
             st.markdown("**Base tratada (pós-JOIN)**")
-            _base_cache_key = f"base_tratada_{_file_id}"
+            _base_cache_key = f"bt_{_exp_hash}"
             if st.session_state.get("_base_cache_key") != _base_cache_key:
                 _buf_base = BytesIO(); df_interm.to_excel(_buf_base, index=False); _buf_base.seek(0)
                 st.session_state["base_tratada_cache"] = _buf_base.read()
