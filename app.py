@@ -2798,7 +2798,8 @@ with st.sidebar:
     except: pass
     suporte_cfg={}
     for key,label,defs in [("lavadora","Lavadora e Inspeção",{"A":1,"B":1,"C":0}),("gravacao","Gravação e Estanqueidade",{"A":1,"B":1,"C":0}),("preset","Preset",{"A":2,"B":1,"C":1}),("coringa","Coringa",{"A":1,"B":0,"C":0}),("facilitador","Facilitador",{"A":1,"B":1,"C":0})]:
-        with st.expander(f"🔧 {label}"):
+        _exp_open = st.session_state.get(f"m_{key}", "Automático") == "Manual"
+        with st.expander(f"🔧 {label}", expanded=_exp_open):
             modo=st.radio("Modo",["Automático","Manual"],key=f"m_{key}",horizontal=True,label_visibility="collapsed")
             if modo=="Automático":
                 st.caption(f"Padrão: A={defs['A']} · B={defs['B']} · C={defs['C']} · Zerado automaticamente em turnos sem operadores")
