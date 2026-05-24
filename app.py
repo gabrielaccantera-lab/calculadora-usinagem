@@ -2824,6 +2824,16 @@ aplic_hash= _h.get("aplic",hash(aplic.to_json()))
 _sup_hash = hash(str(suporte_cfg))
 res_base,df_interm,agg_interm=calcular_cached(pmp_hash,pmp,tempo,dist,aplic,aplic_hash,dias_hash,dias,horas_turno["A"],horas_turno["B"],horas_turno["C"],horas_efetivas["A"],horas_efetivas["B"],horas_efetivas["C"],thresholds["A"],thresholds["B"],thresholds["C"],_sup_hash,suporte_cfg)
 st.session_state["last_res_base"]=res_base
+_cfg_key = f"{_file_id}_{_sup_hash}_{hash(str(horas_turno)+str(horas_efetivas)+str(thresholds))}"
+
+# Invalida buffers de sessão quando qualquer config muda (suporte/horas/thresholds)
+if st.session_state.get("_last_cfg_key") != _cfg_key:
+    for _bk in ["tabelona_buf","tab_pura_buf","mem_base_ano","base_tratada_cache","_base_cache_key"]:
+        st.session_state.pop(_bk, None)
+    for _bk in list(st.session_state.keys()):
+        if _bk.startswith("mem_base_"):
+            st.session_state.pop(_bk, None)
+    st.session_state["_last_cfg_key"] = _cfg_key
 
 # ── TAB 1 VISÃO GERAL
 if _aba == "🏠 Visão Geral":
@@ -3031,9 +3041,32 @@ if _aba == "📊 Resultado por Mês":
         st.markdown(f'<div class="aviso-ok">📋 <b>{mes_r}</b> — {r["dias"]} dias &nbsp;|&nbsp; A: <b>{r["tot_A"]}</b> &nbsp;|&nbsp; B: <b>{r["tot_B"]}</b> &nbsp;|&nbsp; C: <b>{r["tot_C"]}</b> &nbsp;|&nbsp; <b>Total: {r["total"]} func.</b></div>',unsafe_allow_html=True)
         show_tabela(r)
 
+# ── Recomputa cenários stale (roda em todas as abas)
+if "cenarios" not in st.session_state: st.session_state.cenarios={}
+for _cn, _cv in st.session_state.cenarios.items():
+    if _cv.get("_cfg_key") != _cfg_key:
+        _ov_m = {k: v for k, v in _cv.get("overrides", {}).items() if k != "__ano__"}
+        _ov_a = _cv.get("overrides", {}).get("__ano__", {})
+        _eh_a = _cv.get("eh_ano", False)
+        if _eh_a and not _ov_m:
+            _cv["resultados"] = res_base
+        else:
+            _cv["resultados"] = calcular(pmp, tempo, dist, aplic, dias, horas_turno, thresholds, suporte_cfg,
+                                         horas_efetivas=horas_efetivas, overrides=_ov_m)
+        if _eh_a:
+            _dm_r = {m: res_base[m]["dias"] for m in MESES if res_base.get(m)}
+            _ck_r = f"_ano_exp_{_cn}_{_file_id}"
+            st.session_state[_ck_r] = build_cp_data_from_meses(
+                res_base, tempo, dist, aplic, pmp, _dm_r,
+                horas_turno, horas_efetivas, overrides_ano=_ov_a, suporte_cfg=suporte_cfg)
+            _cv["cp_data_ano"] = st.session_state[_ck_r][0]
+            _cv["res_ano_fy26"] = (calcular_ano_fy26(
+                st.session_state.get("_fb_anual"), _ov_a, horas_efetivas, suporte_cfg, horas_turno
+            ) or st.session_state[_ck_r][1])
+        _cv["_cfg_key"] = _cfg_key
+
 # ── TAB 5 CENÁRIOS
 if _aba == "🎯 Cenários":
-    if "cenarios" not in st.session_state: st.session_state.cenarios={}
     st.markdown('<div class="jd-section">Simulador de cenários</div>',unsafe_allow_html=True)
     st.markdown('<div class="aviso-ok">🎯 <b>Como usar:</b> dê um nome, escolha mês ou ANO, ajuste os turnos por centro à vontade (sem travar a tela) e clique em <b>Salvar</b>. Até 4 cenários podem ser comparados no gráfico ao mesmo tempo.</div>', unsafe_allow_html=True)
 
@@ -3315,6 +3348,7 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
                         "meses_configurados": list(meses_sel_raw),
                         "overrides": novo_ov_por_mes,
                         "eh_ano": eh_ano_novo,
+                        "_cfg_key": _cfg_key,
                     }
                     st.success(f"✅ '{novo_nome}' salvo — {_label_periodo} configurado(s)!")
                     st.session_state["_cen_criar_open"] = True
