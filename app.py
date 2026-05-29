@@ -1008,6 +1008,10 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
             ci_t=20+mi_t; _ec(ws_out,6,ci_t,mod_t,_F_CINZA,True,"000000",7,True,True); ws_out.column_dimensions[get_column_letter(ci_t)].width=7
         ws_out.row_dimensions[6].height=42
         _qtd_mes = {mod: int(_pmp_pivot.get("qtd", {}).get((mod, mes_t), 0)) for mod in modelos_lista}
+        # Linha 4: volumes PMP por modelo (igual ao Excel de referência)
+        for _mi4, _mod4 in enumerate(modelos_lista):
+            _q4 = _qtd_mes.get(_mod4, 0)
+            _ec(ws_out, 4, 20+_mi4, _q4 if _q4 else None, _F_AMAR, True, "000000", 8)
         ri_t=7
         for cen_t,peca_t in pares_cp:
             _dk = (cen_t, peca_t); _dr = _dist_idx.get(_dk); _tr = _tempo_idx.get(_dk)
@@ -1106,7 +1110,7 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
     _fb_ano = st.session_state.get("_fb_anual")
     _cp_data_ano = build_cp_data_anual(resultados, tempo, dist, aplic, pmp, file_bytes=_fb_ano)
     _horas_ano = read_horas_anual(_fb_ano)
-    gerar_aba_anual(wb_out, resultados, label="ANO", cp_data=_cp_data_ano, horas_anual=_horas_ano)
+    gerar_aba_anual(wb_out, resultados, label="ANO", cp_data=_cp_data_ano, horas_anual=_horas_ano, pmp=pmp, aplic=aplic)
     buf_out = BytesIO(); wb_out.save(buf_out); buf_out.seek(0)
     return buf_out
 
@@ -1119,19 +1123,26 @@ def build_cp_data_anual(resultados, tempo, dist, aplic, pmp, file_bytes=None):
                 ws_ref = wb_ref["AnoFY26"]
                 rows_ref = list(ws_ref.rows)
                 result = []
+                # Detecta formato pelo cabeçalho (linha 6, índice 5)
+                _hdr = [c.value for c in rows_ref[5]] if len(rows_ref) > 5 else []
+                _has_seq  = any(str(v or "").strip().upper() in ("SEQ","#") for v in _hdr[:3])
+                _has_perf = any(str(v or "").lower().startswith("perf") or str(v or "").lower().startswith("performance") for v in _hdr)
+                _off_ano  = 1 if _has_seq else 0
+                _is_ano   = 1 if _has_perf else 0
                 for row in rows_ref[6:]:
-                    vals = [c.value for c in row[:18]]
-                    if not vals[0] or not str(vals[0]).startswith("CEN"): continue
+                    vals = [c.value for c in row[:21]]
+                    if not str(vals[_off_ano] or "").startswith("CEN"): continue
                     try:
-                        cen  = str(vals[0]); peca = str(vals[1])
-                        pc_t = float(vals[3] or 1)
-                        tc   = float(vals[5] or 0); tl = float(vals[6] or 0)
-                        dc   = float(vals[7] or 0); vi = float(vals[8] or 1)
-                        dv   = float(vals[9] or 0); di = float(vals[10] or 1)
-                        idx  = float(vals[11] or 0)
-                        mc   = float(vals[15] or 0); ml = float(vals[16] or 0)
-                        qt   = int(vals[17] or 0)
-                        result.append((cen, peca, pc_t, tc, tl, dc, vi, dv, di, idx, mc, ml, qt))
+                        cen  = str(vals[_off_ano]); peca = str(vals[_off_ano+1])
+                        pc_t = float(vals[_off_ano+3] or 1)
+                        tc   = float(vals[_off_ano+5] or 0); tl = float(vals[_off_ano+6] or 0)
+                        dc   = float(vals[_off_ano+7] or 0); vi = float(vals[_off_ano+8] or 1)
+                        dv   = float(vals[_off_ano+9] or 0); di = float(vals[_off_ano+10] or 1)
+                        _po  = float(vals[_off_ano+11] or 1) if _is_ano else 1.0
+                        idx  = float(vals[_off_ano+11+_is_ano] or 0)
+                        mc   = float(vals[_off_ano+14+_is_ano] or 0); ml = float(vals[_off_ano+15+_is_ano] or 0)
+                        qt   = int(vals[_off_ano+16+_is_ano] or 0)
+                        result.append((cen, peca, pc_t, tc, tl, dc, vi, dv, di, _po, idx, mc, ml, qt))
                     except: pass
                 wb_ref.close()
                 if result: return result
@@ -1549,7 +1560,7 @@ def show_memoria_ano(res_base, df_intermediario, agg, horas_turno, thresholds):
                        key="dl_mem_ano")
 
 
-def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None, eh_cenario=False, ws_existente=None, res_ano_override=None):
+def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None, eh_cenario=False, ws_existente=None, res_ano_override=None, pmp=None, aplic=None):
     meses_com_dados = [(m, resultados[m]) for m in MESES if resultados.get(m)]
     if not meses_com_dados: return
     brd = Border(left=Side(style='thin',color='CCCCCC'),right=Side(style='thin',color='CCCCCC'),
@@ -1574,6 +1585,10 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None,
             if f>=0.40: return F_VERDE_a
             return F_BRANCO_a
         except: return F_BRANCO_a
+    modelos_lista_a = sorted(pmp["modelo"].unique().tolist()) if pmp is not None else []
+    n_mod_a = len(modelos_lista_a)
+    _aplic_set_a = set(zip(aplic["centro"], aplic["peca"], aplic["modelo"])) if aplic is not None else set()
+    _qtd_anual_a = {mod: int(pmp[pmp["modelo"]==mod]["qtd"].sum()) for mod in modelos_lista_a} if pmp is not None else {}
     n_meses=len(meses_com_dados); dias_ano=sum(r["dias"] for _,r in meses_com_dados)
     hA=meses_com_dados[0][1]["hA"]; hB=meses_com_dados[0][1]["hB"]; hC=meses_com_dados[0][1]["hC"]
     heA=meses_com_dados[0][1].get("heA",hA); heB=meses_com_dados[0][1].get("heB",hB); heC=meses_com_dados[0][1].get("heC",hC)
@@ -1670,9 +1685,12 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None,
     ws.row_dimensions[3].height=13
     ws.merge_cells("A4:O4"); _e(ws,4,1,"Nº DIAS TRABALHADOS",F_CINZA_H_a,True,"000000",8,False)
     _e(ws,4,16,dias_ano,F_VERDE_a,True,"FF0000",9); _e(ws,4,17,dias_ano,F_AMAR_a,True,"FF0000",9); _e(ws,4,18,dias_ano,F_AZUL_a,True,"FF0000",9)
+    # Linha 4: volumes PMP anuais por modelo
+    for _mi4a,_mod4a in enumerate(modelos_lista_a):
+        _q4a=_qtd_anual_a.get(_mod4a,0); _e(ws,4,20+_mi4a,_q4a if _q4a else None,PatternFill("solid",fgColor="FFDE00"),True,"000000",8)
     ws.row_dimensions[4].height=13
-    # LINHA 5 — agora 19 colunas fixas (adicionou Perf. Op.)
-    ws.merge_cells("A5:S5"); _e(ws,5,1,f"RESUMO DA CARGA — ANO ({dias_ano} dias / {n_meses} meses)",F_VD_JD_a,True,"FFFFFF",10,True)
+    # LINHA 5 — 19 colunas fixas + colunas de modelos
+    ws.merge_cells(f"A5:{get_column_letter(19+n_mod_a)}5"); _e(ws,5,1,f"RESUMO DA CARGA — ANO ({dias_ano} dias / {n_meses} meses)",F_VD_JD_a,True,"FFFFFF",10,True)
     ws.row_dimensions[5].height=18
     # CABEÇALHO — Perf. Op. entre Disponib. e Indice Ciclo
     hdrs_f=[("Máquina",F_CINZA2_a,"000000"),("PEÇA",F_CINZA2_a,"000000"),("DESCRIÇÃO",F_CINZA2_a,"000000"),("PÇ/TRAT",F_CINZA2_a,"000000"),("UM",F_CINZA2_a,"000000"),
@@ -1684,6 +1702,8 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None,
     largs=[9,8,16,6,5,9,9,8,8,8,8,8,9,8,8,8,12,12,8]
     for ci,(h,f,cor) in enumerate(hdrs_f,1):
         _e(ws,6,ci,h,f,True,cor,8,True,True); ws.column_dimensions[get_column_letter(ci)].width=largs[ci-1]
+    for mi_a,mod_a in enumerate(modelos_lista_a):
+        ci_a=20+mi_a; _e(ws,6,ci_a,mod_a,F_CINZA_a,True,"000000",7,True,True); ws.column_dimensions[get_column_letter(ci_a)].width=7
     ws.row_dimensions[6].height=42
     ri=7
     if cp_data:
@@ -1709,6 +1729,9 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None,
             _e(ws,ri,17,round(mc,4),F_BRANCO_a,False,"000000",8)
             _e(ws,ri,18,round(ml,4),F_BRANCO_a,False,"000000",8)
             _e(ws,ri,19,_qtd,F_BRANCO_a,False,"000000",8)
+            for mi_a2,mod_a2 in enumerate(modelos_lista_a):
+                ci_a2=20+mi_a2; v_a=_qtd_anual_a.get(mod_a2,0) if (cen,peca,mod_a2) in _aplic_set_a else 0
+                _e(ws,ri,ci_a2,v_a if v_a else None,F_CINZA_a if v_a else F_BRANCO_a,False,"000000",7)
             ws.row_dimensions[ri].height=13; ri+=1
     else:
         for cen in centros_ord:
@@ -3770,17 +3793,24 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                         ws_nov_t=wb_r[_aba_ref_t]
                         base_rows_t=list(ws_nov_t.iter_rows(min_row=7,max_row=63,min_col=1,max_col=87,values_only=True))
                         base_rows_t=[r for r in base_rows_t if r[0] and r[1]]
-                        modelos_xl_t=[str(ws_nov_t.cell(6,c).value) for c in range(19,88)
-                                      if ws_nov_t.cell(6,c).value and str(ws_nov_t.cell(6,c).value).startswith("MODELO")]
-                        modelo_col_idx={str(ws_nov_t.cell(6,c).value):(c-19) for c in range(19,88)
-                                        if ws_nov_t.cell(6,c).value and str(ws_nov_t.cell(6,c).value).startswith("MODELO")}
+                        # Detecta colunas de modelo: suporta formato antigo (linha 6 = "MODELO X")
+                        # e formato novo (linha 5 = "MODELO X", linha 6 = nome real como "5060E OOS")
+                        modelos_xl_t = []; modelo_col_idx = {}
+                        for _mc in range(19, 88):
+                            _v5 = ws_nov_t.cell(5, _mc).value
+                            _v6 = ws_nov_t.cell(6, _mc).value
+                            if _v5 and str(_v5).startswith("MODELO"):
+                                _mname = str(_v6) if _v6 else str(_v5)
+                                modelos_xl_t.append(_mname); modelo_col_idx[_mname] = _mc - 19
+                            elif _v6 and str(_v6).startswith("MODELO"):
+                                modelos_xl_t.append(str(_v6)); modelo_col_idx[str(_v6)] = _mc - 19
 
                         dados_mes_t={}
                         for mes_t,aba_t in MAPA_T.items():
                             if aba_t not in wb_r.sheetnames: continue
                             ws_m_t=wb_r[aba_t]
                             dados_mes_t[mes_t]={
-                                "main":list(ws_m_t.iter_rows(min_row=7,max_row=63,min_col=1,max_col=18,values_only=True)),
+                                "main":list(ws_m_t.iter_rows(min_row=7,max_row=63,min_col=1,max_col=21,values_only=True)),
                                 "vols":list(ws_m_t.iter_rows(min_row=7,max_row=63,min_col=19,max_col=87,values_only=True))}
                         wb_r.close()
 
@@ -3825,6 +3855,10 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                             _ec(ws_out,4,17,d_t,_F_VERDE,True,"FF0000",9)
                             _ec(ws_out,4,18,d_t,_F_AMAR,True,"FF0000",9)
                             _ec(ws_out,4,19,d_t,_F_AZUL,True,"FF0000",9)
+                            # Linha 4: volumes PMP por modelo (igual ao Excel de referência)
+                            for _mi4,_mod4 in enumerate(modelos_xl_t):
+                                _q4=int(pmp_mes_t[pmp_mes_t.modelo==_mod4]["qtd"].sum()) if _mod4 in pmp_mes_t.modelo.values else 0
+                                _ec(ws_out,4,20+_mi4,_q4 if _q4 else None,_F_AMAR,True,"000000",8)
                             ws_out.row_dimensions[4].height=13
 
                             ws_out.merge_cells(f"A5:{get_column_letter(19+len(modelos_xl_t))}5")
@@ -3850,26 +3884,33 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                 ws_out.column_dimensions[get_column_letter(ci_t)].width=7
                             ws_out.row_dimensions[6].height=42
 
+                            # Formato novo: SEQ em col A (+1) e perf_op entre disponib/indice (+1 extra)
+                            # base_row_t[0]=SEQ, [1]=MÁQUINA, [2]=REFERÊNCIA, [3]=DESCRIÇÃO
+                            # [4]=PEÇA TRAT, [5]=UM, [6]=t_ciclo, [7]=t_labor
+                            # [8]=div_carga, [9]=vol_int, [10]=div_volume, [11]=disponib
+                            # [12]=perf_op(novo), [13]=indice_ciclo, [14]=JA.A, [15]=JA.B
+                            # [16]=JA.C, [17]=TOTAL CICLOS, [18]=TOTAL LABOR, [19]=TOTAL PECAS(se existir)
+                            _aplic_set_tab = set(zip(aplic["centro"], aplic["peca"], aplic["modelo"]))
                             main_data_t=dm_t.get("main",[]); vols_data_t=dm_t.get("vols",[])
                             for ri_t_idx,base_row_t in enumerate(base_rows_t):
-                                cen_t=str(base_row_t[0]).strip(); peca_t=str(base_row_t[1]).strip()
+                                cen_t=str(base_row_t[1]).strip(); peca_t=str(base_row_t[2]).strip()
                                 ri_t=7+ri_t_idx
-                                tc_xl_t=base_row_t[5]; tl_xl_t=base_row_t[6]
-                                dc_xl_t=base_row_t[7]; vi_xl_t=base_row_t[8]; dv_xl_t=base_row_t[9]
-                                di_xl_t=base_row_t[10]; idx_xl_t=base_row_t[11]
+                                tc_xl_t=base_row_t[6]; tl_xl_t=base_row_t[7]
+                                dc_xl_t=base_row_t[8]; vi_xl_t=base_row_t[9]; dv_xl_t=base_row_t[10]
+                                di_xl_t=base_row_t[11]; idx_xl_t=base_row_t[13]
 
-                                mrow_t=main_data_t[ri_t_idx] if ri_t_idx<len(main_data_t) else [None]*18
-                                xl_pA_t=mrow_t[12] if len(mrow_t)>12 else None
-                                xl_pB_t=mrow_t[13] if len(mrow_t)>13 else None
-                                xl_ciclo_t=mrow_t[15] if len(mrow_t)>15 else None
-                                xl_pecas_t=mrow_t[17] if len(mrow_t)>17 else None
+                                mrow_t=main_data_t[ri_t_idx] if ri_t_idx<len(main_data_t) else [None]*21
+                                xl_pA_t=mrow_t[14] if len(mrow_t)>14 else None
+                                xl_pB_t=mrow_t[15] if len(mrow_t)>15 else None
+                                xl_ciclo_t=mrow_t[17] if len(mrow_t)>17 else None
+                                xl_pecas_t=mrow_t[19] if len(mrow_t)>19 else None
                                 # Lê os valores de distribuição do MÊS CORRENTE (não da aba estrutural)
                                 # para comparar corretamente com o INPUT
-                                dc_xl_t = mrow_t[7] if len(mrow_t)>7 else base_row_t[7]
-                                vi_xl_t = mrow_t[8] if len(mrow_t)>8 else base_row_t[8]
-                                dv_xl_t = mrow_t[9] if len(mrow_t)>9 else base_row_t[9]
-                                di_xl_t = mrow_t[10] if len(mrow_t)>10 else base_row_t[10]
-                                idx_xl_t = mrow_t[11] if len(mrow_t)>11 else base_row_t[11]
+                                dc_xl_t = mrow_t[8]  if len(mrow_t)>8  else base_row_t[8]
+                                vi_xl_t = mrow_t[9]  if len(mrow_t)>9  else base_row_t[9]
+                                dv_xl_t = mrow_t[10] if len(mrow_t)>10 else base_row_t[10]
+                                di_xl_t = mrow_t[11] if len(mrow_t)>11 else base_row_t[11]
+                                idx_xl_t = mrow_t[13] if len(mrow_t)>13 else base_row_t[13]
                                 vrow_t=dm_t.get("vols",[])[ri_t_idx] if dm_t.get("vols") and ri_t_idx<len(dm_t["vols"]) else []
 
                                 try: mc_t=float(agg_cp_t.loc[(cen_t,peca_t,mes_t),"min_ciclo"])
@@ -3884,8 +3925,7 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                 app_mod_v={}
                                 for mod_t2 in modelos_xl_t:
                                     qtd_t=int(pmp_mes_t[pmp_mes_t.modelo==mod_t2]["qtd"].sum()) if mod_t2 in pmp_mes_t.modelo.values else 0
-                                    fr_t=aplic_orig[(aplic_orig.centro==cen_t)&(aplic_orig.peca==peca_t)]
-                                    flag_t=int(fr_t[mod_t2].values[0]) if len(fr_t)>0 and mod_t2 in fr_t.columns and not pd.isna(fr_t[mod_t2].values[0] if len(fr_t)>0 else 0) else 0
+                                    flag_t = 1 if (cen_t, peca_t, mod_t2) in _aplic_set_tab else 0
                                     app_mod_v[mod_t2]=qtd_t*flag_t
                                 # Calcula total de peças direto do aplic+pmp (independente dos nomes do Excel)
                                 _aplic_models_cp = set(aplic[(aplic.centro==cen_t)&(aplic.peca==peca_t)].modelo.unique())
@@ -3917,7 +3957,7 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                 _tr_t = _tempo_idx_t.get((cen_t, peca_t))
                                 tc_inp = float(_tr_t.t_ciclo) if _tr_t is not None else float(tc_xl_t or 0)
                                 tl_inp = float(_tr_t.t_labor) if _tr_t is not None else float(tl_xl_t or 0)
-                                pc_trat_t = (float(_tr_t.pc_trat) if _tr_t is not None and hasattr(_tr_t,"pc_trat") else None) or (float(base_row_t[3]) if base_row_t[3] else 1.0)
+                                pc_trat_t = (float(_tr_t.pc_trat) if _tr_t is not None and hasattr(_tr_t,"pc_trat") else None) or (float(base_row_t[4]) if base_row_t[4] else 1.0)
                                 idx_app_t = (tc_inp * dc_inp * dv_inp * vi_inp) / (di_inp * po_inp) if (di_inp and po_inp) else 0.0
                                 div_idx_t = abs(float(idx_xl_t or 0) - float(idx_app_t or 0)) > 0.5
                                 # Recompute mc_t e ml_t com t_ciclo/t_labor do INPUTTEMPO (evita inflação e outdated ref)
@@ -3949,9 +3989,9 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
 
                                 _ec(ws_out,ri_t,1,cen_t,_F_BRANCO,False,"000000",8,False)
                                 _ec(ws_out,ri_t,2,peca_t,_F_BRANCO,False,"000000",8,False)
-                                _ec(ws_out,ri_t,3,base_row_t[2],_F_BRANCO,False,"000000",8,False)
-                                _ec(ws_out,ri_t,4,base_row_t[3],_F_BRANCO,False,"000000",8)
-                                _ec(ws_out,ri_t,5,base_row_t[4],_F_BRANCO,False,"000000",8)
+                                _ec(ws_out,ri_t,3,base_row_t[3],_F_BRANCO,False,"000000",8,False)
+                                _ec(ws_out,ri_t,4,base_row_t[4],_F_BRANCO,False,"000000",8)
+                                _ec(ws_out,ri_t,5,base_row_t[5],_F_BRANCO,False,"000000",8)
                                 # Col 6-7: mostra valor do INPUTTEMPO; vermelho se diferir do arquivo de referência
                                 _fill_tc = _F_VERM if _dif_val(tc_xl_t, tc_inp, 0.01) else _F_PRETO
                                 _fill_tl = _F_VERM if _dif_val(tl_xl_t, tl_inp, 0.01) else _F_PRETO
@@ -4081,7 +4121,7 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                             _cp_ano_t = build_cp_data_anual(res_base, tempo, dist, aplic, pmp, file_bytes=file_bytes)
                         except: _cp_ano_t = None
                         _horas_ano_t = read_horas_anual(file_bytes)
-                        gerar_aba_anual(wb_out, res_base, label="ANO", cp_data=_cp_ano_t, horas_anual=_horas_ano_t)
+                        gerar_aba_anual(wb_out, res_base, label="ANO", cp_data=_cp_ano_t, horas_anual=_horas_ano_t, pmp=pmp, aplic=aplic)
                         tabelona_buf=BytesIO(); wb_out.save(tabelona_buf); tabelona_buf.seek(0)
                         st.session_state["tabelona_buf"] = tabelona_buf
 
