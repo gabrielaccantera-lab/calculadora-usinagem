@@ -20,7 +20,7 @@ JD_AMARELO     = "#FFDE00"
 JD_AMARELO_ESC = "#C9A800"
 JD_TEXTO       = "#1A1A1A"
 
-st.markdown("""
+st.markdown("""r
 <style>
 .jd-header{background:#1F4D19;padding:16px 24px;border-radius:10px;border-left:6px solid #FFDE00;margin-bottom:20px;}
 .jd-header h1{color:#FFFFFF;margin:0;font-size:21px;font-weight:700;}
