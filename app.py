@@ -4004,13 +4004,13 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                 _ec(ws_out,ri_t,11,di_inp,_fill_di,False,"000000",8)
                                 _fill_po = _F_VERM if abs(po_inp-1.0)>0.001 else _F_BRANCO
                                 _ec(ws_out,ri_t,12,po_inp,_fill_po,False,"000000",8)
-                                _ec(ws_out,ri_t,13,float(idx_app_t),_F_VERM_S if div_idx_t else _F_BRANCO,False,"000000",8)
+                                _ec(ws_out,ri_t,13,float(idx_app_t),_F_VERM if div_idx_t else _F_BRANCO,False,"000000",8)
                                 _ec_pct(ws_out,ri_t,14,pA_t,_F_VERM if div_A_t else _cor_pct(pA_t))
                                 _ec_pct(ws_out,ri_t,15,pB_t,_F_VERM if div_B_t else _cor_pct(pB_t))
                                 _ec_pct(ws_out,ri_t,16,pC_t,_cor_pct(pC_t))
-                                _ec(ws_out,ri_t,17,mc_t,_F_VERM_S if div_c_t else _F_BRANCO,False,"000000",8)
+                                _ec(ws_out,ri_t,17,mc_t,_F_VERM if div_c_t else _F_BRANCO,False,"000000",8)
                                 _ec(ws_out,ri_t,18,ml_t,_F_BRANCO,False,"000000",8)
-                                _ec(ws_out,ri_t,19,app_tot_t,_F_VERM_S if div_p_t else _F_BRANCO,False,"000000",8)
+                                _ec(ws_out,ri_t,19,app_tot_t,_F_VERM if div_p_t else _F_BRANCO,False,"000000",8)
                                 for mi_t2,mod_t2 in enumerate(modelos_xl_t):
                                     ci_t2=20+mi_t2
                                     v_app_t=app_mod_v.get(mod_t2,0)
