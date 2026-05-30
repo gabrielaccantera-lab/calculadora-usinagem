@@ -3781,6 +3781,11 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                         _xl_main_end  = 18 + _xl_offset   # col (1-idx) fim do bloco principal
                         base_rows_t=list(ws_nov_t.iter_rows(min_row=_xl_hdr_row+1,max_row=_xl_hdr_row+57,min_col=1,max_col=87+_xl_offset,values_only=True))
                         base_rows_t=[r for r in base_rows_t if len(r)>_xl_offset+1 and r[_xl_offset] and r[_xl_offset+1]]
+                        _seen_cp_t=set(); _dedup_t=[]
+                        for _br in base_rows_t:
+                            _k=(str(_br[_xl_offset]).strip(),str(_br[_xl_offset+1]).strip())
+                            if _k not in _seen_cp_t: _seen_cp_t.add(_k); _dedup_t.append(_br)
+                        base_rows_t=_dedup_t
                         _SKIP_MOD = {_norm(h) for h in [
                             "total de pecas","total pecas","volume tratores",
                             "total de ciclos","total de labor","total ciclos","total labor",
@@ -3788,14 +3793,15 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                             "total ciclos (min.)","total labor (min.)",
                             "pecas excel","total de tratores","total tratores",
                         ]}
-                        modelos_xl_t=[str(ws_nov_t.cell(_xl_hdr_row,c).value) for c in range(_xl_mod_start,120+_xl_offset)
+                        def _nm_xl(v): return re.sub(r'\s+', ' ', str(v).strip())
+                        modelos_xl_t=[_nm_xl(ws_nov_t.cell(_xl_hdr_row,c).value) for c in range(_xl_mod_start,120+_xl_offset)
                                       if ws_nov_t.cell(_xl_hdr_row,c).value is not None
-                                      and str(ws_nov_t.cell(_xl_hdr_row,c).value).strip() not in ("","None")
-                                      and _norm(str(ws_nov_t.cell(_xl_hdr_row,c).value)) not in _SKIP_MOD]
-                        modelo_col_idx={str(ws_nov_t.cell(_xl_hdr_row,c).value):(c-_xl_mod_start) for c in range(_xl_mod_start,120+_xl_offset)
+                                      and _nm_xl(ws_nov_t.cell(_xl_hdr_row,c).value) not in ("","None")
+                                      and _norm(_nm_xl(ws_nov_t.cell(_xl_hdr_row,c).value)) not in _SKIP_MOD]
+                        modelo_col_idx={_nm_xl(ws_nov_t.cell(_xl_hdr_row,c).value):(c-_xl_mod_start) for c in range(_xl_mod_start,120+_xl_offset)
                                         if ws_nov_t.cell(_xl_hdr_row,c).value is not None
-                                        and str(ws_nov_t.cell(_xl_hdr_row,c).value).strip() not in ("","None")
-                                        and _norm(str(ws_nov_t.cell(_xl_hdr_row,c).value)) not in _SKIP_MOD}
+                                        and _nm_xl(ws_nov_t.cell(_xl_hdr_row,c).value) not in ("","None")
+                                        and _norm(_nm_xl(ws_nov_t.cell(_xl_hdr_row,c).value)) not in _SKIP_MOD}
 
                         dados_mes_t={}
                         for mes_t,aba_t in MAPA_T.items():
