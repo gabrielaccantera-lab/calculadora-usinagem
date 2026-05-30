@@ -237,6 +237,7 @@ def find_aba(sheetnames, candidatos):
             return norm_map[nc]
     return None
 
+@st.cache_data(show_spinner=False)
 def verificar_abas(fb):
     try:
         wb = openpyxl.load_workbook(BytesIO(fb), read_only=True, data_only=True)
@@ -1643,8 +1644,8 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None,
             sup_somas[k]["A"]+=r["suporte"][k]["A"]; sup_somas[k]["B"]+=r["suporte"][k]["B"]; sup_somas[k]["C"]+=r["suporte"][k]["C"]
     if cp_data:
         _cmc=defaultdict(float); _cml=defaultdict(float)
-        for (_cen,_peca,_pct,_tc,_tl,_dc,_vi,_dv,_di,_po,_idx,_mc,_ml,_qt) in cp_data:
-            _cmc[_cen]+=_mc; _cml[_cen]+=_ml
+        for _r in cp_data:
+            _cmc[_r[0]]+=_r[11]; _cml[_r[0]]+=_r[12]
         cen_mc=_cmc; cen_ml=_cml
     if res_ano_override:
         _ro = res_ano_override
@@ -1698,8 +1699,8 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None,
     tot_A_calc=op_A_ano+tot_suporte_A; tot_B_calc=op_B_ano+tot_suporte_B; tot_C_calc=op_C_ano+tot_suporte_C
     tot_func_calc=tot_A_calc+tot_B_calc+tot_C_calc
     if cp_data and not (horas_anual and not eh_cenario) and not eh_cenario:
-        _hc_cp = sum(mc for (_,_,_,_,_,_,_,_,_,_,_,mc,_,_) in cp_data) / 60
-        _hl_cp = sum(ml for (_,_,_,_,_,_,_,_,_,_,_,_,ml,_) in cp_data) / 60
+        _hc_cp = sum(r[11] for r in cp_data) / 60
+        _hl_cp = sum(r[12] for r in cp_data) / 60
         _ha_cp = sum(hdA(c)+hdB(c)+hdC(c) for c in centros_ord)
         _ht_cp = tot_A_calc*dias_ano*heA + tot_B_calc*dias_ano*heB + tot_C_calc*dias_ano*heC
         if _ha_cp > 0: prod_co=_hc_cp/_ha_cp; prod_lo=_hl_cp/_ha_cp
@@ -1742,18 +1743,25 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None,
     ws.row_dimensions[6].height=42
     ri=7
     if cp_data:
-        # cp_data agora tem 14 elementos: cen,peca,_pc_t,tc,tl,dc,vi,dv,di,po,idx_c,mc,ml,_qtd
-        for (cen,peca,_pc_t,tc,tl,dc,vi,dv,di,po,idx_c,mc,ml,_qtd) in cp_data:
+        # Normaliza para 14 elementos (compatibilidade com tuplas de 13 da leitura AnoFY26)
+        _cp14 = []
+        for _r in cp_data:
+            if len(_r) == 13:
+                _c,_p,_pc,_tc,_tl,_dc,_vi,_dv,_di,_idx,_mc,_ml,_qt = _r
+                _cp14.append((_c,_p,_pc,_tc,_tl,_dc,_vi,_dv,_di,1.0,_idx,_mc,_ml,_qt))
+            else:
+                _cp14.append(_r)
+        for (cen,peca,_pc_t,tc,tl,dc,vi,dv,di,po,idx_c,mc,ml,_qtd) in _cp14:
             pA=mc/minA_ano if minA_ano>0 else 0; pB=mc/minB_ano if minB_ano>0 else 0; pC=mc/minC_ano if minC_ano>0 else 0
             _e(ws,ri,1,cen,F_BRANCO_a,False,"000000",8,False); _e(ws,ri,2,peca,F_BRANCO_a,False,"000000",8,False)
             _e(ws,ri,3,"ANO",F_BRANCO_a,False,"000000",8,False); _e(ws,ri,4,int(_pc_t),F_BRANCO_a,False,"000000",8); _e(ws,ri,5,"PC",F_BRANCO_a,False,"000000",8)
             _e(ws,ri,6,round(tc,4) if tc else "",F_PRETO_a,False,"FFFFFF",8); _e(ws,ri,7,round(tl,4) if tl else "",F_PRETO_a,False,"FFFFFF",8)
-            _e(ws,ri,8,round(dc,4) if dc else "",PatternFill("solid",fgColor="FF0000"),False,"FFFF00",8)
+            _e(ws,ri,8,round(dc,4) if dc else "",F_VERM_a if abs(float(dc or 0)-1.0)>0.001 else F_BRANCO_a,False,"000000",8)
             _e(ws,ri,9,round(vi,4) if vi else "",F_BRANCO_a,False,"000000",8)
-            _e(ws,ri,10,round(dv,4) if dv else "",PatternFill("solid",fgColor="FF0000"),False,"FFFF00",8)
+            _e(ws,ri,10,round(dv,4) if dv else "",F_VERM_a if abs(float(dv or 0)-1.0)>0.001 else F_BRANCO_a,False,"000000",8)
             _e(ws,ri,11,round(di,4) if di else "",F_CINZA2_a,False,"000000",8)
-            # col 12 = Perf. Op. (NOVO)
-            _e(ws,ri,12,round(po,4) if po else "",F_CINZA2_a,False,"000000",8)
+            # col 12 = Perf. Op. (vermelho quando ≠ 1)
+            _e(ws,ri,12,round(po,4) if po else "",F_VERM_a if abs(float(po or 0)-1.0)>0.001 else F_CINZA2_a,False,"000000",8)
             # col 13 = Indice Ciclo
             _e(ws,ri,13,round(idx_c,4),F_BRANCO_a,False,"000000",8)
             # cols 14/15/16 = JA.A / JA.B / JA.C
@@ -3891,7 +3899,7 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                             for ri_t_idx,base_row_t in enumerate(base_rows_t):
                                 _o=_xl_offset
                                 cen_t=str(base_row_t[_o]).strip(); peca_t=str(base_row_t[_o+1]).strip()
-                                ri_t=_xl_hdr_row+1+ri_t_idx
+                                ri_t=7+ri_t_idx
                                 tc_xl_t=base_row_t[_o+5]; tl_xl_t=base_row_t[_o+6]
                                 dc_xl_t=base_row_t[_o+7]; vi_xl_t=base_row_t[_o+8]; dv_xl_t=base_row_t[_o+9]
                                 di_xl_t=base_row_t[_o+10]; idx_xl_t=base_row_t[_o+11]
@@ -4025,7 +4033,7 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                     _ec(ws_out,ri_t,ci_t2,v_app_t if v_app_t else None,fill_vm,False,"000000",7)
                                 ws_out.row_dimensions[ri_t].height=13
 
-                            nota_rt=_xl_hdr_row+1+len(base_rows_t)+1
+                            nota_rt=7+len(base_rows_t)+1
                             ws_out.merge_cells(f"A{nota_rt}:{get_column_letter(18+len(modelos_xl_t))}{nota_rt}")
                             nt=ws_out.cell(nota_rt,1,"🔴 VERMELHO (células): valor no arquivo de referência difere do INPUTTEMPO/INPUTDISTRIBUIÇÃO — cálculo usa sempre o INPUT  |  🔴 JA.A/JA.B vermelho = % ocupação difere do Excel  |  🔴 Rosa = total de ciclos ou peças difere  |  Cinza = presente no App")
                             nt.font=_Ft(name="Arial",bold=True,size=8,color="CC0000")
