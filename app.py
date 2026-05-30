@@ -3897,15 +3897,9 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                 idx_xl_t = mrow_t[_o+11] if len(mrow_t)>_o+11 else base_row_t[_o+11]
                                 vrow_t=dm_t.get("vols",[])[ri_t_idx] if dm_t.get("vols") and ri_t_idx<len(dm_t["vols"]) else []
 
-                                app_mod_v={}
-                                _fr_row = _aplic_orig_idx.get((cen_t, peca_t))
-                                for mod_t2 in modelos_xl_t:
-                                    qtd_t = _qtd_mes_t.get(mod_t2, 0)
-                                    try: flag_t = int(_fr_row[mod_t2]) if _fr_row is not None and mod_t2 in _fr_row.index and not pd.isna(_fr_row.get(mod_t2)) else 0
-                                    except: flag_t = 0
-                                    app_mod_v[mod_t2] = qtd_t * flag_t
-                                _aplic_models_cp = _aplic_cp_mods_t.get((cen_t, peca_t), set())
-                                app_tot_t = int(sum(int(_pmp_all_qtd_t.get((m, mes_t), 0)) for m in _aplic_models_cp))
+                                _active_mods_cp = _aplic_cp_mods_t.get((cen_t, peca_t), set())
+                                app_mod_v = {mod_t2: (int(_pmp_all_qtd_t.get((mod_t2, mes_t), 0)) if mod_t2 in _active_mods_cp else 0) for mod_t2 in modelos_xl_t}
+                                app_tot_t = int(sum(int(_pmp_all_qtd_t.get((m, mes_t), 0)) for m in _active_mods_cp))
 
                                 def _df(a,b,tol=0.02):
                                     if b is None: return False
