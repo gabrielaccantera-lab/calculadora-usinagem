@@ -3779,16 +3779,12 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                             if any(_xv and str(_xv).strip().upper().startswith("CEN") for _xv in _rv): break
                         _xl_mod_start = 19 + _xl_offset   # col (1-idx) onde começam os modelos
                         _xl_main_end  = 18 + _xl_offset   # col (1-idx) fim do bloco principal
-                        base_rows_t=list(ws_nov_t.iter_rows(min_row=_xl_hdr_row+1,max_row=_xl_hdr_row+57,min_col=1,max_col=87+_xl_offset,values_only=True))
-                        base_rows_t=[r for r in base_rows_t if len(r)>_xl_offset+1 and r[_xl_offset] and r[_xl_offset+1]]
-                        _seen_cp_t=set(); _dedup_t=[]
-                        for _br in base_rows_t:
-                            _k=(str(_br[_xl_offset]).strip(),str(_br[_xl_offset+1]).strip())
-                            if _k not in _seen_cp_t: _seen_cp_t.add(_k); _dedup_t.append(_br)
-                        base_rows_t=_dedup_t
-                        # Manter apenas pares (centro,peca) que o App realmente calculou (idem tabelona_resultados)
-                        _valid_cp_t=set(zip(dist.centro.astype(str).str.strip(),dist.peca.astype(str).str.strip()))
-                        base_rows_t=[_br for _br in base_rows_t if (str(_br[_xl_offset]).strip(),str(_br[_xl_offset+1]).strip()) in _valid_cp_t]
+                        # Dict lookup da aba estrutural: (cen,peca)->linha (para desc/pc_trat/UM)
+                        _ref_row_by_cp_t={}
+                        for _br in ws_nov_t.iter_rows(min_row=_xl_hdr_row+1,max_row=_xl_hdr_row+57,min_col=1,max_col=87+_xl_offset,values_only=True):
+                            if len(_br)>_xl_offset+1 and _br[_xl_offset] and _br[_xl_offset+1]:
+                                _k=(str(_br[_xl_offset]).strip(),str(_br[_xl_offset+1]).strip())
+                                if _k not in _ref_row_by_cp_t: _ref_row_by_cp_t[_k]=_br
                         _SKIP_MOD = {_norm(h) for h in [
                             "total de pecas","total pecas","volume tratores",
                             "total de ciclos","total de labor","total ciclos","total labor",
@@ -3810,9 +3806,14 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                         for mes_t,aba_t in MAPA_T.items():
                             if aba_t not in wb_r.sheetnames: continue
                             ws_m_t=wb_r[aba_t]
-                            dados_mes_t[mes_t]={
-                                "main":list(ws_m_t.iter_rows(min_row=_xl_hdr_row+1,max_row=_xl_hdr_row+57,min_col=1,max_col=_xl_main_end,values_only=True)),
-                                "vols":list(ws_m_t.iter_rows(min_row=_xl_hdr_row+1,max_row=_xl_hdr_row+57,min_col=_xl_mod_start,max_col=120+_xl_offset,values_only=True))}
+                            _main_d={}; _vols_d={}
+                            for _mr in ws_m_t.iter_rows(min_row=_xl_hdr_row+1,max_row=_xl_hdr_row+57,values_only=True):
+                                if len(_mr)>_xl_offset+1 and _mr[_xl_offset] and _mr[_xl_offset+1]:
+                                    _ck=(str(_mr[_xl_offset]).strip(),str(_mr[_xl_offset+1]).strip())
+                                    if _ck not in _main_d:
+                                        _main_d[_ck]=list(_mr[:_xl_main_end])
+                                        _vols_d[_ck]=list(_mr[_xl_mod_start-1:])
+                            dados_mes_t[mes_t]={"main":_main_d,"vols":_vols_d}
                         wb_r.close()
 
                         try:
@@ -3883,28 +3884,25 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                 ws_out.column_dimensions[get_column_letter(ci_t)].width=7
                             ws_out.row_dimensions[6].height=42
 
-                            main_data_t=dm_t.get("main",[]); vols_data_t=dm_t.get("vols",[])
-                            for ri_t_idx,base_row_t in enumerate(base_rows_t):
+                            # Itera exatamente sobre os mesmos pares que a tabelona_resultados
+                            pares_cp_t=list(dist[["centro","peca"]].drop_duplicates().itertuples(index=False,name=None))
+                            for ri_t_offset,(cen_t,peca_t) in enumerate(pares_cp_t):
                                 _o=_xl_offset
-                                cen_t=str(base_row_t[_o]).strip(); peca_t=str(base_row_t[_o+1]).strip()
-                                ri_t=7+ri_t_idx
-                                tc_xl_t=base_row_t[_o+5]; tl_xl_t=base_row_t[_o+6]
-                                dc_xl_t=base_row_t[_o+7]; vi_xl_t=base_row_t[_o+8]; dv_xl_t=base_row_t[_o+9]
-                                di_xl_t=base_row_t[_o+10]; idx_xl_t=base_row_t[_o+11]
-
-                                mrow_t=main_data_t[ri_t_idx] if ri_t_idx<len(main_data_t) else [None]*(_xl_main_end)
+                                ri_t=7+ri_t_offset
+                                base_row_t=_ref_row_by_cp_t.get((cen_t,peca_t))
+                                tc_xl_t=base_row_t[_o+5] if base_row_t else None
+                                tl_xl_t=base_row_t[_o+6] if base_row_t else None
+                                mrow_t=dm_t["main"].get((cen_t,peca_t),[None]*100)
                                 xl_pA_t=mrow_t[_o+12] if len(mrow_t)>_o+12 else None
                                 xl_pB_t=mrow_t[_o+13] if len(mrow_t)>_o+13 else None
                                 xl_ciclo_t=mrow_t[_o+15] if len(mrow_t)>_o+15 else None
                                 xl_pecas_t=mrow_t[_o+17] if len(mrow_t)>_o+17 else None
-                                # Lê os valores de distribuição do MÊS CORRENTE (não da aba estrutural)
-                                # para comparar corretamente com o INPUT
-                                dc_xl_t = mrow_t[_o+7] if len(mrow_t)>_o+7 else base_row_t[_o+7]
-                                vi_xl_t = mrow_t[_o+8] if len(mrow_t)>_o+8 else base_row_t[_o+8]
-                                dv_xl_t = mrow_t[_o+9] if len(mrow_t)>_o+9 else base_row_t[_o+9]
-                                di_xl_t = mrow_t[_o+10] if len(mrow_t)>_o+10 else base_row_t[_o+10]
-                                idx_xl_t = mrow_t[_o+11] if len(mrow_t)>_o+11 else base_row_t[_o+11]
-                                vrow_t=dm_t.get("vols",[])[ri_t_idx] if dm_t.get("vols") and ri_t_idx<len(dm_t["vols"]) else []
+                                dc_xl_t=mrow_t[_o+7] if len(mrow_t)>_o+7 else None
+                                vi_xl_t=mrow_t[_o+8] if len(mrow_t)>_o+8 else None
+                                dv_xl_t=mrow_t[_o+9] if len(mrow_t)>_o+9 else None
+                                di_xl_t=mrow_t[_o+10] if len(mrow_t)>_o+10 else None
+                                idx_xl_t=mrow_t[_o+11] if len(mrow_t)>_o+11 else None
+                                vrow_t=dm_t["vols"].get((cen_t,peca_t),[])
 
                                 _active_mods_cp = _aplic_cp_mods_t.get((cen_t, peca_t), set())
                                 app_mod_v = {mod_t2: (int(_pmp_all_qtd_t.get((mod_t2, mes_t), 0)) if mod_t2 in _active_mods_cp else 0) for mod_t2 in modelos_xl_t}
@@ -3935,7 +3933,7 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                 _tr_t = _tempo_idx_t.get((cen_t, peca_t))
                                 tc_inp = float(_tr_t.t_ciclo) if _tr_t is not None else float(tc_xl_t or 0)
                                 tl_inp = float(_tr_t.t_labor) if _tr_t is not None else float(tl_xl_t or 0)
-                                pc_trat_t = (float(_tr_t.pc_trat) if _tr_t is not None and hasattr(_tr_t,"pc_trat") else None) or (float(base_row_t[3]) if base_row_t[3] else 1.0)
+                                pc_trat_t = (float(_tr_t.pc_trat) if _tr_t is not None and hasattr(_tr_t,"pc_trat") else None) or (float(base_row_t[3]) if base_row_t is not None and base_row_t[3] else 1.0)
                                 idx_app_t = (tc_inp * dc_inp * dv_inp * vi_inp) / (di_inp * po_inp) if (di_inp and po_inp) else 0.0
                                 div_idx_t = abs(float(idx_xl_t or 0) - float(idx_app_t or 0)) > 0.5
                                 # Recompute mc_t e ml_t com t_ciclo/t_labor do INPUTTEMPO (evita inflação e outdated ref)
@@ -3967,9 +3965,9 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
 
                                 _ec(ws_out,ri_t,1,cen_t,_F_BRANCO,False,"000000",8,False)
                                 _ec(ws_out,ri_t,2,peca_t,_F_BRANCO,False,"000000",8,False)
-                                _ec(ws_out,ri_t,3,base_row_t[_o+2],_F_BRANCO,False,"000000",8,False)
-                                _ec(ws_out,ri_t,4,base_row_t[_o+3],_F_BRANCO,False,"000000",8)
-                                _ec(ws_out,ri_t,5,base_row_t[_o+4],_F_BRANCO,False,"000000",8)
+                                _ec(ws_out,ri_t,3,base_row_t[_o+2] if base_row_t else "",_F_BRANCO,False,"000000",8,False)
+                                _ec(ws_out,ri_t,4,base_row_t[_o+3] if base_row_t else "",_F_BRANCO,False,"000000",8)
+                                _ec(ws_out,ri_t,5,base_row_t[_o+4] if base_row_t else "",_F_BRANCO,False,"000000",8)
                                 # Col 6-7: mostra valor do INPUTTEMPO; vermelho se diferir do arquivo de referência
                                 _fill_tc = _F_VERM if _dif_val(tc_xl_t, tc_inp, 0.01) else _F_PRETO
                                 _fill_tl = _F_VERM if _dif_val(tl_xl_t, tl_inp, 0.01) else _F_PRETO
@@ -4008,7 +4006,7 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                     _ec(ws_out,ri_t,ci_t2,_disp_mod,fill_vm,False,"000000",7)
                                 ws_out.row_dimensions[ri_t].height=13
 
-                            nota_rt=7+len(base_rows_t)+1
+                            nota_rt=7+len(pares_cp_t)+1
                             ws_out.merge_cells(f"A{nota_rt}:{get_column_letter(19+len(modelos_xl_t))}{nota_rt}")
                             nt=ws_out.cell(nota_rt,1,"🔴 VERMELHO (células): valor no arquivo de referência difere do INPUTTEMPO/INPUTDISTRIBUIÇÃO — cálculo usa sempre o INPUT  |  🔴 JA.A/JA.B vermelho = % ocupação difere do Excel  |  🔴 Rosa = total de ciclos ou peças difere  |  Cinza = presente no App")
                             nt.font=_Ft(name="Arial",bold=True,size=8,color="CC0000")
