@@ -3786,6 +3786,9 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                             _k=(str(_br[_xl_offset]).strip(),str(_br[_xl_offset+1]).strip())
                             if _k not in _seen_cp_t: _seen_cp_t.add(_k); _dedup_t.append(_br)
                         base_rows_t=_dedup_t
+                        # Manter apenas pares (centro,peca) que o App realmente calculou (idem tabelona_resultados)
+                        _valid_cp_t=set(zip(dist.centro.astype(str).str.strip(),dist.peca.astype(str).str.strip()))
+                        base_rows_t=[_br for _br in base_rows_t if (str(_br[_xl_offset]).strip(),str(_br[_xl_offset+1]).strip()) in _valid_cp_t]
                         _SKIP_MOD = {_norm(h) for h in [
                             "total de pecas","total pecas","volume tratores",
                             "total de ciclos","total de labor","total ciclos","total labor",
