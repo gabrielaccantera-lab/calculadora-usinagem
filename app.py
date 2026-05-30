@@ -1113,42 +1113,50 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
         for _cen_a, _peca_a in pares_cp
     }
     gerar_aba_anual(wb_out, resultados, label="ANO", cp_data=_cp_data_ano, horas_anual=_horas_ano, modelos_lista=modelos_lista, app_mod_ano=_app_mod_ano_t)
-    # ── Abas de Input — exibem exatamente o que foi lido pelo app ──────────────
-    _F_INP_H = _PF("solid", fgColor="1F4D19")
-    _F_INP_A = _PF("solid", fgColor="F0F4F0")
-    def _ec_inp(ws_i, r, c, val, fill=None, bold=False, color="000000", size=8, center=False):
-        cell = ws_i.cell(row=r, column=c, value=val)
-        cell.font = _Ft(name="Arial", bold=bold, color=color, size=size)
-        cell.fill = fill or _F_BRANCO
-        cell.alignment = _Al(horizontal="center" if center else "left", vertical="center")
-        cell.border = _BRD
-        return cell
-    def _dump_df(nome, df):
-        ws_i = wb_out.create_sheet(nome)
-        for ci, col in enumerate(df.columns, 1):
-            _ec_inp(ws_i, 1, ci, str(col), _F_INP_H, True, "FFFFFF", 8, True)
-            ws_i.column_dimensions[get_column_letter(ci)].width = max(12, min(35, len(str(col)) + 4))
-        ws_i.row_dimensions[1].height = 16
-        for ri, (_, row) in enumerate(df.iterrows(), 2):
-            _fg = _F_INP_A if ri % 2 == 0 else _F_BRANCO
-            for ci, val in enumerate(row, 1):
-                v = None if (isinstance(val, float) and pd.isna(val)) else val
-                _ec_inp(ws_i, ri, ci, v, _fg)
-            ws_i.row_dimensions[ri].height = 13
-    _dump_df("INPUT_PMP", pmp)
-    _df_turnos_inp = pd.DataFrame(
-        [{"Parâmetro": "Turno A — horas acumuladas", "Valor": horas_turno["A"]},
-         {"Parâmetro": "Turno B — horas acumuladas", "Valor": horas_turno["B"]},
-         {"Parâmetro": "Turno C — horas acumuladas", "Valor": horas_turno["C"]},
-         {"Parâmetro": "Turno A — horas efetivas",   "Valor": horas_efetivas["A"]},
-         {"Parâmetro": "Turno B — horas efetivas",   "Valor": horas_efetivas["B"]},
-         {"Parâmetro": "Turno C — horas efetivas",   "Valor": horas_efetivas["C"]}] +
-        [{"Parâmetro": f"Dias trabalhados — {m}", "Valor": dias.get(m, 0)} for m in MESES]
-    )
-    _dump_df("INPUT_TURNOS", _df_turnos_inp)
-    _dump_df("INPUT_TEMPO", tempo)
-    _dump_df("INPUT_DIST", dist)
-    _dump_df("INPUT_APLIC", aplic)
+    # ── Abas de Input — cópia fiel do arquivo original (formatação idêntica) ──
+    _fb_src = st.session_state.get("_fb_anual")
+    if _fb_src:
+        try:
+            from copy import copy as _copy
+            _wb_src = _opx.load_workbook(BytesIO(_fb_src), read_only=False, data_only=True)
+            _abas_map_inp = st.session_state.get("_abas_map", {})
+            for _chave_inp, _nome_dst_inp in [
+                ("INPUTPMP",          "INPUT_PMP"),
+                ("INPUTTURNOS",       "INPUT_TURNOS"),
+                ("INPUTTEMPO",        "INPUT_TEMPO"),
+                ("INPUTDISTRIBUIÇÃO", "INPUT_DIST"),
+                ("INPUTAPLICAÇÃO",    "INPUT_APLIC"),
+            ]:
+                _nome_src_inp = _abas_map_inp.get(_chave_inp) or _chave_inp
+                if _nome_src_inp not in _wb_src.sheetnames:
+                    continue
+                _ws_s = _wb_src[_nome_src_inp]
+                _ws_d = wb_out.create_sheet(_nome_dst_inp)
+                for _col_inp, _cd_inp in _ws_s.column_dimensions.items():
+                    _ws_d.column_dimensions[_col_inp].width = _cd_inp.width
+                for _row_inp, _rd_inp in _ws_s.row_dimensions.items():
+                    _ws_d.row_dimensions[_row_inp].height = _rd_inp.height
+                if _ws_s.freeze_panes:
+                    _ws_d.freeze_panes = _ws_s.freeze_panes
+                for _row_inp in _ws_s.iter_rows():
+                    for _cell_inp in _row_inp:
+                        _nc = _ws_d.cell(row=_cell_inp.row, column=_cell_inp.column, value=_cell_inp.value)
+                        if _cell_inp.has_style:
+                            try: _nc.font      = _copy(_cell_inp.font)
+                            except: pass
+                            try: _nc.fill      = _copy(_cell_inp.fill)
+                            except: pass
+                            try: _nc.border    = _copy(_cell_inp.border)
+                            except: pass
+                            try: _nc.alignment = _copy(_cell_inp.alignment)
+                            except: pass
+                            try: _nc.number_format = _cell_inp.number_format
+                            except: pass
+                for _merged_inp in list(_ws_s.merged_cells.ranges):
+                    _ws_d.merge_cells(str(_merged_inp))
+            _wb_src.close()
+        except Exception:
+            pass
     buf_out = BytesIO(); wb_out.save(buf_out); buf_out.seek(0)
     return buf_out
 
