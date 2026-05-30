@@ -63,8 +63,7 @@ div[data-testid="stRadio"]:has(div[role="radiogroup"]>label:nth-child(5)) div[ro
 div[data-testid="stRadio"]:has(div[role="radiogroup"]>label:nth-child(5)) div[role="radiogroup"]>label:has(input:checked){color:#FFDE00;border-color:#2a2a2a #2a2a2a transparent;border-bottom:2px solid #FFDE00;background:#0d1a0d;}
 div[data-testid="stRadio"]:has(div[role="radiogroup"]>label:nth-child(5)) div[role="radiogroup"]>label>div:first-child{display:none!important;}
 /* Prevent content dimming during tab switches */
-.main .block-container{opacity:1!important;transition:none!important;}
-.element-container{opacity:1!important;transition:none!important;}
+.main .block-container{transition:none!important;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -944,26 +943,6 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
         except: return _F_BRANCO
     hA_t=horas_turno["A"]; hB_t=horas_turno["B"]; hC_t=horas_turno["C"]
     heA_t=horas_efetivas["A"]; heB_t=horas_efetivas["B"]; heC_t=horas_efetivas["C"]
-    try:
-        df_all_t=(aplic.merge(pmp,on="modelo").merge(tempo,on=["centro","peca"]).merge(dist,on=["centro","peca"]))
-        if "pc_trat_x" in df_all_t.columns and "pc_trat_y" in df_all_t.columns:
-            df_all_t["pc_trat"]=df_all_t["pc_trat_y"].fillna(df_all_t["pc_trat_x"]).fillna(1.0)
-            df_all_t.drop(columns=["pc_trat_x","pc_trat_y"],inplace=True)
-        elif "pc_trat_y" in df_all_t.columns: df_all_t.rename(columns={"pc_trat_y":"pc_trat"},inplace=True)
-        elif "pc_trat_x" in df_all_t.columns: df_all_t.rename(columns={"pc_trat_x":"pc_trat"},inplace=True)
-        if "pc_trat" not in df_all_t.columns: df_all_t["pc_trat"]=1.0
-        df_all_t["pc_trat"]=pd.to_numeric(df_all_t["pc_trat"],errors="coerce").fillna(1.0).clip(lower=1.0)
-        if "vol_int" not in df_all_t.columns: df_all_t["vol_int"] = 1.0
-        df_all_t["vol_int"]    = pd.to_numeric(df_all_t["vol_int"],    errors="coerce").fillna(1.0)
-        df_all_t["div_carga"]  = pd.to_numeric(df_all_t["div_carga"],  errors="coerce").fillna(0.0)
-        df_all_t["div_volume"] = pd.to_numeric(df_all_t["div_volume"], errors="coerce").fillna(0.0)
-        df_all_t["disponib"]   = pd.to_numeric(df_all_t["disponib"],   errors="coerce").fillna(1.0)
-        df_all_t["perf_op"]    = pd.to_numeric(df_all_t["perf_op"],    errors="coerce").fillna(1.0) if "perf_op" in df_all_t.columns else 1.0
-        df_all_t["indice_ciclo"]=(df_all_t.t_ciclo*df_all_t.div_carga*df_all_t.div_volume*df_all_t.vol_int)/(df_all_t.disponib*df_all_t.perf_op)
-        df_all_t["min_ciclo"]=df_all_t.indice_ciclo*df_all_t.qtd
-        df_all_t["min_labor"]=df_all_t.t_labor*df_all_t.div_carga*df_all_t.qtd*df_all_t.pc_trat
-        agg_cp_t=df_all_t.groupby(["centro","peca","mes"])[["min_ciclo","min_labor"]].sum()
-    except: agg_cp_t=pd.DataFrame()
     pares_cp = list(dist[["centro","peca"]].drop_duplicates().itertuples(index=False, name=None))
     modelos_lista = sorted(pmp["modelo"].unique().tolist())
 
@@ -3772,25 +3751,9 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                 thr_A_t=thresholds["A"]/100; thr_B_t=thresholds["B"]/100; thr_C_t=thresholds["C"]/100
 
                 try:
-                    df_all_t=(aplic.merge(pmp,on="modelo").merge(tempo,on=["centro","peca"]).merge(dist,on=["centro","peca"]))
-                    if "pc_trat_x" in df_all_t.columns and "pc_trat_y" in df_all_t.columns:
-                        df_all_t["pc_trat"]=df_all_t["pc_trat_y"].fillna(df_all_t["pc_trat_x"]).fillna(1.0); df_all_t.drop(columns=["pc_trat_x","pc_trat_y"],inplace=True)
-                    elif "pc_trat_y" in df_all_t.columns: df_all_t.rename(columns={"pc_trat_y":"pc_trat"},inplace=True)
-                    elif "pc_trat_x" in df_all_t.columns: df_all_t.rename(columns={"pc_trat_x":"pc_trat"},inplace=True)
-                    df_all_t["pc_trat"]=pd.to_numeric(df_all_t.get("pc_trat",1.0),errors="coerce").fillna(1.0).clip(lower=1.0)
-                    if "vol_int" not in df_all_t.columns: df_all_t["vol_int"] = 1.0
-                    df_all_t["vol_int"]    = pd.to_numeric(df_all_t["vol_int"],    errors="coerce").fillna(1.0)
-                    df_all_t["div_carga"]  = pd.to_numeric(df_all_t["div_carga"],  errors="coerce").fillna(0.0)
-                    df_all_t["div_volume"] = pd.to_numeric(df_all_t["div_volume"], errors="coerce").fillna(0.0)
-                    df_all_t["disponib"]   = pd.to_numeric(df_all_t["disponib"],   errors="coerce").fillna(1.0)
-                    if "perf_op" not in df_all_t.columns: df_all_t["perf_op"]=1.0
-                    df_all_t["perf_op"]=pd.to_numeric(df_all_t["perf_op"],errors="coerce").fillna(1.0)
-                    df_all_t["indice_ciclo"]=(df_all_t.t_ciclo*df_all_t.div_carga*df_all_t.div_volume*df_all_t.vol_int)/(df_all_t.disponib*df_all_t["perf_op"])
-                    df_all_t["min_ciclo"]=df_all_t.indice_ciclo*df_all_t.qtd
-                    df_all_t["min_labor"]=df_all_t.t_labor*df_all_t.div_carga*df_all_t.qtd*df_all_t.pc_trat
-                    agg_cp_t=df_all_t.groupby(["centro","peca","mes"])[["min_ciclo","min_labor"]].sum()
-                    # Índice por (centro,peca) usando INPUTTEMPO — fonte única da verdade para t_ciclo/t_labor/pc_trat
                     _tempo_idx_t = {(r.centro, r.peca): r for r in tempo.itertuples()}
+                    _pmp_all_qtd_t = pmp.groupby(["modelo","mes"])["qtd"].sum().to_dict()
+                    _aplic_cp_mods_t = aplic.groupby(["centro","peca"])["modelo"].apply(set).to_dict()
                 except Exception as _e_merge:
                     st.error(f"Erro ao preparar dados: {_e_merge}"); st.stop()
 
@@ -3848,6 +3811,7 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                             aplic_orig=pd.read_excel(BytesIO(file_bytes),sheet_name=_aba_aplic_t,header=0)
                             aplic_orig=aplic_orig.rename(columns={aplic_orig.columns[0]:"centro",aplic_orig.columns[1]:"peca"})
                         except: aplic_orig=aplic.copy()
+                        _aplic_orig_idx = {(str(r.centro).strip(), str(r.peca).strip()): r for _, r in aplic_orig.iterrows()}
 
                         wb_out=_opx.Workbook(); primeira_t=True
                         for mes_t in MESES:
@@ -3856,6 +3820,7 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                             minA_t=d_t*hA_t*60; minB_t=d_t*hB_t*60; minC_t=d_t*hC_t*60
                             heA_t=horas_efetivas["A"]; heB_t=horas_efetivas["B"]; heC_t=horas_efetivas["C"]
                             dm_t=dados_mes_t.get(mes_t,{}); pmp_mes_t=pmp[pmp.mes==mes_t]
+                            _qtd_mes_t = {mod: int(_pmp_all_qtd_t.get((mod, mes_t), 0)) for mod in modelos_xl_t}
 
                             if primeira_t: ws_out=wb_out.active; ws_out.title=mes_t[:10]; primeira_t=False
                             else: ws_out=wb_out.create_sheet(mes_t[:10])
@@ -3932,32 +3897,22 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                 idx_xl_t = mrow_t[_o+11] if len(mrow_t)>_o+11 else base_row_t[_o+11]
                                 vrow_t=dm_t.get("vols",[])[ri_t_idx] if dm_t.get("vols") and ri_t_idx<len(dm_t["vols"]) else []
 
-                                try: mc_t=float(agg_cp_t.loc[(cen_t,peca_t,mes_t),"min_ciclo"])
-                                except: mc_t=0.0
-                                try: ml_t=float(agg_cp_t.loc[(cen_t,peca_t,mes_t),"min_labor"])
-                                except: ml_t=0.0
-
-                                pA_t=mc_t/minA_t if minA_t>0 else 0
-                                pB_t=mc_t/minB_t if minB_t>0 else 0
-                                pC_t=mc_t/minC_t if minC_t>0 else 0
-
                                 app_mod_v={}
+                                _fr_row = _aplic_orig_idx.get((cen_t, peca_t))
                                 for mod_t2 in modelos_xl_t:
-                                    qtd_t=int(pmp_mes_t[pmp_mes_t.modelo==mod_t2]["qtd"].sum()) if mod_t2 in pmp_mes_t.modelo.values else 0
-                                    fr_t=aplic_orig[(aplic_orig.centro==cen_t)&(aplic_orig.peca==peca_t)]
-                                    flag_t=int(fr_t[mod_t2].values[0]) if len(fr_t)>0 and mod_t2 in fr_t.columns and not pd.isna(fr_t[mod_t2].values[0] if len(fr_t)>0 else 0) else 0
-                                    app_mod_v[mod_t2]=qtd_t*flag_t
-                                # Calcula total de peças direto do aplic+pmp (independente dos nomes do Excel)
-                                _aplic_models_cp = set(aplic[(aplic.centro==cen_t)&(aplic.peca==peca_t)].modelo.unique())
-                                app_tot_t = int(sum(int(pmp_mes_t[pmp_mes_t.modelo==m]["qtd"].sum()) for m in _aplic_models_cp))
+                                    qtd_t = _qtd_mes_t.get(mod_t2, 0)
+                                    try: flag_t = int(_fr_row[mod_t2]) if _fr_row is not None and mod_t2 in _fr_row.index and not pd.isna(_fr_row.get(mod_t2)) else 0
+                                    except: flag_t = 0
+                                    app_mod_v[mod_t2] = qtd_t * flag_t
+                                _aplic_models_cp = _aplic_cp_mods_t.get((cen_t, peca_t), set())
+                                app_tot_t = int(sum(int(_pmp_all_qtd_t.get((m, mes_t), 0)) for m in _aplic_models_cp))
 
                                 def _df(a,b,tol=0.02):
                                     if b is None: return False
                                     try: return abs(float(a or 0)-float(b))>tol
                                     except: return False
 
-                                div_A_t=_df(pA_t,xl_pA_t,0.02); div_B_t=_df(pB_t,xl_pB_t,0.02)
-                                div_c_t=_df(mc_t,xl_ciclo_t,1); div_p_t=_df(app_tot_t,xl_pecas_t,0.5)
+                                div_p_t=_df(app_tot_t,xl_pecas_t,0.5)
 
                                 # Lê direto do dist (INPUTDISTRIBUIÇÃO) — fonte única da verdade
                                 _dist_row = dist[(dist.centro==cen_t)&(dist.peca==peca_t)]
