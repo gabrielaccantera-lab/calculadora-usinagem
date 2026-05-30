@@ -3818,10 +3818,12 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                         _xl_main_end  = 18 + _xl_offset   # col (1-idx) fim do bloco principal
                         base_rows_t=list(ws_nov_t.iter_rows(min_row=_xl_hdr_row+1,max_row=_xl_hdr_row+57,min_col=1,max_col=87+_xl_offset,values_only=True))
                         base_rows_t=[r for r in base_rows_t if len(r)>_xl_offset+1 and r[_xl_offset] and r[_xl_offset+1]]
-                        modelos_xl_t=[str(ws_nov_t.cell(_xl_hdr_row,c).value) for c in range(_xl_mod_start,88+_xl_offset)
-                                      if ws_nov_t.cell(_xl_hdr_row,c).value and str(ws_nov_t.cell(_xl_hdr_row,c).value).startswith("MODELO")]
-                        modelo_col_idx={str(ws_nov_t.cell(_xl_hdr_row,c).value):(c-_xl_mod_start) for c in range(_xl_mod_start,88+_xl_offset)
-                                        if ws_nov_t.cell(_xl_hdr_row,c).value and str(ws_nov_t.cell(_xl_hdr_row,c).value).startswith("MODELO")}
+                        modelos_xl_t=[str(ws_nov_t.cell(_xl_hdr_row,c).value) for c in range(_xl_mod_start,120+_xl_offset)
+                                      if ws_nov_t.cell(_xl_hdr_row,c).value is not None
+                                      and str(ws_nov_t.cell(_xl_hdr_row,c).value).strip() not in ("","None")]
+                        modelo_col_idx={str(ws_nov_t.cell(_xl_hdr_row,c).value):(c-_xl_mod_start) for c in range(_xl_mod_start,120+_xl_offset)
+                                        if ws_nov_t.cell(_xl_hdr_row,c).value is not None
+                                        and str(ws_nov_t.cell(_xl_hdr_row,c).value).strip() not in ("","None")}
 
                         dados_mes_t={}
                         for mes_t,aba_t in MAPA_T.items():
