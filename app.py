@@ -3818,12 +3818,21 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                         _xl_main_end  = 18 + _xl_offset   # col (1-idx) fim do bloco principal
                         base_rows_t=list(ws_nov_t.iter_rows(min_row=_xl_hdr_row+1,max_row=_xl_hdr_row+57,min_col=1,max_col=87+_xl_offset,values_only=True))
                         base_rows_t=[r for r in base_rows_t if len(r)>_xl_offset+1 and r[_xl_offset] and r[_xl_offset+1]]
+                        _SKIP_MOD = {_norm(h) for h in [
+                            "total de pecas","total pecas","volume tratores",
+                            "total de ciclos","total de labor","total ciclos","total labor",
+                            "total de ciclos (min.)","total de labor (min.)",
+                            "total ciclos (min.)","total labor (min.)",
+                            "pecas excel","total de tratores","total tratores",
+                        ]}
                         modelos_xl_t=[str(ws_nov_t.cell(_xl_hdr_row,c).value) for c in range(_xl_mod_start,120+_xl_offset)
                                       if ws_nov_t.cell(_xl_hdr_row,c).value is not None
-                                      and str(ws_nov_t.cell(_xl_hdr_row,c).value).strip() not in ("","None")]
+                                      and str(ws_nov_t.cell(_xl_hdr_row,c).value).strip() not in ("","None")
+                                      and _norm(str(ws_nov_t.cell(_xl_hdr_row,c).value)) not in _SKIP_MOD]
                         modelo_col_idx={str(ws_nov_t.cell(_xl_hdr_row,c).value):(c-_xl_mod_start) for c in range(_xl_mod_start,120+_xl_offset)
                                         if ws_nov_t.cell(_xl_hdr_row,c).value is not None
-                                        and str(ws_nov_t.cell(_xl_hdr_row,c).value).strip() not in ("","None")}
+                                        and str(ws_nov_t.cell(_xl_hdr_row,c).value).strip() not in ("","None")
+                                        and _norm(str(ws_nov_t.cell(_xl_hdr_row,c).value)) not in _SKIP_MOD}
 
                         dados_mes_t={}
                         for mes_t,aba_t in MAPA_T.items():
@@ -3831,7 +3840,7 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                             ws_m_t=wb_r[aba_t]
                             dados_mes_t[mes_t]={
                                 "main":list(ws_m_t.iter_rows(min_row=_xl_hdr_row+1,max_row=_xl_hdr_row+57,min_col=1,max_col=_xl_main_end,values_only=True)),
-                                "vols":list(ws_m_t.iter_rows(min_row=_xl_hdr_row+1,max_row=_xl_hdr_row+57,min_col=_xl_mod_start,max_col=87+_xl_offset,values_only=True))}
+                                "vols":list(ws_m_t.iter_rows(min_row=_xl_hdr_row+1,max_row=_xl_hdr_row+57,min_col=_xl_mod_start,max_col=120+_xl_offset,values_only=True))}
                         wb_r.close()
 
                         try:
@@ -4037,7 +4046,8 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                         fill_vm=_F_VERM if div_vm else (_F_CINZA if v_app_t else _F_BRANCO)
                                     else:
                                         fill_vm=_F_CINZA if v_app_t else _F_BRANCO
-                                    _ec(ws_out,ri_t,ci_t2,v_app_t if v_app_t else None,fill_vm,False,"000000",7)
+                                    _disp_mod = v_app_t if v_app_t else (0 if div_vm else "")
+                                    _ec(ws_out,ri_t,ci_t2,_disp_mod,fill_vm,False,"000000",7)
                                 ws_out.row_dimensions[ri_t].height=13
 
                             nota_rt=7+len(base_rows_t)+1
