@@ -1106,7 +1106,13 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
     _fb_ano = st.session_state.get("_fb_anual")
     _cp_data_ano = build_cp_data_anual(resultados, tempo, dist, aplic, pmp, file_bytes=_fb_ano)
     _horas_ano = read_horas_anual(_fb_ano)
-    gerar_aba_anual(wb_out, resultados, label="ANO", cp_data=_cp_data_ano, horas_anual=_horas_ano)
+    _pmp_qtd_dict = _pmp_pivot.get("qtd", {})
+    _pmp_ano_mod = {mod: sum(int(_pmp_qtd_dict.get((mod, mes_t), 0) or 0) for mes_t in MESES) for mod in modelos_lista}
+    _app_mod_ano_t = {
+        (_cen_a, _peca_a): {mod: _pmp_ano_mod[mod] if (_cen_a, _peca_a, mod) in _aplic_set else 0 for mod in modelos_lista}
+        for _cen_a, _peca_a in pares_cp
+    }
+    gerar_aba_anual(wb_out, resultados, label="ANO", cp_data=_cp_data_ano, horas_anual=_horas_ano, modelos_lista=modelos_lista, app_mod_ano=_app_mod_ano_t)
     buf_out = BytesIO(); wb_out.save(buf_out); buf_out.seek(0)
     return buf_out
 
@@ -1549,7 +1555,7 @@ def show_memoria_ano(res_base, df_intermediario, agg, horas_turno, thresholds):
                        key="dl_mem_ano")
 
 
-def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None, eh_cenario=False, ws_existente=None, res_ano_override=None):
+def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None, eh_cenario=False, ws_existente=None, res_ano_override=None, modelos_lista=None, app_mod_ano=None):
     meses_com_dados = [(m, resultados[m]) for m in MESES if resultados.get(m)]
     if not meses_com_dados: return
     brd = Border(left=Side(style='thin',color='CCCCCC'),right=Side(style='thin',color='CCCCCC'),
@@ -1671,8 +1677,10 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None,
     ws.merge_cells("A4:O4"); _e(ws,4,1,"Nº DIAS TRABALHADOS",F_CINZA_H_a,True,"000000",8,False)
     _e(ws,4,16,dias_ano,F_VERDE_a,True,"FF0000",9); _e(ws,4,17,dias_ano,F_AMAR_a,True,"FF0000",9); _e(ws,4,18,dias_ano,F_AZUL_a,True,"FF0000",9)
     ws.row_dimensions[4].height=13
-    # LINHA 5 — agora 19 colunas fixas (adicionou Perf. Op.)
-    ws.merge_cells("A5:S5"); _e(ws,5,1,f"RESUMO DA CARGA — ANO ({dias_ano} dias / {n_meses} meses)",F_VD_JD_a,True,"FFFFFF",10,True)
+    # LINHA 5 — 19 colunas fixas + colunas de modelo se disponíveis
+    _n_mod_a = len(modelos_lista) if modelos_lista else 0
+    _end_col_5a = get_column_letter(19 + _n_mod_a) if _n_mod_a else "S"
+    ws.merge_cells(f"A5:{_end_col_5a}5"); _e(ws,5,1,f"RESUMO DA CARGA — ANO ({dias_ano} dias / {n_meses} meses)",F_VD_JD_a,True,"FFFFFF",10,True)
     ws.row_dimensions[5].height=18
     # CABEÇALHO — Perf. Op. entre Disponib. e Indice Ciclo
     hdrs_f=[("Máquina",F_CINZA2_a,"000000"),("PEÇA",F_CINZA2_a,"000000"),("DESCRIÇÃO",F_CINZA2_a,"000000"),("PÇ/TRAT",F_CINZA2_a,"000000"),("UM",F_CINZA2_a,"000000"),
@@ -1684,6 +1692,9 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None,
     largs=[9,8,16,6,5,9,9,8,8,8,8,8,9,8,8,8,12,12,8]
     for ci,(h,f,cor) in enumerate(hdrs_f,1):
         _e(ws,6,ci,h,f,True,cor,8,True,True); ws.column_dimensions[get_column_letter(ci)].width=largs[ci-1]
+    if modelos_lista:
+        for _mi_a,_mod_a in enumerate(modelos_lista):
+            _ci_a=20+_mi_a; _e(ws,6,_ci_a,_mod_a,F_CINZA_a,True,"000000",7,True,True); ws.column_dimensions[get_column_letter(_ci_a)].width=7
     ws.row_dimensions[6].height=42
     ri=7
     if cp_data:
@@ -1709,6 +1720,11 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None,
             _e(ws,ri,17,round(mc,4),F_BRANCO_a,False,"000000",8)
             _e(ws,ri,18,round(ml,4),F_BRANCO_a,False,"000000",8)
             _e(ws,ri,19,_qtd,F_BRANCO_a,False,"000000",8)
+            if modelos_lista and app_mod_ano:
+                _mods_v_a=app_mod_ano.get((cen,peca),{})
+                for _mi_a,_mod_a in enumerate(modelos_lista):
+                    _ci_a=20+_mi_a; _v_a=_mods_v_a.get(_mod_a,0)
+                    _e(ws,ri,_ci_a,_v_a if _v_a else None,F_CINZA_a if _v_a else F_BRANCO_a,False,"000000",7)
             ws.row_dimensions[ri].height=13; ri+=1
     else:
         for cen in centros_ord:
