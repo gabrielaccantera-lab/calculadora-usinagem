@@ -3797,6 +3797,8 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                       if ws_nov_t.cell(_xl_hdr_row,c).value is not None
                                       and _nm_xl(ws_nov_t.cell(_xl_hdr_row,c).value) not in ("","None")
                                       and _norm(_nm_xl(ws_nov_t.cell(_xl_hdr_row,c).value)) not in _SKIP_MOD]
+                        # Deduplicar modelos preservando a primeira ocorrência
+                        _seen_m_t=set(); modelos_xl_t=[m for m in modelos_xl_t if m not in _seen_m_t and not _seen_m_t.add(m)]
                         modelo_col_idx={_nm_xl(ws_nov_t.cell(_xl_hdr_row,c).value):(c-_xl_mod_start) for c in range(_xl_mod_start,120+_xl_offset)
                                         if ws_nov_t.cell(_xl_hdr_row,c).value is not None
                                         and _nm_xl(ws_nov_t.cell(_xl_hdr_row,c).value) not in ("","None")
@@ -4100,7 +4102,14 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                             _cp_ano_t = build_cp_data_anual(res_base, tempo, dist, aplic, pmp, file_bytes=file_bytes)
                         except: _cp_ano_t = None
                         _horas_ano_t = read_horas_anual(file_bytes)
-                        gerar_aba_anual(wb_out, res_base, label="ANO", cp_data=_cp_ano_t, horas_anual=_horas_ano_t)
+                        # Calcular valores de modelo para aba ANO
+                        _pmp_ano_t={mod:sum(int(_pmp_all_qtd_t.get((mod,m),0) or 0) for m in MESES) for mod in modelos_xl_t}
+                        _pares_ano_t=list(dist[["centro","peca"]].drop_duplicates().itertuples(index=False,name=None))
+                        _app_mod_ano_tab={
+                            (c_a,p_a):{mod:_pmp_ano_t[mod] if mod in _aplic_cp_mods_t.get((c_a,p_a),set()) else 0 for mod in modelos_xl_t}
+                            for c_a,p_a in _pares_ano_t
+                        }
+                        gerar_aba_anual(wb_out,res_base,label="ANO",cp_data=_cp_ano_t,horas_anual=_horas_ano_t,modelos_lista=modelos_xl_t,app_mod_ano=_app_mod_ano_tab)
                         tabelona_buf=BytesIO(); wb_out.save(tabelona_buf); tabelona_buf.seek(0)
                         st.session_state["tabelona_buf"] = tabelona_buf
 
