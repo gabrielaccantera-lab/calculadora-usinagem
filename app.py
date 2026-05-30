@@ -62,6 +62,9 @@ div[data-testid="stRadio"]:has(div[role="radiogroup"]>label:nth-child(5)) div[ro
 div[data-testid="stRadio"]:has(div[role="radiogroup"]>label:nth-child(5)) div[role="radiogroup"]>label:hover{color:#ccc;background:#151515;}
 div[data-testid="stRadio"]:has(div[role="radiogroup"]>label:nth-child(5)) div[role="radiogroup"]>label:has(input:checked){color:#FFDE00;border-color:#2a2a2a #2a2a2a transparent;border-bottom:2px solid #FFDE00;background:#0d1a0d;}
 div[data-testid="stRadio"]:has(div[role="radiogroup"]>label:nth-child(5)) div[role="radiogroup"]>label>div:first-child{display:none!important;}
+/* Prevent content dimming during tab switches */
+.main .block-container{opacity:1!important;transition:none!important;}
+.element-container{opacity:1!important;transition:none!important;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -3872,7 +3875,7 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                             _ec(ws_out,4,19,d_t,_F_AZUL,True,"FF0000",9)
                             ws_out.row_dimensions[4].height=13
 
-                            ws_out.merge_cells(f"A5:{get_column_letter(19+len(modelos_xl_t))}5")
+                            ws_out.merge_cells(f"A5:{get_column_letter(20+len(modelos_xl_t))}5")
                             _ec(ws_out,5,1,f"RESUMO DA CARGA — {mes_t.upper()} ({d_t} dias)",_F_VERDE_JD,True,"FFFFFF",10,True)
                             ws_out.row_dimensions[5].height=18
 
@@ -3884,13 +3887,13 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                     ("Perf. Op.",_F_CINZA2,"000000"),("Indice Ciclo",_F_CINZA2,"000000"),
                                     ("JA.A",_F_VERDE,"000000"),("JA.B",_F_AMAR,"000000"),("JA.C",_F_AZUL,"000000"),
                                     ("TOTAL CICLOS (MIN)",_F_CINZA,"000000"),("TOTAL LABOR (MIN)",_F_CINZA,"000000"),
-                                    ("TOTAL PECAS",_F_CINZA,"000000")]
-                            largs_t=[9,8,16,6,5,9,9,8,8,8,8,8,9,8,8,8,12,12,8]
+                                    ("TOTAL PECAS",_F_CINZA,"000000"),("PECAS\n(Excel)",_PF("solid",fgColor="BBDEFB"),"000000")]
+                            largs_t=[9,8,16,6,5,9,9,8,8,8,8,8,9,8,8,8,12,12,8,8]
                             for ci_t,(h_t,f_t,cor_t) in enumerate(hdrs_f,1):
                                 _ec(ws_out,6,ci_t,h_t,f_t,True,cor_t,8,True,True)
                                 ws_out.column_dimensions[get_column_letter(ci_t)].width=largs_t[ci_t-1]
                             for mi_t,mod_t in enumerate(modelos_xl_t):
-                                ci_t=20+mi_t
+                                ci_t=21+mi_t
                                 _ec(ws_out,6,ci_t,mod_t,_F_CINZA,True,"000000",7,True,True)
                                 ws_out.column_dimensions[get_column_letter(ci_t)].width=7
                             ws_out.row_dimensions[6].height=42
@@ -4019,8 +4022,10 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                 _ec(ws_out,ri_t,17,mc_t,_F_VERM if div_c_t else _F_BRANCO,False,"000000",8)
                                 _ec(ws_out,ri_t,18,ml_t,_F_BRANCO,False,"000000",8)
                                 _ec(ws_out,ri_t,19,app_tot_t,_F_VERM if div_p_t else _F_BRANCO,False,"000000",8)
+                                _xl_pec_ref = int(float(xl_pecas_t)) if xl_pecas_t is not None else ""
+                                _ec(ws_out,ri_t,20,_xl_pec_ref,_F_VERM if div_p_t else _PF("solid",fgColor="BBDEFB"),False,"000000",8)
                                 for mi_t2,mod_t2 in enumerate(modelos_xl_t):
-                                    ci_t2=20+mi_t2
+                                    ci_t2=21+mi_t2
                                     v_app_t=app_mod_v.get(mod_t2,0)
                                     col_idx=modelo_col_idx.get(mod_t2, mi_t2)
                                     v_xl_t=vrow_t[col_idx] if vrow_t and col_idx<len(vrow_t) else None
@@ -4034,7 +4039,7 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                 ws_out.row_dimensions[ri_t].height=13
 
                             nota_rt=7+len(base_rows_t)+1
-                            ws_out.merge_cells(f"A{nota_rt}:{get_column_letter(18+len(modelos_xl_t))}{nota_rt}")
+                            ws_out.merge_cells(f"A{nota_rt}:{get_column_letter(19+len(modelos_xl_t))}{nota_rt}")
                             nt=ws_out.cell(nota_rt,1,"🔴 VERMELHO (células): valor no arquivo de referência difere do INPUTTEMPO/INPUTDISTRIBUIÇÃO — cálculo usa sempre o INPUT  |  🔴 JA.A/JA.B vermelho = % ocupação difere do Excel  |  🔴 Rosa = total de ciclos ou peças difere  |  Cinza = presente no App")
                             nt.font=_Ft(name="Arial",bold=True,size=8,color="CC0000")
                             nt.fill=_PF("solid",fgColor="FFEEEE")
