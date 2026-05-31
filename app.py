@@ -3754,6 +3754,11 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                     _tempo_idx_t = {(r.centro, r.peca): r for r in tempo.itertuples()}
                     _pmp_all_qtd_t = pmp.groupby(["modelo","mes"])["qtd"].sum().to_dict()
                     _aplic_cp_mods_t = aplic.groupby(["centro","peca"])["modelo"].apply(set).to_dict()
+                    # Lookups normalizados — resolve variações de nome (espaços, quebras de linha)
+                    _pmp_norm_t = {}
+                    for (mod, mes), qty in _pmp_all_qtd_t.items():
+                        _pmp_norm_t[(_norm(str(mod)), mes)] = _pmp_norm_t.get((_norm(str(mod)), mes), 0) + int(qty or 0)
+                    _aplic_norm_t = {k: {_norm(str(m)) for m in ms} for k, ms in _aplic_cp_mods_t.items()}
                 except Exception as _e_merge:
                     st.error(f"Erro ao preparar dados: {_e_merge}"); st.stop()
 
@@ -3814,8 +3819,11 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                         _KEY_COL_NORMS = {
                             "ja.a": "pA", "jaa": "pA",
                             "ja.b": "pB", "jab": "pB",
+                            "ja.c": "pC", "jac": "pC",
                             "total ciclos": "ciclo", "total de ciclos": "ciclo",
                             "total de pecas": "pecas", "total pecas": "pecas",
+                            "indice ciclo": "idx_cic", "indice tempo ciclo": "idx_cic",
+                            "indice de ciclo": "idx_cic", "\xedndice ciclo": "idx_cic",
                         }
                         _col_key_map = {}
                         for _hc in range(1, _xl_mod_start + 10):
@@ -3921,23 +3929,24 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                 tl_xl_t=base_row_t[_o+6] if base_row_t else None
                                 mrow_t=dm_t["main"].get((cen_t,peca_t),[None]*100)
                                 def _mget(idx): return mrow_t[idx] if idx is not None and len(mrow_t)>idx else None
-                                xl_pA_t=_mget(_col_key_map.get("pA",_o+12))
-                                xl_pB_t=_mget(_col_key_map.get("pB",_o+13))
-                                xl_ciclo_t=_mget(_col_key_map.get("ciclo",_o+15))
-                                xl_pecas_t=_mget(_col_key_map.get("pecas",_o+17))
+                                xl_pA_t=_mget(_col_key_map.get("pA",_o+13))
+                                xl_pB_t=_mget(_col_key_map.get("pB",_o+14))
+                                xl_pC_t=_mget(_col_key_map.get("pC",_o+15))
+                                xl_ciclo_t=_mget(_col_key_map.get("ciclo",_o+16))
+                                xl_pecas_t=_mget(_col_key_map.get("pecas",_o+18))
                                 dc_xl_t=mrow_t[_o+7] if len(mrow_t)>_o+7 else None
                                 vi_xl_t=mrow_t[_o+8] if len(mrow_t)>_o+8 else None
                                 dv_xl_t=mrow_t[_o+9] if len(mrow_t)>_o+9 else None
                                 di_xl_t=mrow_t[_o+10] if len(mrow_t)>_o+10 else None
-                                idx_xl_t=mrow_t[_o+11] if len(mrow_t)>_o+11 else None
+                                idx_xl_t=_mget(_col_key_map.get("idx_cic",_o+12))
                                 vrow_t=dm_t["vols"].get((cen_t,peca_t),[])
 
-                                _active_mods_cp = _aplic_cp_mods_t.get((cen_t, peca_t), set())
+                                _active_norm = _aplic_norm_t.get((cen_t, peca_t), set())
                                 app_mod_v = {}
                                 for mod_t2 in modelos_xl_t:
-                                    _am=_xl_to_aplic_mod.get(mod_t2,mod_t2)
-                                    app_mod_v[mod_t2]=int(_pmp_all_qtd_t.get((_am,mes_t),0)) if _am in _active_mods_cp else 0
-                                app_tot_t = int(sum(int(_pmp_all_qtd_t.get((m, mes_t), 0)) for m in _active_mods_cp))
+                                    _nm2 = _norm(mod_t2)
+                                    app_mod_v[mod_t2] = int(_pmp_norm_t.get((_nm2, mes_t), 0)) if _nm2 in _active_norm else 0
+                                app_tot_t = int(sum(_pmp_norm_t.get((_norm(str(m)), mes_t), 0) for m in _aplic_cp_mods_t.get((cen_t, peca_t), set())))
 
                                 def _df(a,b,tol=0.02):
                                     if b is None: return False
@@ -3966,14 +3975,15 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                 tl_inp = float(_tr_t.t_labor) if _tr_t is not None else float(tl_xl_t or 0)
                                 pc_trat_t = (float(_tr_t.pc_trat) if _tr_t is not None and hasattr(_tr_t,"pc_trat") else None) or (float(base_row_t[3]) if base_row_t is not None and base_row_t[3] else 1.0)
                                 idx_app_t = (tc_inp * dc_inp * dv_inp * vi_inp) / (di_inp * po_inp) if (di_inp and po_inp) else 0.0
-                                div_idx_t = abs(float(idx_xl_t or 0) - float(idx_app_t or 0)) > 0.5
+                                div_idx_t = round(float(idx_xl_t or 0),2) != round(float(idx_app_t or 0),2)
                                 # Recompute mc_t e ml_t com t_ciclo/t_labor do INPUTTEMPO (evita inflação e outdated ref)
                                 mc_t = idx_app_t * app_tot_t
                                 ml_t = tl_inp * dc_inp * pc_trat_t * app_tot_t
                                 pA_t = mc_t/minA_t if minA_t>0 else 0
                                 pB_t = mc_t/minB_t if minB_t>0 else 0
                                 pC_t = mc_t/minC_t if minC_t>0 else 0
-                                div_A_t=_df(pA_t,xl_pA_t,0.02); div_B_t=_df(pB_t,xl_pB_t,0.02)
+                                def _pct2(a,b): return b is not None and round(float(a or 0)*100,2)!=round(float(b or 0)*100,2)
+                                div_A_t=_pct2(pA_t,xl_pA_t); div_B_t=_pct2(pB_t,xl_pB_t); div_C_t=_pct2(pC_t,xl_pC_t)
                                 div_c_t=_df(mc_t,xl_ciclo_t,1)
 
                                 # Vermelho = valor no arquivo mensal difere do INPUT
@@ -4016,7 +4026,7 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                 _ec(ws_out,ri_t,13,float(idx_app_t),_F_VERM if div_idx_t else _F_BRANCO,False,"000000",8)
                                 _ec_pct(ws_out,ri_t,14,pA_t,_F_VERM if div_A_t else _cor_pct(pA_t))
                                 _ec_pct(ws_out,ri_t,15,pB_t,_F_VERM if div_B_t else _cor_pct(pB_t))
-                                _ec_pct(ws_out,ri_t,16,pC_t,_cor_pct(pC_t))
+                                _ec_pct(ws_out,ri_t,16,pC_t,_F_VERM if div_C_t else _cor_pct(pC_t))
                                 _ec(ws_out,ri_t,17,mc_t,_F_VERM if div_c_t else _F_BRANCO,False,"000000",8)
                                 _ec(ws_out,ri_t,18,ml_t,_F_BRANCO,False,"000000",8)
                                 _ec(ws_out,ri_t,19,app_tot_t,_F_VERM if div_p_t else _F_BRANCO,False,"000000",8)
@@ -4026,8 +4036,8 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                     col_idx=modelo_col_idx.get(mod_t2, mi_t2)
                                     v_xl_t=vrow_t[col_idx] if vrow_t and col_idx<len(vrow_t) else None
                                     if v_xl_t is not None:
-                                        try: div_vm=abs(float(v_app_t)-float(v_xl_t or 0))>0.5
-                                        except: div_vm=False
+                                        try: div_vm = round(float(v_app_t or 0)) != round(float(v_xl_t or 0))
+                                        except: div_vm = False
                                         fill_vm=_F_VERM if div_vm else (_F_CINZA if v_app_t else _F_BRANCO)
                                     else:
                                         fill_vm=_F_CINZA if v_app_t else _F_BRANCO
