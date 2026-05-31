@@ -2067,7 +2067,7 @@ def exportar_cenario_vs_base(res_base, res_cenario, meses_lista, nome_cenario, r
                 _used_titles.add(tt); return tt
         return base_title[:31]
 
-    if not _usar_ano_fy26:
+    if meses_lista:
         for mes in meses_lista:
             r_b = res_base.get(mes); r_c = res_cenario.get(mes)
             abrev = mes[:3].upper()
@@ -2085,8 +2085,8 @@ def exportar_cenario_vs_base(res_base, res_cenario, meses_lista, nome_cenario, r
             if r_c: escrever_mes(ws2, r_c, f"{mes.upper()} — {nome_cenario.upper()}")
             else: ws2.cell(1,1,"Sem dados para este mês no cenário")
 
-    # ── aba Comparação consolidada (apenas no modo meses, não ANO FY26) ─
-    if not _usar_ano_fy26:
+    # ── aba Comparação consolidada (apenas no modo meses) ─
+    if meses_lista:
         ws3 = wb.create_sheet("Comparação")
         header_title = f"COMPARAÇÃO | Base vs {nome_cenario} | {' / '.join(m[:3].upper() for m in meses_lista)}"
         ws3.merge_cells("A1:N1")
@@ -2127,7 +2127,10 @@ def exportar_cenario_vs_base(res_base, res_cenario, meses_lista, nome_cenario, r
             _cp_ano = _cp_data_fallback
         _ha = read_horas_anual(_file_bytes_ano)
         # Aba BASE: usa res_base (todos os meses) com cp_data
-        _ws_base = wb.active; _ws_base.title = "ANO Base"
+        if not first_sheet_used:
+            _ws_base = wb.active; _ws_base.title = "ANO Base"; first_sheet_used = True
+        else:
+            _ws_base = wb.create_sheet("ANO Base")
         gerar_aba_anual(wb, res_base, label="ANO Base", cp_data=_cp_ano,
                         horas_anual=_ha, eh_cenario=False, ws_existente=_ws_base)
         # Aba CENÁRIO: usa res_cenario (todos os meses com overrides) com cp_data
