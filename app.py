@@ -2118,27 +2118,58 @@ def exportar_cenario_vs_base(res_base, res_cenario, meses_lista, nome_cenario, r
             ri3+=1  # linha em branco entre meses
         for ci,w in enumerate([8,18,9,9,9],1): ws3.column_dimensions[get_column_letter(ci)].width=w
 
-    # ── aba ANO FY26: gerar aba ANO base + ANO cenário (igual ao exportar normal) ──
+    # ── aba ANO FY26: formato igual às abas mensais ──
     if _usar_ano_fy26:
-        # cp_data: preferir AnoFY26; fallback = recalcular dos inputs do res_ano_fy26_b
-        _cp_ano = build_cp_data_anual({}, None, None, None, None, file_bytes=_file_bytes_ano)
-        if _cp_ano is None:
-            # Sem AnoFY26: usar cp_data calculado externamente por (centro, peça)
-            _cp_ano = _cp_data_fallback
-        _ha = read_horas_anual(_file_bytes_ano)
-        # Aba BASE: usa res_base (todos os meses) com cp_data
+        # Constrói resultado anual da BASE agregando os meses disponíveis em res_ano_fy26_b
+        _meses_b_ano = [m for m in MESES if isinstance(res_ano_fy26_b, dict) and isinstance(res_ano_fy26_b.get(m), dict)]
+        _res_ano_base_fmt = None
+        if _meses_b_ano:
+            from collections import defaultdict as _dd_a
+            _dias_t_a = sum(res_ano_fy26_b[m]["dias"] for m in _meses_b_ano)
+            _hA_a = res_ano_fy26_b[_meses_b_ano[0]]["hA"]
+            _hB_a = res_ano_fy26_b[_meses_b_ano[0]]["hB"]
+            _hC_a = res_ano_fy26_b[_meses_b_ano[0]]["hC"]
+            _heA_a = res_ano_fy26_b[_meses_b_ano[0]].get("heA", _hA_a)
+            _heB_a = res_ano_fy26_b[_meses_b_ano[0]].get("heB", _hB_a)
+            _heC_a = res_ano_fy26_b[_meses_b_ano[0]].get("heC", _hC_a)
+            _minA_a = _dias_t_a*_hA_a*60; _minB_a = _dias_t_a*_hB_a*60; _minC_a = _dias_t_a*_hC_a*60
+            _cen_mc_a = _dd_a(float); _cen_num_a = {}
+            _sup_s_a = {k:{"A":0,"B":0,"C":0} for k in ["lavadora","gravacao","preset","coringa","facilitador"]}
+            for _m_a in _meses_b_ano:
+                _r_a = res_ano_fy26_b[_m_a]
+                for _, _rw_a in _r_a["centros"].iterrows():
+                    _cen_mc_a[_rw_a.centro] += _rw_a.min_ciclo_total
+                    if _rw_a.centro not in _cen_num_a: _cen_num_a[_rw_a.centro] = {"nA":0,"nB":0,"nC":0}
+                    _cn = _cen_num_a[_rw_a.centro]
+                    _cn["nA"] = max(_cn["nA"], int(_rw_a.num_A) if hasattr(_rw_a,"num_A") else int(_rw_a.ativo_A))
+                    _cn["nB"] = max(_cn["nB"], int(_rw_a.num_B) if hasattr(_rw_a,"num_B") else int(_rw_a.ativo_B))
+                    _cn["nC"] = max(_cn["nC"], int(_rw_a.num_C) if hasattr(_rw_a,"num_C") else int(_rw_a.ativo_C))
+                for _k_a in _sup_s_a:
+                    for _t_a in "ABC": _sup_s_a[_k_a][_t_a] += _r_a["suporte"][_k_a][_t_a]
+            _n_m_a = len(_meses_b_ano)
+            _sup_avg_a = {k:{"A":round(_sup_s_a[k]["A"]/_n_m_a),"B":round(_sup_s_a[k]["B"]/_n_m_a),"C":round(_sup_s_a[k]["C"]/_n_m_a)} for k in _sup_s_a}
+            _centros_a = []
+            for _cen_a in sorted(_cen_mc_a.keys()):
+                _mc_a=_cen_mc_a[_cen_a]; _cn=_cen_num_a[_cen_a]
+                _nA_a=_cn["nA"]; _nB_a=_cn["nB"]; _nC_a=_cn["nC"]
+                _centros_a.append({"centro":_cen_a,"ocup_A":_mc_a/_minA_a if _minA_a>0 else 0,"ocup_B":_mc_a/_minB_a if _minB_a>0 else 0,"ocup_C":_mc_a/_minC_a if _minC_a>0 else 0,"ativo_A":1 if _nA_a>0 else 0,"ativo_B":1 if _nB_a>0 else 0,"ativo_C":1 if _nC_a>0 else 0,"num_A":_nA_a,"num_B":_nB_a,"num_C":_nC_a,"horas_disp_A":_dias_t_a*_heA_a*_nA_a,"horas_disp_B":_dias_t_a*_heB_a*_nB_a,"horas_disp_C":_dias_t_a*_heC_a*_nC_a})
+            _df_cen_a = pd.DataFrame(_centros_a)
+            _op_A_a=int(_df_cen_a.num_A.sum()); _op_B_a=int(_df_cen_a.num_B.sum()); _op_C_a=int(_df_cen_a.num_C.sum())
+            _sA_a=sum(_sup_avg_a[k]["A"] for k in _sup_avg_a); _sB_a=sum(_sup_avg_a[k]["B"] for k in _sup_avg_a); _sC_a=sum(_sup_avg_a[k]["C"] for k in _sup_avg_a)
+            _tot_A_a=_op_A_a+_sA_a; _tot_B_a=_op_B_a+_sB_a; _tot_C_a=_op_C_a+_sC_a; _total_a=_tot_A_a+_tot_B_a+_tot_C_a
+            _sh_c_a=sum(res_ano_fy26_b[m]["h_ciclo"] for m in _meses_b_ano); _sh_l_a=sum(res_ano_fy26_b[m]["h_labor"] for m in _meses_b_ano)
+            _h_at_a=float((_df_cen_a["horas_disp_A"]+_df_cen_a["horas_disp_B"]+_df_cen_a["horas_disp_C"]).sum())
+            _h_td_a=_tot_A_a*_dias_t_a*_heA_a+_tot_B_a*_dias_t_a*_heB_a+_tot_C_a*_dias_t_a*_heC_a
+            _res_ano_base_fmt = {"centros":_df_cen_a,"op_A":_op_A_a,"op_B":_op_B_a,"op_C":_op_C_a,"tot_A":_tot_A_a,"tot_B":_tot_B_a,"tot_C":_tot_C_a,"total":_total_a,"suporte":_sup_avg_a,"h_ciclo":_sh_c_a,"h_labor":_sh_l_a,"h_ativos":_h_at_a,"h_todos":_h_td_a,"prod_ciclo_op":_sh_c_a/_h_at_a if _h_at_a>0 else 0,"prod_ciclo_tot":_sh_c_a/_h_td_a if _h_td_a>0 else 0,"prod_labor_op":_sh_l_a/_h_at_a if _h_at_a>0 else 0,"prod_labor_tot":_sh_l_a/_h_td_a if _h_td_a>0 else 0,"dias":_dias_t_a,"hA":_hA_a,"hB":_hB_a,"hC":_hC_a,"heA":_heA_a,"heB":_heB_a,"heC":_heC_a}
+        # Aba ANO Base — mesmo formato das abas mensais
         if not first_sheet_used:
             _ws_base = wb.active; _ws_base.title = "ANO Base"; first_sheet_used = True
         else:
             _ws_base = wb.create_sheet("ANO Base")
-        gerar_aba_anual(wb, res_base, label="ANO Base", cp_data=_cp_ano,
-                        horas_anual=_ha, eh_cenario=False, ws_existente=_ws_base)
-        # Aba CENÁRIO: usa cp_data dos inputs atuais (não do AnoFY26 que pode estar desatualizado)
-        _cp_cen = _cp_data_fallback if _cp_data_fallback is not None else _cp_ano
+        if _res_ano_base_fmt: escrever_mes(_ws_base, _res_ano_base_fmt, "ANO — BASE")
+        # Aba ANO Cenário — mesmo formato das abas mensais
         _ws_cen = wb.create_sheet("ANO Cenário")
-        gerar_aba_anual(wb, res_cenario, label="ANO Cenário", cp_data=_cp_cen,
-                        horas_anual=None, eh_cenario=True, ws_existente=_ws_cen,
-                        res_ano_override=res_ano_fy26_c)
+        if res_ano_fy26_c: escrever_mes(_ws_cen, res_ano_fy26_c, f"ANO — {nome_cenario.upper()}")
 
     # ── aba ANO CONSOLIDADO (soma de meses, quando há múltiplos meses) ──────────
     meses_com_dados = [(m, res_base.get(m), res_cenario.get(m)) for m in meses_lista if res_base.get(m) and res_cenario.get(m)]
