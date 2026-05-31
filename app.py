@@ -3610,9 +3610,26 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
                 else:
                     _meses_dl = [m for m in v_dl.get("meses_configurados",[v_dl.get("mes","")]) if m and not m.startswith("📅")]
                     if not _meses_dl: _meses_dl = [m for m in MESES if res_base.get(m)]
-                    _eh_ano_dl = False
-                    _res_ano_c_dl = None
-                    _cp_fb_dl = None
+                    if v_dl.get("eh_ano"):
+                        _res_ano_c_dl = v_dl.get("res_ano_fy26")
+                        _cp_fb_dl = v_dl.get("cp_data_ano")
+                        if _res_ano_c_dl is None or _cp_fb_dl is None:
+                            _ck = f"_ano_exp_{nm_dl}_{_file_id}"
+                            if _ck not in st.session_state or st.session_state[_ck][1] is None:
+                                _dm = {m: res_base[m]["dias"] for m in MESES if res_base.get(m)}
+                                _ov = v_dl.get("overrides", {}).get("__ano__", {})
+                                st.session_state[_ck] = build_cp_data_from_meses(
+                                    res_base, tempo, dist, aplic, pmp, _dm,
+                                    horas_turno, horas_efetivas,
+                                    overrides_ano=_ov, suporte_cfg=suporte_cfg
+                                )
+                            _cp_fb_dl = _cp_fb_dl or st.session_state[_ck][0]
+                            _res_ano_c_dl = _res_ano_c_dl or st.session_state[_ck][1]
+                        _eh_ano_dl = _res_ano_c_dl is not None
+                    else:
+                        _eh_ano_dl = False
+                        _res_ano_c_dl = None
+                        _cp_fb_dl = None
                 _hash_dl = hash(str(v_dl["resultados"]) + str(res_base) + nm_dl + str(_meses_dl) + "cen")
                 st.download_button(
                     f"📥 {nm_dl} vs Base",
@@ -3692,12 +3709,9 @@ if _aba == "🔄 Comparar com Excel":
 if _aba == "📥 Exportar":
     st.markdown('<div class="jd-section">Exportação</div>',unsafe_allow_html=True)
 
-    sub_tab, sub_res = st.tabs(["📋 Tabelona completa — layout INPUTDISTRIBUIÇÃO", "📊 Resultados"])
+    sub_res = st.container()
 
-    # ══════════════════════════════════════════
-    # SUB-ABA 1 — TABELONA COMPLETA COM COMPARAÇÃO
-    # ══════════════════════════════════════════
-    with sub_tab:
+    if False:  # Tabelona completa removida
         st.markdown('<div class="jd-sub">📋 Tabelona completa — layout idêntico ao INPUTDISTRIBUIÇÃO</div>', unsafe_allow_html=True)
         st.markdown("""
 Gera a **tabelona completa** no mesmo layout do seu Excel — colunas A até os modelos todos —
@@ -4254,9 +4268,26 @@ Inclui totais de minutos/horas/dias, bloco de DADOS AUTOMÁTICOS e aba ANO.
                 else:
                     _meses_e = [m for m in v.get("meses_configurados",[v.get("mes","")]) if m and not m.startswith("📅")]
                     if not _meses_e: _meses_e = [m for m in MESES if res_base.get(m)]
-                    _eh_ano_e = False
-                    _res_ano_c_e = None
-                    _cp_fb_e = None
+                    if v.get("eh_ano"):
+                        _res_ano_c_e = v.get("res_ano_fy26")
+                        _cp_fb_e = v.get("cp_data_ano")
+                        if _res_ano_c_e is None or _cp_fb_e is None:
+                            _ck_e = f"_ano_exp_{nm}_{_file_id}"
+                            if _ck_e not in st.session_state or st.session_state[_ck_e][1] is None:
+                                _dm_e = {m: res_base[m]["dias"] for m in MESES if res_base.get(m)}
+                                _ov_e = v.get("overrides", {}).get("__ano__", {})
+                                st.session_state[_ck_e] = build_cp_data_from_meses(
+                                    res_base, tempo, dist, aplic, pmp, _dm_e,
+                                    horas_turno, horas_efetivas,
+                                    overrides_ano=_ov_e, suporte_cfg=suporte_cfg
+                                )
+                            _cp_fb_e = _cp_fb_e or st.session_state[_ck_e][0]
+                            _res_ano_c_e = _res_ano_c_e or st.session_state[_ck_e][1]
+                        _eh_ano_e = _res_ano_c_e is not None
+                    else:
+                        _eh_ano_e = False
+                        _res_ano_c_e = None
+                        _cp_fb_e = None
                 _cen_hash = hash(str(v["resultados"]) + str(res_base) + nm + str(_meses_e))
                 st.download_button(
                     f"📥 Cenário vs Base: {nm}",
