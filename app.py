@@ -2133,9 +2133,10 @@ def exportar_cenario_vs_base(res_base, res_cenario, meses_lista, nome_cenario, r
             _ws_base = wb.create_sheet("ANO Base")
         gerar_aba_anual(wb, res_base, label="ANO Base", cp_data=_cp_ano,
                         horas_anual=_ha, eh_cenario=False, ws_existente=_ws_base)
-        # Aba CENÁRIO: usa res_cenario (todos os meses com overrides) com cp_data
+        # Aba CENÁRIO: usa cp_data dos inputs atuais (não do AnoFY26 que pode estar desatualizado)
+        _cp_cen = _cp_data_fallback if _cp_data_fallback is not None else _cp_ano
         _ws_cen = wb.create_sheet("ANO Cenário")
-        gerar_aba_anual(wb, res_cenario, label="ANO Cenário", cp_data=_cp_ano,
+        gerar_aba_anual(wb, res_cenario, label="ANO Cenário", cp_data=_cp_cen,
                         horas_anual=None, eh_cenario=True, ws_existente=_ws_cen,
                         res_ano_override=res_ano_fy26_c)
 
