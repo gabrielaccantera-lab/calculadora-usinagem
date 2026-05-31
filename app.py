@@ -3799,10 +3799,35 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                       and _norm(_nm_xl(ws_nov_t.cell(_xl_hdr_row,c).value)) not in _SKIP_MOD]
                         # Deduplicar modelos preservando a primeira ocorrência
                         _seen_m_t=set(); modelos_xl_t=[m for m in modelos_xl_t if m not in _seen_m_t and not _seen_m_t.add(m)]
+                        # Mapeamento normalizado: nome do modelo no Excel ref → nome no INPUTAPLICAÇÃO/PMP
+                        _norm_aplic_mods={}
+                        for _am in aplic["modelo"].unique():
+                            _nm_am=_norm(str(_am))
+                            if _nm_am not in _norm_aplic_mods: _norm_aplic_mods[_nm_am]=_am
+                        _xl_to_aplic_mod={_xm:_norm_aplic_mods.get(_norm(_xm),_xm) for _xm in modelos_xl_t}
                         modelo_col_idx={_nm_xl(ws_nov_t.cell(_xl_hdr_row,c).value):(c-_xl_mod_start) for c in range(_xl_mod_start,120+_xl_offset)
                                         if ws_nov_t.cell(_xl_hdr_row,c).value is not None
                                         and _nm_xl(ws_nov_t.cell(_xl_hdr_row,c).value) not in ("","None")
                                         and _norm(_nm_xl(ws_nov_t.cell(_xl_hdr_row,c).value)) not in _SKIP_MOD}
+
+                        # Detectar posições das colunas chave por nome no cabeçalho — robusto a layouts diferentes
+                        _KEY_COL_NORMS = {
+                            "ja.a": "pA", "jaa": "pA",
+                            "ja.b": "pB", "jab": "pB",
+                            "total ciclos": "ciclo", "total de ciclos": "ciclo",
+                            "total de pecas": "pecas", "total pecas": "pecas",
+                        }
+                        _col_key_map = {}
+                        for _hc in range(1, _xl_mod_start + 10):
+                            _hval = ws_nov_t.cell(_xl_hdr_row, _hc).value
+                            if _hval:
+                                _hn = _norm(str(_hval))
+                                for _kn, _kkey in _KEY_COL_NORMS.items():
+                                    if _kn in _hn and _kkey not in _col_key_map:
+                                        _col_key_map[_kkey] = _hc - 1  # 0-indexed em tuple de linha
+                                        break
+                        # Garantir que mrow_t inclui todas as colunas detectadas
+                        _xl_main_end_ext = max([_xl_main_end] + [v+1 for v in _col_key_map.values()])
 
                         dados_mes_t={}
                         for mes_t,aba_t in MAPA_T.items():
@@ -3813,7 +3838,7 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                 if len(_mr)>_xl_offset+1 and _mr[_xl_offset] and _mr[_xl_offset+1]:
                                     _ck=(str(_mr[_xl_offset]).strip(),str(_mr[_xl_offset+1]).strip())
                                     if _ck not in _main_d:
-                                        _main_d[_ck]=list(_mr[:_xl_main_end])
+                                        _main_d[_ck]=list(_mr[:_xl_main_end_ext])
                                         _vols_d[_ck]=list(_mr[_xl_mod_start-1:])
                             dados_mes_t[mes_t]={"main":_main_d,"vols":_vols_d}
                         wb_r.close()
@@ -3863,7 +3888,7 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                             _ec(ws_out,4,19,d_t,_F_AZUL,True,"FF0000",9)
                             ws_out.row_dimensions[4].height=13
 
-                            ws_out.merge_cells(f"A5:{get_column_letter(20+len(modelos_xl_t))}5")
+                            ws_out.merge_cells(f"A5:{get_column_letter(19+len(modelos_xl_t))}5")
                             _ec(ws_out,5,1,f"RESUMO DA CARGA — {mes_t.upper()} ({d_t} dias)",_F_VERDE_JD,True,"FFFFFF",10,True)
                             ws_out.row_dimensions[5].height=18
 
@@ -3875,13 +3900,13 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                     ("Perf. Op.",_F_CINZA2,"000000"),("Indice Ciclo",_F_CINZA2,"000000"),
                                     ("JA.A",_F_VERDE,"000000"),("JA.B",_F_AMAR,"000000"),("JA.C",_F_AZUL,"000000"),
                                     ("TOTAL CICLOS (MIN)",_F_CINZA,"000000"),("TOTAL LABOR (MIN)",_F_CINZA,"000000"),
-                                    ("TOTAL PECAS",_F_CINZA,"000000"),("PECAS\n(Excel)",_PF("solid",fgColor="BBDEFB"),"000000")]
-                            largs_t=[9,8,16,6,5,9,9,8,8,8,8,8,9,8,8,8,12,12,8,8]
+                                    ("TOTAL PECAS",_F_CINZA,"000000")]
+                            largs_t=[9,8,16,6,5,9,9,8,8,8,8,8,9,8,8,8,12,12,8]
                             for ci_t,(h_t,f_t,cor_t) in enumerate(hdrs_f,1):
                                 _ec(ws_out,6,ci_t,h_t,f_t,True,cor_t,8,True,True)
                                 ws_out.column_dimensions[get_column_letter(ci_t)].width=largs_t[ci_t-1]
                             for mi_t,mod_t in enumerate(modelos_xl_t):
-                                ci_t=21+mi_t
+                                ci_t=20+mi_t
                                 _ec(ws_out,6,ci_t,mod_t,_F_CINZA,True,"000000",7,True,True)
                                 ws_out.column_dimensions[get_column_letter(ci_t)].width=7
                             ws_out.row_dimensions[6].height=42
@@ -3895,10 +3920,11 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                 tc_xl_t=base_row_t[_o+5] if base_row_t else None
                                 tl_xl_t=base_row_t[_o+6] if base_row_t else None
                                 mrow_t=dm_t["main"].get((cen_t,peca_t),[None]*100)
-                                xl_pA_t=mrow_t[_o+12] if len(mrow_t)>_o+12 else None
-                                xl_pB_t=mrow_t[_o+13] if len(mrow_t)>_o+13 else None
-                                xl_ciclo_t=mrow_t[_o+15] if len(mrow_t)>_o+15 else None
-                                xl_pecas_t=mrow_t[_o+17] if len(mrow_t)>_o+17 else None
+                                def _mget(idx): return mrow_t[idx] if idx is not None and len(mrow_t)>idx else None
+                                xl_pA_t=_mget(_col_key_map.get("pA",_o+12))
+                                xl_pB_t=_mget(_col_key_map.get("pB",_o+13))
+                                xl_ciclo_t=_mget(_col_key_map.get("ciclo",_o+15))
+                                xl_pecas_t=_mget(_col_key_map.get("pecas",_o+17))
                                 dc_xl_t=mrow_t[_o+7] if len(mrow_t)>_o+7 else None
                                 vi_xl_t=mrow_t[_o+8] if len(mrow_t)>_o+8 else None
                                 dv_xl_t=mrow_t[_o+9] if len(mrow_t)>_o+9 else None
@@ -3907,7 +3933,10 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                 vrow_t=dm_t["vols"].get((cen_t,peca_t),[])
 
                                 _active_mods_cp = _aplic_cp_mods_t.get((cen_t, peca_t), set())
-                                app_mod_v = {mod_t2: (int(_pmp_all_qtd_t.get((mod_t2, mes_t), 0)) if mod_t2 in _active_mods_cp else 0) for mod_t2 in modelos_xl_t}
+                                app_mod_v = {}
+                                for mod_t2 in modelos_xl_t:
+                                    _am=_xl_to_aplic_mod.get(mod_t2,mod_t2)
+                                    app_mod_v[mod_t2]=int(_pmp_all_qtd_t.get((_am,mes_t),0)) if _am in _active_mods_cp else 0
                                 app_tot_t = int(sum(int(_pmp_all_qtd_t.get((m, mes_t), 0)) for m in _active_mods_cp))
 
                                 def _df(a,b,tol=0.02):
@@ -3991,10 +4020,8 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                                 _ec(ws_out,ri_t,17,mc_t,_F_VERM if div_c_t else _F_BRANCO,False,"000000",8)
                                 _ec(ws_out,ri_t,18,ml_t,_F_BRANCO,False,"000000",8)
                                 _ec(ws_out,ri_t,19,app_tot_t,_F_VERM if div_p_t else _F_BRANCO,False,"000000",8)
-                                _xl_pec_ref = int(float(xl_pecas_t)) if xl_pecas_t is not None else ""
-                                _ec(ws_out,ri_t,20,_xl_pec_ref,_F_VERM if div_p_t else _PF("solid",fgColor="BBDEFB"),False,"000000",8)
                                 for mi_t2,mod_t2 in enumerate(modelos_xl_t):
-                                    ci_t2=21+mi_t2
+                                    ci_t2=20+mi_t2
                                     v_app_t=app_mod_v.get(mod_t2,0)
                                     col_idx=modelo_col_idx.get(mod_t2, mi_t2)
                                     v_xl_t=vrow_t[col_idx] if vrow_t and col_idx<len(vrow_t) else None
@@ -4110,6 +4137,39 @@ Inclui também, no mesmo Excel: **totais de minutos/horas/dias** por turno lá e
                             for c_a,p_a in _pares_ano_t
                         }
                         gerar_aba_anual(wb_out,res_base,label="ANO",cp_data=_cp_ano_t,horas_anual=_horas_ano_t,modelos_lista=modelos_xl_t,app_mod_ano=_app_mod_ano_tab)
+                        # ── Abas de Input — cópia fiel do arquivo original ──
+                        try:
+                            from copy import copy as _copy_t
+                            _wb_src_t=_opx.load_workbook(BytesIO(file_bytes),read_only=False,data_only=True)
+                            _abas_map_t=st.session_state.get("_abas_map",{})
+                            for _chave_t,_nome_dst_t in [
+                                ("INPUTPMP","INPUT_PMP"),("INPUTTURNOS","INPUT_TURNOS"),
+                                ("INPUTTEMPO","INPUT_TEMPO"),("INPUTDISTRIBUIÇÃO","INPUT_DIST"),
+                                ("INPUTAPLICAÇÃO","INPUT_APLIC"),
+                            ]:
+                                _nome_src_t=_abas_map_t.get(_chave_t) or _chave_t
+                                if _nome_src_t not in _wb_src_t.sheetnames: continue
+                                _ws_s_t=_wb_src_t[_nome_src_t]; _ws_d_t=wb_out.create_sheet(_nome_dst_t)
+                                for _col_t,_cd_t in _ws_s_t.column_dimensions.items(): _ws_d_t.column_dimensions[_col_t].width=_cd_t.width
+                                for _row_t,_rd_t in _ws_s_t.row_dimensions.items(): _ws_d_t.row_dimensions[_row_t].height=_rd_t.height
+                                if _ws_s_t.freeze_panes: _ws_d_t.freeze_panes=_ws_s_t.freeze_panes
+                                for _row_t in _ws_s_t.iter_rows():
+                                    for _cell_t in _row_t:
+                                        _nc_t=_ws_d_t.cell(row=_cell_t.row,column=_cell_t.column,value=_cell_t.value)
+                                        if _cell_t.has_style:
+                                            try: _nc_t.font=_copy_t(_cell_t.font)
+                                            except: pass
+                                            try: _nc_t.fill=_copy_t(_cell_t.fill)
+                                            except: pass
+                                            try: _nc_t.border=_copy_t(_cell_t.border)
+                                            except: pass
+                                            try: _nc_t.alignment=_copy_t(_cell_t.alignment)
+                                            except: pass
+                                            try: _nc_t.number_format=_cell_t.number_format
+                                            except: pass
+                                for _merged_t in list(_ws_s_t.merged_cells.ranges): _ws_d_t.merge_cells(str(_merged_t))
+                            _wb_src_t.close()
+                        except Exception: pass
                         tabelona_buf=BytesIO(); wb_out.save(tabelona_buf); tabelona_buf.seek(0)
                         st.session_state["tabelona_buf"] = tabelona_buf
 
