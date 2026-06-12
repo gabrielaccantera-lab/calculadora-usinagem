@@ -910,6 +910,111 @@ def cell_style(ws, r, c, val, fill=None, bold=False, color="000000", font_size=9
     return ec(ws, r, c, val, fill, bold, color, font_size, center, italic, comment_text)
 
 # ─────────────────────────────────────────
+# AGRUPAMENTO DE CENTROS EM CÉLULAS — apenas rótulo visual, não altera cálculos
+# ─────────────────────────────────────────
+def _get_celula_cfg():
+    """Configuração de células da sessão: {centro: 'INDIVIDUAL' | 'Célula N'}."""
+    try:
+        return st.session_state.get("celula_cfg", {}) or {}
+    except Exception:
+        return {}
+
+def _grupo_label(centro, cfg=None):
+    """Rótulo de exibição do grupo: 'INDIVIDUAL' ou 'CÉLULA N'."""
+    if cfg is None: cfg = _get_celula_cfg()
+    g = cfg.get(str(centro), "INDIVIDUAL")
+    if not g or str(g).strip().upper() in ("INDIVIDUAL", ""):
+        return "INDIVIDUAL"
+    return str(g).strip().upper()  # "Célula 3" -> "CÉLULA 3"
+
+def _ordem_celulas(centros_list, cfg=None):
+    """Reordena os centros para que membros da mesma célula fiquem contíguos.
+    Cada grupo (uma célula, ou um centro individual) é ordenado pelo menor
+    índice original de seus membros, preservando a ordem dentro de cada célula."""
+    if cfg is None: cfg = _get_celula_cfg()
+    centros_list = [str(c) for c in centros_list]
+    idx = {c: i for i, c in enumerate(centros_list)}
+    grupos = {}        # chave -> lista de centros
+    ordem_chaves = []  # ordem de 1ª aparição
+    for c in centros_list:
+        lbl = _grupo_label(c, cfg)
+        chave = lbl if lbl != "INDIVIDUAL" else f"__ind__{idx[c]}"
+        if chave not in grupos:
+            grupos[chave] = []; ordem_chaves.append(chave)
+        grupos[chave].append(c)
+    ordem_chaves.sort(key=lambda k: min(idx[c] for c in grupos[k]))
+    out = []
+    for k in ordem_chaves:
+        out.extend(grupos[k])
+    return out
+
+def _df_centros_agrupado(df_centros, cfg=None):
+    """Recebe o DataFrame de centros e devolve (df_reordenado, labels),
+    onde labels[i] é o rótulo do grupo da linha i (já contígua)."""
+    if cfg is None: cfg = _get_celula_cfg()
+    centros = [str(c) for c in df_centros["centro"].tolist()]
+    ordem = _ordem_celulas(centros, cfg)
+    df_idx = df_centros.copy()
+    df_idx["__ck__"] = df_idx["centro"].astype(str)
+    df_idx = df_idx.set_index("__ck__", drop=True)
+    df_re = df_idx.loc[ordem].reset_index(drop=True)
+    if "__ck__" in df_re.columns: df_re = df_re.drop(columns="__ck__")
+    labels = [_grupo_label(c, cfg) for c in ordem]
+    return df_re, labels
+
+def _runs_celulas(labels):
+    """Para a lista de labels por linha, devolve tuplas (label, i_inicio, i_fim)
+    de blocos contíguos a mesclar verticalmente. Linhas INDIVIDUAL nunca mesclam."""
+    runs = []; i = 0; n = len(labels)
+    while i < n:
+        j = i
+        while j + 1 < n and labels[i] != "INDIVIDUAL" and labels[j + 1] == labels[i]:
+            j += 1
+        runs.append((labels[i], i, j)); i = j + 1
+    return runs
+
+def _celula_cfg_hash(cfg=None):
+    """String estável para invalidar caches quando a configuração muda."""
+    if cfg is None: cfg = _get_celula_cfg()
+    return str(sorted(cfg.items()))
+
+def _render_celula_config(res_base, key_sufixo=""):
+    """Interface para agrupar centros em células — apenas rótulo visual nas
+    exportações, não altera nenhum cálculo. A configuração vale durante a sessão."""
+    with st.expander("🔧 Agrupamento de centros (células) — aparece em todas as exportações", expanded=False):
+        st.caption("Defina se cada centro é INDIVIDUAL ou parte de uma célula. É apenas um rótulo visual nas planilhas exportadas — **não altera nenhum cálculo**. A configuração vale enquanto o app estiver aberto; centros da mesma célula são reordenados e mesclados na exportação.")
+        _centros_cfg=[]; _seen_cfg=set()
+        for _m in MESES:
+            _rr=res_base.get(_m) if res_base else None
+            if not _rr: continue
+            for _c in _rr["centros"].centro:
+                _c=str(_c)
+                if _c not in _seen_cfg: _seen_cfg.add(_c); _centros_cfg.append(_c)
+        if not _centros_cfg:
+            st.info("Calcule os resultados primeiro para configurar as células."); return
+        _cfg_atual=st.session_state.get("celula_cfg",{})
+        _n_cel=st.number_input("Quantas células no máximo?",min_value=1,max_value=40,
+                               value=int(st.session_state.get("celula_n",6)),step=1,key="celula_n"+key_sufixo)
+        _opts_cel=["INDIVIDUAL"]+[f"Célula {i}" for i in range(1,int(_n_cel)+1)]
+        for _v in _cfg_atual.values():
+            if _v and _v not in _opts_cel: _opts_cel.append(_v)
+        _df_cfg=pd.DataFrame({"Centro":_centros_cfg,
+                              "Grupo":[_cfg_atual.get(c,"INDIVIDUAL") for c in _centros_cfg]})
+        _edit_cfg=st.data_editor(_df_cfg,hide_index=True,use_container_width=True,key="celula_editor"+key_sufixo,
+            column_config={
+                "Centro":st.column_config.TextColumn("Centro",disabled=True),
+                "Grupo":st.column_config.SelectboxColumn("Grupo",options=_opts_cel,required=True),
+            })
+        st.session_state["celula_cfg"]={str(_row["Centro"]):_row["Grupo"] for _,_row in _edit_cfg.iterrows()}
+        _resumo={}
+        for _c,_g in st.session_state["celula_cfg"].items():
+            if _g and _g!="INDIVIDUAL": _resumo.setdefault(_g,[]).append(_c)
+        if _resumo:
+            st.markdown("**Células definidas:** "+" · ".join(f"{k} → {', '.join(v)}" for k,v in sorted(_resumo.items())))
+        else:
+            st.caption("Todos os centros estão como INDIVIDUAL no momento.")
+
+# ─────────────────────────────────────────
 # TABELONA PURA — sem comparação com referência
 # ─────────────────────────────────────────
 def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, horas_efetivas, thresholds):
@@ -1038,13 +1143,14 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
         for _ci_g,_txt_g,_fg in [(_COL_F+1,"TURNO A",_F_VERDE),(_COL_F+2,"TURNO B",_F_AMAR),(_COL_F+3,"TURNO C",_F_AZUL),(_COL_F+4,"TURNO A",_F_VERDE),(_COL_F+5,"TURNO B",_F_AMAR),(_COL_F+6,"TURNO C",_F_AZUL),(_COL_F+7,"TURNO A",_F_VERDE),(_COL_F+8,"TURNO B",_F_AMAR),(_COL_F+9,"TURNO C",_F_AZUL)]:
             _ec(ws_out,_r69,_ci_g,_txt_g,_fg,True,"000000",8,True)
         ws_out.row_dimensions[_r69].height=14
-        _r70=_ROW_START+4; _ec(ws_out,_r70,_COL_F,"Centro",_F_PRETO,True,"FFFFFF",8)
+        _r70=_ROW_START+4; _ec(ws_out,_r70,_COL_F-1,"CÉLULA",_F_PRETO,True,"FFFFFF",8); _ec(ws_out,_r70,_COL_F,"Centro",_F_PRETO,True,"FFFFFF",8)
         for _ci_s,_txt_s in [(_COL_F+1,"% Ocup"),(_COL_F+2,"% Ocup"),(_COL_F+3,"% Ocup"),(_COL_F+4,"Nº Func"),(_COL_F+5,"Nº Func"),(_COL_F+6,"Nº Func"),(_COL_F+7,"Horas"),(_COL_F+8,"Horas"),(_COL_F+9,"Horas")]:
             _ec(ws_out,_r70,_ci_s,_txt_s,_F_PRETO,True,"FFFFFF",8)
         ws_out.row_dimensions[_r70].height=14
         _ri_c=_ROW_START+5
         if r_auto:
-            for _,_crow in r_auto["centros"].iterrows():
+            _df_cre_t,_lbls_t=_df_centros_agrupado(r_auto["centros"]); _ri_ini_t=_ri_c
+            for _,_crow in _df_cre_t.iterrows():
                 def _cbg_t(v):
                     if v>=1.06: return _PF("solid",fgColor="FF0000")
                     if v>=1.00: return _PF("solid",fgColor="FFFF00")
@@ -1058,6 +1164,10 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
                 _ec(ws_out,_ri_c,_COL_F+8,_crow.horas_disp_B if _crow.ativo_B else 0,_F_AMAR if _crow.ativo_B else _F_BRANCO,True,"000000",8)
                 _ec(ws_out,_ri_c,_COL_F+9,_crow.horas_disp_C if _crow.ativo_C else 0,_F_AZUL if _crow.ativo_C else _F_BRANCO,True,"000000",8)
                 ws_out.row_dimensions[_ri_c].height=13; _ri_c+=1
+            for _lbl,_a,_b in _runs_celulas(_lbls_t):
+                _rt=_ri_ini_t+_a; _rb=_ri_ini_t+_b
+                if _rb>_rt: ws_out.merge_cells(start_row=_rt,start_column=_COL_F-1,end_row=_rb,end_column=_COL_F-1)
+                _ec(ws_out,_rt,_COL_F-1,_lbl,_PF("solid",fgColor="E8F5E9") if _lbl!="INDIVIDUAL" else _F_BRANCO,_lbl!="INDIVIDUAL","1F4D19",8)
             _sup_a=r_auto["suporte"]
             for _snm,_skey in [("TOTAL DE OPERADORES",None),("LAVADORA E INSPEÇÃO","lavadora"),("GRAVAÇÃO E ESTANQUEIDADE","gravacao"),("PRESET","preset"),("CORINGA","coringa"),("FACILITADOR","facilitador"),("TOTAL POR TURNO",None),("TOTAL FUNCIONÁRIOS",None)]:
                 _bold_s="TOTAL" in _snm; _bg_s=_F_AMAR_JD if _bold_s else _F_BRANCO; _fg_s="1F4D19" if _bold_s else "000000"
@@ -1084,7 +1194,7 @@ def gerar_tabelona_pura(resultados, tempo, dist, aplic, pmp, dias, horas_turno, 
                 _ec(ws_out,_ri_c,_COL_F,_pnm,_F_AMAR_JD if _dest else _F_BRANCO,_dest,"1F4D19" if _dest else "000000",8,False)
                 _ec_pct(ws_out,_ri_c,_COL_F+9,_pv,_F_AMAR_JD if _dest else _F_BRANCO)
                 ws_out.row_dimensions[_ri_c].height=14; _ri_c+=1
-        for _ci_w,_ww in [(_COL_F,14),(_COL_F+1,8),(_COL_F+2,8),(_COL_F+3,8),(_COL_F+4,8),(_COL_F+5,8),(_COL_F+6,8),(_COL_F+7,10),(_COL_F+8,10),(_COL_F+9,10)]:
+        for _ci_w,_ww in [(_COL_F-1,12),(_COL_F,14),(_COL_F+1,8),(_COL_F+2,8),(_COL_F+3,8),(_COL_F+4,8),(_COL_F+5,8),(_COL_F+6,8),(_COL_F+7,10),(_COL_F+8,10),(_COL_F+9,10)]:
             ws_out.column_dimensions[get_column_letter(_ci_w)].width=_ww
     _fb_ano = st.session_state.get("_fb_anual")
     _cp_data_ano = build_cp_data_anual(resultados, tempo, dist, aplic, pmp, file_bytes=_fb_ano)
@@ -1781,7 +1891,7 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None,
     _e(ws,_RS+1,_CF+6,heA,F_CINZA_H_a,True,"000000",8); _e(ws,_RS+1,_CF+7,heB,F_CINZA_H_a,True,"000000",8); _e(ws,_RS+1,_CF+8,heC,F_CINZA_H_a,True,"000000",8); ws.row_dimensions[_RS+1].height=14
     for _ci,_txt,_f in [(_CF+1,"TURNO A",F_VERDE_a),(_CF+2,"TURNO B",F_AMAR_a),(_CF+3,"TURNO C",F_AZUL_a),(_CF+4,"TURNO A",F_VERDE_a),(_CF+5,"TURNO B",F_AMAR_a),(_CF+6,"TURNO C",F_AZUL_a),(_CF+7,"TURNO A",F_VERDE_a),(_CF+8,"TURNO B",F_AMAR_a),(_CF+9,"TURNO C",F_AZUL_a)]:
         _e(ws,_RS+2,_ci,_txt,_f,True,"000000",8); ws.row_dimensions[_RS+2].height=14
-    _e(ws,_RS+3,_CF,"Centro",F_PRETO_a,True,"FFFFFF",8)
+    _e(ws,_RS+3,_CF-1,"CÉLULA",F_PRETO_a,True,"FFFFFF",8); _e(ws,_RS+3,_CF,"Centro",F_PRETO_a,True,"FFFFFF",8)
     for _ci,_txt in [(_CF+1,"% Ocup"),(_CF+2,"% Ocup"),(_CF+3,"% Ocup"),(_CF+4,"Nº Func"),(_CF+5,"Nº Func"),(_CF+6,"Nº Func"),(_CF+7,"Horas"),(_CF+8,"Horas"),(_CF+9,"Horas")]:
         _e(ws,_RS+3,_ci,_txt,F_PRETO_a,True,"FFFFFF",8); ws.row_dimensions[_RS+3].height=14
     _ri=_RS+4
@@ -1792,7 +1902,8 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None,
         return F_BRANCO_a
     _ro_df = res_ano_override["centros"] if (res_ano_override and "centros" in res_ano_override and not res_ano_override["centros"].empty) else None
     _ro_map = {row.centro: row for _, row in _ro_df.iterrows()} if _ro_df is not None else {}
-    for cen in centros_ord:
+    _centros_disp = _ordem_celulas(centros_ord); _lbls_a=[_grupo_label(c) for c in _centros_disp]; _ri_ini_a=_ri
+    for cen in _centros_disp:
         oA=ocup_ano(cen,"A"); oB=ocup_ano(cen,"B"); oC=ocup_ano(cen,"C")
         if cen in _ro_map:
             _row_ro = _ro_map[cen]
@@ -1812,6 +1923,10 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None,
         _e(ws,_ri,_CF+8,round(dias_ano*heB*nB,2) if aB else 0,F_AMAR_a if aB else F_BRANCO_a,True,"000000",8)
         _e(ws,_ri,_CF+9,round(dias_ano*heC*nC,2) if aC else 0,F_AZUL_a if aC else F_BRANCO_a,True,"000000",8)
         ws.row_dimensions[_ri].height=13; _ri+=1
+    for _lbl,_a,_b in _runs_celulas(_lbls_a):
+        _rt=_ri_ini_a+_a; _rb=_ri_ini_a+_b
+        if _rb>_rt: ws.merge_cells(start_row=_rt,start_column=_CF-1,end_row=_rb,end_column=_CF-1)
+        _e(ws,_rt,_CF-1,_lbl,PatternFill("solid",fgColor="E8F5E9") if _lbl!="INDIVIDUAL" else F_BRANCO_a,_lbl!="INDIVIDUAL","1F4D19",8)
     for _snm,_sk in [("TOTAL DE OPERADORES",None),("LAVADORA E INSPEÇÃO","lavadora"),("GRAVAÇÃO E ESTANQUEIDADE","gravacao"),("PRESET","preset"),("CORINGA","coringa"),("FACILITADOR","facilitador"),("TOTAL POR TURNO",None),("TOTAL FUNCIONÁRIOS",None)]:
         _bold="TOTAL" in _snm; _bg=F_AM_JD_a if _bold else F_BRANCO_a; _fg="1F4D19" if _bold else "000000"
         _e(ws,_ri,_CF,_snm,_bg,_bold,_fg,8,False)
@@ -1837,7 +1952,7 @@ def gerar_aba_anual(wb, resultados, label="ANO", cp_data=None, horas_anual=None,
         _pv_cell.number_format="0.0000000000%"
         ws.row_dimensions[_ri].height=14; _ri+=1
     for ci,w in enumerate([9,8,16,6,5,9,9,8,8,8,8,8,9,8,8,8,12,12,8],1): ws.column_dimensions[get_column_letter(ci)].width=w
-    for _ci,_ww in [(_CF,14),(_CF+1,8),(_CF+2,8),(_CF+3,8),(_CF+4,8),(_CF+5,8),(_CF+6,8),(_CF+7,10),(_CF+8,10),(_CF+9,10)]:
+    for _ci,_ww in [(_CF-1,12),(_CF,14),(_CF+1,8),(_CF+2,8),(_CF+3,8),(_CF+4,8),(_CF+5,8),(_CF+6,8),(_CF+7,10),(_CF+8,10),(_CF+9,10)]:
         ws.column_dimensions[get_column_letter(_ci)].width=_ww
     _nota_row = _ri + 2
     F_NOTA = PatternFill("solid", fgColor="FFF2CC")
@@ -1905,53 +2020,59 @@ def exportar(resultados, _tempo=None, _dist=None, _aplic=None, _pmp=None, _file_
         if not r: continue
         wsm=wb.create_sheet(mes[:10]); hA,hB,hC,dias=r["hA"],r["hB"],r["hC"],r["dias"]
         heA,heB,heC=r.get("heA",hA),r.get("heB",hB),r.get("heC",hC)
-        for ci,txt in [(1,""),(2,"TURNO A"),(3,"TURNO B"),(4,"TURNO C"),(5,"TURNO A"),(6,"TURNO B"),(7,"TURNO C"),(8,"TURNO A"),(9,"TURNO B"),(10,"TURNO C")]:
+        for ci,txt in [(1,""),(2,""),(3,"TURNO A"),(4,"TURNO B"),(5,"TURNO C"),(6,"TURNO A"),(7,"TURNO B"),(8,"TURNO C"),(9,"TURNO A"),(10,"TURNO B"),(11,"TURNO C")]:
             ec_l(wsm.cell(1,ci,txt),JD_V,"FFFFFF",True)
         wsm.cell(1,1,mes.upper()); ec_l(wsm.cell(1,1),JD_V,"FFFFFF",True)
         JD_V2=JD_VERDE_ESC.replace("#",""); JD_Y2=JD_AMARELO.replace("#","")
-        wsm.merge_cells("B2:D2")
-        c2=wsm.cell(2,1,"CENTRO"); c2.font=Font(name="Arial",bold=True,color="FFFFFF",size=9); c2.fill=PatternFill("solid",fgColor=JD_V2); c2.alignment=Alignment(horizontal="center",vertical="center"); c2.border=brd
-        c2=wsm.cell(2,2,"% OCUPAÇÃO"); c2.font=Font(name="Arial",bold=True,color="FFFFFF",size=9); c2.fill=PatternFill("solid",fgColor=JD_V2); c2.alignment=Alignment(horizontal="center",vertical="center"); c2.border=brd
-        wsm.merge_cells("E2:G2")
-        c2=wsm.cell(2,5,"TURNO ATIVO (0=inativo 1=ativo)"); c2.font=Font(name="Arial",bold=True,color=JD_V2,size=9); c2.fill=PatternFill("solid",fgColor=JD_Y2); c2.alignment=Alignment(horizontal="center",vertical="center"); c2.border=brd
-        wsm.merge_cells("H2:J2")
-        c2=wsm.cell(2,8,"HORAS DISPONIVEIS NO MES"); c2.font=Font(name="Arial",bold=True,color="FFFFFF",size=9); c2.fill=PatternFill("solid",fgColor="1565C0"); c2.alignment=Alignment(horizontal="center",vertical="center"); c2.border=brd
+        wsm.merge_cells("C2:E2")
+        c2=wsm.cell(2,1,"CÉLULA"); c2.font=Font(name="Arial",bold=True,color="FFFFFF",size=9); c2.fill=PatternFill("solid",fgColor=JD_V2); c2.alignment=Alignment(horizontal="center",vertical="center"); c2.border=brd
+        c2=wsm.cell(2,2,"CENTRO"); c2.font=Font(name="Arial",bold=True,color="FFFFFF",size=9); c2.fill=PatternFill("solid",fgColor=JD_V2); c2.alignment=Alignment(horizontal="center",vertical="center"); c2.border=brd
+        c2=wsm.cell(2,3,"% OCUPAÇÃO"); c2.font=Font(name="Arial",bold=True,color="FFFFFF",size=9); c2.fill=PatternFill("solid",fgColor=JD_V2); c2.alignment=Alignment(horizontal="center",vertical="center"); c2.border=brd
+        wsm.merge_cells("F2:H2")
+        c2=wsm.cell(2,6,"TURNO ATIVO (0=inativo 1=ativo)"); c2.font=Font(name="Arial",bold=True,color=JD_V2,size=9); c2.fill=PatternFill("solid",fgColor=JD_Y2); c2.alignment=Alignment(horizontal="center",vertical="center"); c2.border=brd
+        wsm.merge_cells("I2:K2")
+        c2=wsm.cell(2,9,"HORAS DISPONIVEIS NO MES"); c2.font=Font(name="Arial",bold=True,color="FFFFFF",size=9); c2.fill=PatternFill("solid",fgColor="1565C0"); c2.alignment=Alignment(horizontal="center",vertical="center"); c2.border=brd
         wsm.row_dimensions[2].height=16
         def cbg(v):
             if v>1.0: return "FFCDD2"
             if v>=0.85: return "FFFDE7"
             return "E8F5E9"
         ri2=3
-        for _,row in r["centros"].iterrows():
-            for ci,(val,bg,ctr) in enumerate([(row.centro,"FFFFFF",False),(f"{row.ocup_A:.1%}",cbg(row.ocup_A),True),(f"{row.ocup_B:.1%}",cbg(row.ocup_B),True),(f"{row.ocup_C:.1%}",cbg(row.ocup_C),True),(row.ativo_A,"B3E5FC" if row.ativo_A else "FFFDE7",True),(row.ativo_B,"B3E5FC" if row.ativo_B else "FFFDE7",True),(row.ativo_C,"B3E5FC" if row.ativo_C else "FFFDE7",True),(row.horas_disp_A if row.ativo_A else "0","B3E5FC" if row.ativo_A else "F5F5F5",True),(row.horas_disp_B if row.ativo_B else "0","B3E5FC" if row.ativo_B else "F5F5F5",True),(row.horas_disp_C if row.ativo_C else "0","B3E5FC" if row.ativo_C else "F5F5F5",True)],1):
+        _df_cre,_lbls=_df_centros_agrupado(r["centros"]); _ri_ini=ri2
+        for _,row in _df_cre.iterrows():
+            for ci,(val,bg,ctr) in enumerate([(row.centro,"FFFFFF",False),(f"{row.ocup_A:.1%}",cbg(row.ocup_A),True),(f"{row.ocup_B:.1%}",cbg(row.ocup_B),True),(f"{row.ocup_C:.1%}",cbg(row.ocup_C),True),(row.ativo_A,"B3E5FC" if row.ativo_A else "FFFDE7",True),(row.ativo_B,"B3E5FC" if row.ativo_B else "FFFDE7",True),(row.ativo_C,"B3E5FC" if row.ativo_C else "FFFDE7",True),(row.horas_disp_A if row.ativo_A else "0","B3E5FC" if row.ativo_A else "F5F5F5",True),(row.horas_disp_B if row.ativo_B else "0","B3E5FC" if row.ativo_B else "F5F5F5",True),(row.horas_disp_C if row.ativo_C else "0","B3E5FC" if row.ativo_C else "F5F5F5",True)],2):
                 ec_l(wsm.cell(ri2,ci,val),bg,center=ctr)
             ri2+=1
+        for _lbl,_a,_b in _runs_celulas(_lbls):
+            _rt=_ri_ini+_a; _rb=_ri_ini+_b
+            if _rb>_rt: wsm.merge_cells(start_row=_rt,start_column=1,end_row=_rb,end_column=1)
+            ec_l(wsm.cell(_rt,1,_lbl),"E8F5E9" if _lbl!="INDIVIDUAL" else "FFFFFF","1F4D19",_lbl!="INDIVIDUAL")
         sup=r["suporte"]
         for nome,key in [("TOTAL DE OPERADORES",None),("LAVADORA E INSPEÇÃO","lavadora"),("GRAVAÇÃO E ESTANQUEIDADE","gravacao"),("PRESET","preset"),("CORINGA","coringa"),("FACILITADOR","facilitador"),("TOTAL POR TURNO",None),("TOTAL FUNCIONÁRIOS",None)]:
             bold="TOTAL" in nome; bg_r=JD_Y if bold else "FFFFFF"; fg_r=JD_V if bold else "000000"
-            ec_l(wsm.cell(ri2,1,nome),bg_r,fg_r,bold,center=False)
+            ec_l(wsm.cell(ri2,2,nome),bg_r,fg_r,bold,center=False)
             if key:
                 s=sup[key]
-                for ci,t in [(5,"A"),(6,"B"),(7,"C")]: ec_l(wsm.cell(ri2,ci,s[t]),"B3E5FC" if s[t] else "FFFDE7",bold=bold)
-                for ci,t,h in [(8,"A",heA),(9,"B",heB),(10,"C",heC)]:
+                for ci,t in [(6,"A"),(7,"B"),(8,"C")]: ec_l(wsm.cell(ri2,ci,s[t]),"B3E5FC" if s[t] else "FFFDE7",bold=bold)
+                for ci,t,h in [(9,"A",heA),(10,"B",heB),(11,"C",heC)]:
                     v=s[t]*h*dias; ec_l(wsm.cell(ri2,ci,v if v else 0),"B3E5FC" if v else "F5F5F5",bold=bold)
             elif "TOTAL DE OPERADORES" in nome:
-                for ci,v in [(5,r["op_A"]),(6,r["op_B"]),(7,r["op_C"])]: ec_l(wsm.cell(ri2,ci,v),JD_Y,JD_V,True)
-                for ci,v,h in [(8,r["op_A"],heA),(9,r["op_B"],heB),(10,r["op_C"],heC)]: ec_l(wsm.cell(ri2,ci,v*h*dias),JD_Y,JD_V,True)
+                for ci,v in [(6,r["op_A"]),(7,r["op_B"]),(8,r["op_C"])]: ec_l(wsm.cell(ri2,ci,v),JD_Y,JD_V,True)
+                for ci,v,h in [(9,r["op_A"],heA),(10,r["op_B"],heB),(11,r["op_C"],heC)]: ec_l(wsm.cell(ri2,ci,v*h*dias),JD_Y,JD_V,True)
             elif "TOTAL POR TURNO" in nome:
-                for ci,v in [(5,r["tot_A"]),(6,r["tot_B"]),(7,r["tot_C"])]: ec_l(wsm.cell(ri2,ci,v),JD_Y,JD_V,True)
-                for ci,v,h in [(8,r["tot_A"],heA),(9,r["tot_B"],heB),(10,r["tot_C"],heC)]: ec_l(wsm.cell(ri2,ci,v*h*dias),JD_Y,JD_V,True)
+                for ci,v in [(6,r["tot_A"]),(7,r["tot_B"]),(8,r["tot_C"])]: ec_l(wsm.cell(ri2,ci,v),JD_Y,JD_V,True)
+                for ci,v,h in [(9,r["tot_A"],heA),(10,r["tot_B"],heB),(11,r["tot_C"],heC)]: ec_l(wsm.cell(ri2,ci,v*h*dias),JD_Y,JD_V,True)
             elif "FUNCIONÁRIOS" in nome:
-                ec_l(wsm.cell(ri2,4,r["total"]),JD_Y,JD_V,True)
-                ec_l(wsm.cell(ri2,8,r['tot_A']*heA*dias+r['tot_B']*heB*dias+r['tot_C']*heC*dias),JD_Y,JD_V,True)
+                ec_l(wsm.cell(ri2,5,r["total"]),JD_Y,JD_V,True)
+                ec_l(wsm.cell(ri2,9,r['tot_A']*heA*dias+r['tot_B']*heB*dias+r['tot_C']*heC*dias),JD_Y,JD_V,True)
             ri2+=1
         ri2+=1
         for nm,v,dest in [("PROD. CICLO OPERACIONAL",r["prod_ciclo_op"],False),("PROD. CICLO TOTAL",r["prod_ciclo_tot"],False),("PROD. LABOR OPERACIONAL",r["prod_labor_op"],False),("PROD. LABOR TOTAL ★",r["prod_labor_tot"],True)]:
-            wsm.merge_cells(f"H{ri2}:I{ri2}")
-            ec_l(wsm.cell(ri2,8,nm),JD_Y if dest else "FFFFFF",JD_V if dest else "000000",dest,center=False)
-            ec_l(wsm.cell(ri2,10,f"{v:.1%}" if isinstance(v,float) else v),JD_Y if dest else "FFFFFF",JD_V if dest else "000000",dest)
+            wsm.merge_cells(f"I{ri2}:J{ri2}")
+            ec_l(wsm.cell(ri2,9,nm),JD_Y if dest else "FFFFFF",JD_V if dest else "000000",dest,center=False)
+            ec_l(wsm.cell(ri2,11,f"{v:.1%}" if isinstance(v,float) else v),JD_Y if dest else "FFFFFF",JD_V if dest else "000000",dest)
             ri2+=1
-        for ci,w in enumerate([14,8,8,8,8,8,8,24,10,10],1): wsm.column_dimensions[get_column_letter(ci)].width=w
+        for ci,w in enumerate([12,14,8,8,8,8,8,8,24,10,10],1): wsm.column_dimensions[get_column_letter(ci)].width=w
     _fb_ano = _file_bytes or st.session_state.get("_fb_anual")
     if _tempo is not None and _dist is not None and _aplic is not None and _pmp is not None:
         _cp_ano=build_cp_data_anual(resultados,_tempo,_dist,_aplic,_pmp,file_bytes=_fb_ano)
@@ -2006,52 +2127,58 @@ def exportar_cenario_vs_base(res_base, res_cenario, meses_lista, nome_cenario, r
     def escrever_mes(ws,r,titulo):
         hA,hB,hC,dias=r["hA"],r["hB"],r["hC"],r["dias"]
         heA,heB,heC=r.get("heA",hA),r.get("heB",hB),r.get("heC",hC)
-        for ci,txt in [(1,titulo),(2,"TURNO A"),(3,"TURNO B"),(4,"TURNO C"),(5,"TURNO A"),(6,"TURNO B"),(7,"TURNO C"),(8,"TURNO A"),(9,"TURNO B"),(10,"TURNO C")]:
+        for ci,txt in [(1,titulo),(2,""),(3,"TURNO A"),(4,"TURNO B"),(5,"TURNO C"),(6,"TURNO A"),(7,"TURNO B"),(8,"TURNO C"),(9,"TURNO A"),(10,"TURNO B"),(11,"TURNO C")]:
             ec_c(ws.cell(1,ci,txt),JD_V,"FFFFFF",True)
         ws.row_dimensions[1].height=16
-        ec_c(ws.cell(2,1,"CENTRO"),JD_V,"FFFFFF",True); ec_c(ws.cell(2,2,"% OCUPAÇÃO"),JD_V,"FFFFFF",True)
-        ws.merge_cells("E2:G2"); ec_c(ws.cell(2,5,"TURNO ATIVO (0=inativo 1=ativo)"),JD_Y,JD_V,True)
-        ws.merge_cells("H2:J2"); ec_c(ws.cell(2,8,"HORAS DISPONÍVEIS NO MÊS"),"1565C0","FFFFFF",True)
+        ec_c(ws.cell(2,1,"CÉLULA"),JD_V,"FFFFFF",True); ec_c(ws.cell(2,2,"CENTRO"),JD_V,"FFFFFF",True)
+        ws.merge_cells("C2:E2"); ec_c(ws.cell(2,3,"% OCUPAÇÃO"),JD_V,"FFFFFF",True)
+        ws.merge_cells("F2:H2"); ec_c(ws.cell(2,6,"TURNO ATIVO (0=inativo 1=ativo)"),JD_Y,JD_V,True)
+        ws.merge_cells("I2:K2"); ec_c(ws.cell(2,9,"HORAS DISPONÍVEIS NO MÊS"),"1565C0","FFFFFF",True)
         ws.row_dimensions[2].height=16
         def cbg(v):
             if v>1.0: return "FFCDD2"
             if v>=0.85: return "FFFDE7"
             return "E8F5E9"
         ri=3
-        for _,row in r["centros"].iterrows():
+        _df_cre,_lbls=_df_centros_agrupado(r["centros"]); _ri_ini=ri
+        for _,row in _df_cre.iterrows():
             # Usa num_A/num_B/num_C se disponível (número real de funcionários), senão ativo binário
             _nA = int(row.num_A) if hasattr(row,"num_A") and row.num_A is not None else int(row.ativo_A)
             _nB = int(row.num_B) if hasattr(row,"num_B") and row.num_B is not None else int(row.ativo_B)
             _nC = int(row.num_C) if hasattr(row,"num_C") and row.num_C is not None else int(row.ativo_C)
-            for ci,(val,bg,ctr) in enumerate([(row.centro,"FFFFFF",False),(f"{row.ocup_A:.1%}",cbg(row.ocup_A),True),(f"{row.ocup_B:.1%}",cbg(row.ocup_B),True),(f"{row.ocup_C:.1%}",cbg(row.ocup_C),True),(_nA,"B3E5FC" if row.ativo_A else "FFFDE7",True),(_nB,"B3E5FC" if row.ativo_B else "FFFDE7",True),(_nC,"B3E5FC" if row.ativo_C else "FFFDE7",True),(row.horas_disp_A if row.ativo_A else "0","B3E5FC" if row.ativo_A else "F5F5F5",True),(row.horas_disp_B if row.ativo_B else "0","B3E5FC" if row.ativo_B else "F5F5F5",True),(row.horas_disp_C if row.ativo_C else "0","B3E5FC" if row.ativo_C else "F5F5F5",True)],1):
+            for ci,(val,bg,ctr) in enumerate([(row.centro,"FFFFFF",False),(f"{row.ocup_A:.1%}",cbg(row.ocup_A),True),(f"{row.ocup_B:.1%}",cbg(row.ocup_B),True),(f"{row.ocup_C:.1%}",cbg(row.ocup_C),True),(_nA,"B3E5FC" if row.ativo_A else "FFFDE7",True),(_nB,"B3E5FC" if row.ativo_B else "FFFDE7",True),(_nC,"B3E5FC" if row.ativo_C else "FFFDE7",True),(row.horas_disp_A if row.ativo_A else "0","B3E5FC" if row.ativo_A else "F5F5F5",True),(row.horas_disp_B if row.ativo_B else "0","B3E5FC" if row.ativo_B else "F5F5F5",True),(row.horas_disp_C if row.ativo_C else "0","B3E5FC" if row.ativo_C else "F5F5F5",True)],2):
                 ec_c(ws.cell(ri,ci,val),bg,center=ctr)
             ri+=1
+        for _lbl,_a,_b in _runs_celulas(_lbls):
+            _rt=_ri_ini+_a; _rb=_ri_ini+_b
+            if _rb>_rt: ws.merge_cells(start_row=_rt,start_column=1,end_row=_rb,end_column=1)
+            ec_c(ws.cell(_rt,1,_lbl),"E8F5E9" if _lbl!="INDIVIDUAL" else "FFFFFF","1F4D19",_lbl!="INDIVIDUAL")
         sup=r["suporte"]
         for nome,key in [("TOTAL DE OPERADORES",None),("LAVADORA E INSPEÇÃO","lavadora"),("GRAVAÇÃO E ESTANQUEIDADE","gravacao"),("PRESET","preset"),("CORINGA","coringa"),("FACILITADOR","facilitador"),("TOTAL POR TURNO",None),("TOTAL FUNCIONÁRIOS",None)]:
             bold="TOTAL" in nome; bg_r=JD_Y if bold else "FFFFFF"; fg_r=JD_V if bold else "000000"
-            ec_c(ws.cell(ri,1,nome),bg_r,fg_r,bold,False)
+            ec_c(ws.cell(ri,2,nome),bg_r,fg_r,bold,False)
             if key:
                 s=sup[key]
-                for ci,t in [(5,"A"),(6,"B"),(7,"C")]: ec_c(ws.cell(ri,ci,s[t]),"B3E5FC" if s[t] else "FFFDE7",bold=bold)
-                for ci,t,h in [(8,"A",heA),(9,"B",heB),(10,"C",heC)]:
+                for ci,t in [(6,"A"),(7,"B"),(8,"C")]: ec_c(ws.cell(ri,ci,s[t]),"B3E5FC" if s[t] else "FFFDE7",bold=bold)
+                for ci,t,h in [(9,"A",heA),(10,"B",heB),(11,"C",heC)]:
                     v2=s[t]*h*dias; ec_c(ws.cell(ri,ci,v2 if v2 else 0),"B3E5FC" if v2 else "F5F5F5",bold=bold)
             elif "TOTAL DE OPERADORES" in nome:
-                for ci,v2 in [(5,r["op_A"]),(6,r["op_B"]),(7,r["op_C"])]: ec_c(ws.cell(ri,ci,v2),JD_Y,JD_V,True)
-                for ci,v2,h in [(8,r["op_A"],heA),(9,r["op_B"],heB),(10,r["op_C"],heC)]: ec_c(ws.cell(ri,ci,v2*h*dias),JD_Y,JD_V,True)
+                for ci,v2 in [(6,r["op_A"]),(7,r["op_B"]),(8,r["op_C"])]: ec_c(ws.cell(ri,ci,v2),JD_Y,JD_V,True)
+                for ci,v2,h in [(9,r["op_A"],heA),(10,r["op_B"],heB),(11,r["op_C"],heC)]: ec_c(ws.cell(ri,ci,v2*h*dias),JD_Y,JD_V,True)
             elif "TOTAL POR TURNO" in nome:
-                for ci,v2 in [(5,r["tot_A"]),(6,r["tot_B"]),(7,r["tot_C"])]: ec_c(ws.cell(ri,ci,v2),JD_Y,JD_V,True)
-                for ci,v2,h in [(8,r["tot_A"],heA),(9,r["tot_B"],heB),(10,r["tot_C"],heC)]: ec_c(ws.cell(ri,ci,v2*h*dias),JD_Y,JD_V,True)
+                for ci,v2 in [(6,r["tot_A"]),(7,r["tot_B"]),(8,r["tot_C"])]: ec_c(ws.cell(ri,ci,v2),JD_Y,JD_V,True)
+                for ci,v2,h in [(9,r["tot_A"],heA),(10,r["tot_B"],heB),(11,r["tot_C"],heC)]: ec_c(ws.cell(ri,ci,v2*h*dias),JD_Y,JD_V,True)
             elif "FUNCIONÁRIOS" in nome:
-                ec_c(ws.cell(ri,4,r["total"]),JD_Y,JD_V,True)
-                ec_c(ws.cell(ri,8,r['tot_A']*heA*dias+r['tot_B']*heB*dias+r['tot_C']*heC*dias),JD_Y,JD_V,True)
+                ec_c(ws.cell(ri,5,r["total"]),JD_Y,JD_V,True)
+                ec_c(ws.cell(ri,9,r['tot_A']*heA*dias+r['tot_B']*heB*dias+r['tot_C']*heC*dias),JD_Y,JD_V,True)
             ri+=1
         ri+=1
         for nm2,v2,dest in [("PROD. CICLO OPERACIONAL",r["prod_ciclo_op"],False),("PROD. CICLO TOTAL",r["prod_ciclo_tot"],False),("PROD. LABOR OPERACIONAL",r["prod_labor_op"],False),("PROD. LABOR TOTAL ★",r["prod_labor_tot"],True)]:
-            ws.merge_cells(f"H{ri}:I{ri}")
-            ec_c(ws.cell(ri,8,nm2),JD_Y if dest else "FFFFFF",JD_V if dest else "000000",dest,False)
-            ec_c(ws.cell(ri,10,f"{v2:.1%}"),JD_Y if dest else "FFFFFF",JD_V if dest else "000000",dest)
+            ws.merge_cells(f"I{ri}:J{ri}")
+            ec_c(ws.cell(ri,9,nm2),JD_Y if dest else "FFFFFF",JD_V if dest else "000000",dest,False)
+            ec_c(ws.cell(ri,11,f"{v2:.1%}"),JD_Y if dest else "FFFFFF",JD_V if dest else "000000",dest)
             ri+=1
-        for ci,w in enumerate([14,8,8,8,8,8,8,24,10,10],1): ws.column_dimensions[get_column_letter(ci)].width=w
+        for ci,w in enumerate([12,14,8,8,8,8,8,8,24,10,10],1): ws.column_dimensions[get_column_letter(ci)].width=w
 
     # ── gera uma aba BASE e uma aba CENÁRIO para cada mês ─────────────
     # Modo ANO FY26: não gera abas mensais, só a aba ANO Consolidado
@@ -2989,6 +3116,8 @@ if _aba == "📊 Resultado por Mês":
     _opcoes_res=["📅 ANO (resumo anual)"] + [m for m in MESES if res_base.get(m)]
     mes_r=st.selectbox("Período",_opcoes_res,key="mes_r")
 
+    _render_celula_config(res_base)
+
     if mes_r=="📅 ANO (resumo anual)":
         _meses_ano=[(m,res_base[m]) for m in MESES if res_base.get(m)]
         if _meses_ano:
@@ -3121,6 +3250,7 @@ if _aba == "🎯 Cenários":
     if "cenarios" not in st.session_state: st.session_state.cenarios={}
     st.markdown('<div class="jd-section">Simulador de cenários</div>',unsafe_allow_html=True)
     st.markdown('<div class="aviso-ok">🎯 <b>Como usar:</b> dê um nome, escolha mês ou ANO, ajuste os turnos por centro à vontade (sem travar a tela) e clique em <b>Salvar</b>. Até 4 cenários podem ser comparados no gráfico ao mesmo tempo.</div>', unsafe_allow_html=True)
+    _render_celula_config(res_base)
 
     # ── Funções de lookup — definidas fora do expander para cache funcionar corretamente
     @st.cache_data(show_spinner=False)
@@ -3665,7 +3795,7 @@ Use os botões <b>+</b> e <b>−</b> para ajustar. O valor <b>0</b> significa qu
                         _eh_ano_dl = False
                         _res_ano_c_dl = None
                         _cp_fb_dl = None
-                _hash_dl = hash(str(v_dl["resultados"]) + str(res_base) + nm_dl + str(_meses_dl) + "cen")
+                _hash_dl = hash(str(v_dl["resultados"]) + str(res_base) + nm_dl + str(_meses_dl) + "cen" + _celula_cfg_hash())
                 st.download_button(
                     f"📥 {nm_dl} vs Base",
                     data=exportar_cenario_vs_base_cached(
@@ -3743,6 +3873,8 @@ if _aba == "🔄 Comparar com Excel":
 # ── TAB 7 EXPORTAR
 if _aba == "📥 Exportar":
     st.markdown('<div class="jd-section">Exportação</div>',unsafe_allow_html=True)
+
+    _render_celula_config(res_base)
 
     sub_res = st.container()
 
@@ -4269,7 +4401,7 @@ Inclui totais de minutos/horas/dias, bloco de DADOS AUTOMÁTICOS e aba ANO.
         c1,c2=st.columns(2)
         with c1:
             st.markdown("**Resultado completo (todas as abas)**")
-            _exp_hash = hash(str(res_base) + str(horas_turno) + str(thresholds) + str(hash(file_bytes)))
+            _exp_hash = hash(str(res_base) + str(horas_turno) + str(thresholds) + str(hash(file_bytes)) + _celula_cfg_hash())
             st.download_button("📥 Baixar resultado base",data=exportar_cached(_exp_hash, res_base, tempo, dist, aplic, pmp, _file_bytes=file_bytes),file_name="resultado_usinagem.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="dl_res_base")
         with c2:
             st.markdown("**Base tratada (pós-JOIN)**")
@@ -4323,7 +4455,7 @@ Inclui totais de minutos/horas/dias, bloco de DADOS AUTOMÁTICOS e aba ANO.
                         _eh_ano_e = False
                         _res_ano_c_e = None
                         _cp_fb_e = None
-                _cen_hash = hash(str(v["resultados"]) + str(res_base) + nm + str(_meses_e))
+                _cen_hash = hash(str(v["resultados"]) + str(res_base) + nm + str(_meses_e) + _celula_cfg_hash())
                 st.download_button(
                     f"📥 Cenário vs Base: {nm}",
                     data=exportar_cenario_vs_base_cached(
