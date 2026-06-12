@@ -978,11 +978,70 @@ def _celula_cfg_hash(cfg=None):
     if cfg is None: cfg = _get_celula_cfg()
     return str(sorted(cfg.items()))
 
+# Agrupamento padrão (aplicado automaticamente aos centros que existirem no arquivo).
+# Centros não listados aqui ficam INDIVIDUAL. Pode ser sobrescrito pela aba opcional
+# INPUTCELULAS ou pela edição na interface.
+DEFAULT_CELULAS = {
+    "CEN005": "Célula 1", "CEN014": "Célula 1",
+    "CEN007": "Célula 2", "CEN010": "Célula 2",
+    "CEN009": "Célula 3", "CEN015": "Célula 3",
+    "CEN016": "Célula 4", "CEN017": "Célula 4",
+    "CEN018": "Célula 5", "CEN019": "Célula 5",
+    "CEN022": "Célula 6", "CEN023": "Célula 6",
+    "CEN021": "Célula 7", "CEN024": "Célula 7",
+}
+
+def read_celulas(fb, centros_validos):
+    """Lê a aba OPCIONAL de agrupamento de centros em células.
+    Colunas esperadas: Centro | Célula (um número, ou vazio/INDIVIDUAL para centro sozinho).
+    Retorna {centro: 'Célula N' | 'INDIVIDUAL'} apenas para centros válidos, ou {} se a aba não existir."""
+    try:
+        xls = pd.ExcelFile(BytesIO(fb))
+    except Exception:
+        return {}
+    alvo = {_norm(x) for x in ["INPUTCELULAS","INPUTCÉLULAS","INPUT_CELULAS","INPUT CELULAS",
+                               "CELULAS","CÉLULAS","CELULA","CÉLULA","GRUPOS","GRUPO","INPUTGRUPO","CELULA DE TRABALHO"]}
+    aba = next((sn for sn in xls.sheet_names if _norm(sn) in alvo), None)
+    if aba is None:
+        return {}
+    try:
+        raw = pd.read_excel(xls, sheet_name=aba, header=None, dtype=str)
+    except Exception:
+        return {}
+    cands_centro = {_norm(x) for x in ["centro","máquina","maquina","centro de trabalho","cen","posto","estação","estacao"]}
+    cands_cel    = {_norm(x) for x in ["célula","celula","grupo","group","cell","numero celula","número célula","n celula","cel","celula numero"]}
+    hdr = ic = ig = None
+    for ri in range(min(12, len(raw))):
+        vals = [_norm(v) for v in raw.iloc[ri].tolist()]
+        _ic = next((j for j, v in enumerate(vals) if v in cands_centro), None)
+        _ig = next((j for j, v in enumerate(vals) if v in cands_cel), None)
+        if _ic is not None and _ig is not None:
+            hdr, ic, ig = ri, _ic, _ig; break
+    if hdr is None:
+        return {}
+    validos = {str(c) for c in centros_validos}
+    cfg = {}
+    for ri in range(hdr + 1, len(raw)):
+        cen = raw.iat[ri, ic] if ic < raw.shape[1] else None
+        cel = raw.iat[ri, ig] if ig < raw.shape[1] else None
+        if cen is None or (isinstance(cen, float) and pd.isna(cen)):
+            continue
+        cen = str(cen).strip()
+        if not cen or cen not in validos:
+            continue
+        cv = "" if (cel is None or (isinstance(cel, float) and pd.isna(cel))) else str(cel).strip()
+        if cv == "" or _norm(cv) in ("individual", "ind", "0", "nan", "none"):
+            cfg[cen] = "INDIVIDUAL"
+        else:
+            m = re.search(r"\d+", cv)
+            cfg[cen] = f"Célula {int(m.group())}" if m else f"Célula {cv}"
+    return cfg
+
 def _render_celula_config(res_base, key_sufixo=""):
     """Interface para agrupar centros em células — apenas rótulo visual nas
     exportações, não altera nenhum cálculo. A configuração vale durante a sessão."""
-    with st.expander("🔧 Agrupamento de centros (células) — aparece em todas as exportações", expanded=False):
-        st.caption("Defina se cada centro é INDIVIDUAL ou parte de uma célula. É apenas um rótulo visual nas planilhas exportadas — **não altera nenhum cálculo**. A configuração vale enquanto o app estiver aberto; centros da mesma célula são reordenados e mesclados na exportação.")
+    with st.expander("🔧 Agrupamento de centros (células) — aparece em todas as exportações", expanded=True):
+        st.caption("Defina se cada centro é INDIVIDUAL ou parte de uma célula. É **apenas um rótulo visual** nas planilhas exportadas — não altera nenhum cálculo. Centros da mesma célula são reordenados e mesclados. Você pode editar aqui, ou (opcional) incluir uma aba **INPUTCELULAS** no seu Excel (modelo no botão de template, no topo da página).")
         _centros_cfg=[]; _seen_cfg=set()
         for _m in MESES:
             _rr=res_base.get(_m) if res_base else None
@@ -993,21 +1052,37 @@ def _render_celula_config(res_base, key_sufixo=""):
         if not _centros_cfg:
             st.info("Calcule os resultados primeiro para configurar as células."); return
         _cfg_atual=st.session_state.get("celula_cfg",{})
+        _max_cel=0
+        for _v in _cfg_atual.values():
+            _mm=re.search(r"\d+",str(_v)) if (_v and _v!="INDIVIDUAL") else None
+            if _mm: _max_cel=max(_max_cel,int(_mm.group()))
         _n_cel=st.number_input("Quantas células no máximo?",min_value=1,max_value=40,
-                               value=int(st.session_state.get("celula_n",6)),step=1,key="celula_n"+key_sufixo)
+                               value=int(st.session_state.get("celula_n",max(7,_max_cel))),step=1,key="celula_n"+key_sufixo)
         _opts_cel=["INDIVIDUAL"]+[f"Célula {i}" for i in range(1,int(_n_cel)+1)]
         for _v in _cfg_atual.values():
             if _v and _v not in _opts_cel: _opts_cel.append(_v)
-        _df_cfg=pd.DataFrame({"Centro":_centros_cfg,
-                              "Grupo":[_cfg_atual.get(c,"INDIVIDUAL") for c in _centros_cfg]})
-        _edit_cfg=st.data_editor(_df_cfg,hide_index=True,use_container_width=True,key="celula_editor"+key_sufixo,
-            column_config={
-                "Centro":st.column_config.TextColumn("Centro",disabled=True),
-                "Grupo":st.column_config.SelectboxColumn("Grupo",options=_opts_cel,required=True),
-            })
-        st.session_state["celula_cfg"]={str(_row["Centro"]):_row["Grupo"] for _,_row in _edit_cfg.iterrows()}
+        _novo_cfg=None
+        try:
+            _df_cfg=pd.DataFrame({"Centro":_centros_cfg,
+                                  "Grupo":[_cfg_atual.get(c,"INDIVIDUAL") for c in _centros_cfg]})
+            _edit_cfg=st.data_editor(_df_cfg,hide_index=True,use_container_width=True,key="celula_editor"+key_sufixo,
+                column_config={
+                    "Centro":st.column_config.TextColumn("Centro",disabled=True),
+                    "Grupo":st.column_config.SelectboxColumn("Grupo",options=_opts_cel,required=True),
+                })
+            _novo_cfg={str(_row["Centro"]):_row["Grupo"] for _,_row in _edit_cfg.iterrows()}
+        except Exception:
+            st.caption("Editor em modo simples (selecione a célula de cada centro):")
+            _novo_cfg={}; _cols=st.columns(3)
+            for _i,_c in enumerate(_centros_cfg):
+                with _cols[_i%3]:
+                    _atual=_cfg_atual.get(_c,"INDIVIDUAL")
+                    _idx=_opts_cel.index(_atual) if _atual in _opts_cel else 0
+                    _novo_cfg[_c]=st.selectbox(_c,_opts_cel,index=_idx,key=f"celsel_{_c}{key_sufixo}")
+        if _novo_cfg is not None:
+            st.session_state["celula_cfg"]=_novo_cfg
         _resumo={}
-        for _c,_g in st.session_state["celula_cfg"].items():
+        for _c,_g in st.session_state.get("celula_cfg",{}).items():
             if _g and _g!="INDIVIDUAL": _resumo.setdefault(_g,[]).append(_c)
         if _resumo:
             st.markdown("**Células definidas:** "+" · ".join(f"{k} → {', '.join(v)}" for k,v in sorted(_resumo.items())))
@@ -2808,6 +2883,25 @@ def gerar_template_input():
         for i,v in enumerate(row_vals,1): _h(ws5,row_idx,i,v,fill)
         ws5.row_dimensions[row_idx].height = 14
 
+    # ── INPUTCELULAS (OPCIONAL) — agrupamento visual de centros em células ──
+    ws6 = wb.create_sheet("INPUTCELULAS")
+    ws6.column_dimensions["A"].width = 14
+    ws6.column_dimensions["B"].width = 12
+    _h(ws6,1,1,"Centro",_FH,True,color="FFFFFF")
+    _h(ws6,1,2,"Célula",_FH,True,color="FFFFFF")
+    ws6.row_dimensions[1].height = 16
+    for row_idx,(cen,cel) in enumerate([
+        ("CEN005","1"),("CEN014","1"),
+        ("CEN007","2"),("CEN010","2"),
+        ("CEN006","INDIVIDUAL"),("CEN008",""),
+    ], 2):
+        fill = _FG1 if (row_idx % 2 == 0) else _FG2
+        _h(ws6,row_idx,1,cen,fill,center=False)
+        _h(ws6,row_idx,2,cel,fill)
+        ws6.row_dimensions[row_idx].height = 14
+    _h(ws6,9,1,"OPCIONAL. Mesmo número = mesma célula. Vazio ou INDIVIDUAL = centro sozinho. Centros não listados ficam individuais.",_FA,italic=True,center=False,color="666666")
+    ws6.merge_cells("A9:B9")
+
     buf = BytesIO(); wb.save(buf); buf.seek(0)
     return buf.read()
 
@@ -2856,8 +2950,10 @@ if st.session_state.get("_file_id")!=_file_id:
                "cmp_cache_key","cmp_cache_resumo","cmp_cache_detalhe","cmp_cache_err",
                "base_tratada_cache","_base_cache_key","mem_base_ano"]:
         st.session_state.pop(_k,None)
+    st.session_state.pop("celula_cfg",None); st.session_state.pop("celula_editor",None)
     for _k in list(st.session_state.keys()):
-        if _k.startswith("mem_base_") or _k.startswith("_inputs_read_"):
+        if _k.startswith("mem_base_") or _k.startswith("_inputs_read_") \
+           or _k.startswith("_celulas_init_") or _k.startswith("celsel_"):
             st.session_state.pop(_k, None)
     st.session_state["_file_id"]=_file_id
 
@@ -3036,6 +3132,24 @@ aplic_hash= _h.get("aplic",hash(aplic.to_json()))
 _sup_hash = hash(str(suporte_cfg))
 res_base,df_interm,agg_interm=calcular_cached(pmp_hash,pmp,tempo,dist,aplic,aplic_hash,dias_hash,dias,horas_turno["A"],horas_turno["B"],horas_turno["C"],horas_efetivas["A"],horas_efetivas["B"],horas_efetivas["C"],thresholds["A"],thresholds["B"],thresholds["C"],_sup_hash,suporte_cfg)
 st.session_state["last_res_base"]=res_base
+
+# ── Inicializa o agrupamento de células 1x por arquivo: aba INPUTCELULAS (opcional) → default embutido ──
+_cel_init_key=f"_celulas_init_{_file_id}"
+if _cel_init_key not in st.session_state:
+    _all_centros=[]; _seen_c=set()
+    for _m in MESES:
+        _rr=res_base.get(_m)
+        if not _rr: continue
+        for _c in _rr["centros"].centro:
+            _c=str(_c)
+            if _c not in _seen_c: _seen_c.add(_c); _all_centros.append(_c)
+    _cfg_arquivo=read_celulas(file_bytes,_all_centros)
+    if _cfg_arquivo:
+        _base_cfg=_cfg_arquivo
+    else:
+        _base_cfg={c:DEFAULT_CELULAS[c] for c in _all_centros if c in DEFAULT_CELULAS}
+    st.session_state["celula_cfg"]={c:_base_cfg.get(c,"INDIVIDUAL") for c in _all_centros}
+    st.session_state[_cel_init_key]=True
 
 # ── TAB 1 VISÃO GERAL
 if _aba == "🏠 Visão Geral":
